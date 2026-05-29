@@ -2,7 +2,7 @@
 """
 check-tikz-prevention.py — shared multi-line-aware prevention pre-check.
 
-Invoked by /extract-tikz and /new-diagram as their Step 1 gate.
+Invoked by /new-diagram as its Step 1 gate.
 Reports P3 and P4 violations from tikz-prevention.md.
 
 - P3: bare `scale=X` in a tikzpicture options block without accompanying node

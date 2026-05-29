@@ -99,24 +99,6 @@ else
 fi
 echo ""
 
-echo -e "${BOLD}Palette sync (LaTeX ↔ SCSS):${RESET}"
-palette_script="$(dirname "$0")/check-palette-sync.sh"
-if [ -x "$palette_script" ]; then
-    # Rely on the helper's exit code — stable contract, not text matching.
-    # 0 = in sync, 1 = divergence.
-    if "$palette_script" >/dev/null 2>&1; then
-        echo -e "  ${GREEN}✓${RESET} Preambles/header.tex ↔ Quarto/theme-template.scss agree on the core palette"
-        pass=$((pass + 1))
-    else
-        echo -e "  ${YELLOW}⚠${RESET} Palette drift — run ./scripts/check-palette-sync.sh for details"
-        warn=$((warn + 1))
-    fi
-else
-    echo -e "  ${YELLOW}⚠${RESET} scripts/check-palette-sync.sh missing or not executable — skipping"
-    warn=$((warn + 1))
-fi
-echo ""
-
 echo -e "${BOLD}Summary:${RESET} ${GREEN}${pass} passed${RESET}, ${YELLOW}${warn} warnings${RESET}, ${RED}${fail} failed${RESET}"
 echo ""
 

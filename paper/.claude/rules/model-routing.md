@@ -12,15 +12,15 @@ paths:
 
 | Share | Tier | Use for |
 |---:|---|---|
-| ~70% | **Haiku 4.5** | Mechanical work — file renames, citation-format conversion, TikZ extraction, bib validation, proofread-fix application, simple grep / file lookups |
-| ~20% | **Sonnet 4.6** | Review and critique — `r-reviewer`, `slide-auditor`, `proofreader`, `quarto-fixer`, `humanize-auditor` |
-| ~10% | **Opus 4.7** | High-judgment work — `editor`, `methods-referee`, `domain-referee`, `claim-verifier`, `quarto-critic`, `tikz-reviewer`, `domain-reviewer`, `verifier` for non-trivial gates |
+| ~70% | **Haiku 4.5** | Mechanical work — file renames, citation-format conversion, bib validation, proofread-fix application, simple grep / file lookups |
+| ~20% | **Sonnet 4.6** | Review and critique — `r-reviewer`, `proofreader`, `humanize-auditor` |
+| ~10% | **Opus 4.7** | High-judgment work — `editor`, `methods-referee`, `domain-referee`, `claim-verifier`, `tikz-reviewer`, `domain-reviewer`, `verifier` for non-trivial gates |
 
 Set per-agent via `model:` in the agent's YAML frontmatter:
 
 ```yaml
 ---
-name: quarto-fixer
+name: proofreader
 model: sonnet      # was: inherit
 ---
 ```
@@ -35,27 +35,21 @@ Cost reduction on routed skills is typically **50–80%** with no quality loss o
 
 ### Mechanical (Haiku 4.5)
 
-- **TikZ → SVG extraction** (`extract-tikz`'s execution agent).
 - **Bib formatting / citation rewrites** (`validate-bib`'s mechanical fix path).
-- **Quarto fixer applying critic's diff** (`quarto-fixer` — separate from `quarto-critic`).
 - **Proofread fix application** (when the fix is "replace X with Y" mechanically).
 - **File rename / search-and-replace operations.**
 
 ### Review / critique (Sonnet 4.6)
 
 - **R code review** (`r-reviewer`).
-- **Slide layout audit** (`slide-auditor`).
 - **Proofread inspection** (`proofreader`).
-- **Quarto fix application** when the fix is a `quarto-critic`-driven edit.
 - **AI-voice audit** (`humanize-auditor`).
-- **Beamer ↔ Quarto translation** (`beamer-translator`) — translation is bounded enough to live here unless the source TeX has unusual TikZ.
 
 ### High-judgment (Opus 4.7)
 
 - **Editor for `/review-paper --peer`** (`editor`).
 - **Both referee agents** (`domain-referee`, `methods-referee`).
 - **Claim verifier in fresh-context mode** (`claim-verifier`).
-- **Quarto critic** (`quarto-critic`) — adversarial parity QA needs the high-judgment lens to catch subtle visual drift.
 - **TikZ reviewer** (`tikz-reviewer`) — measurement-rule enforcement requires precise spatial reasoning.
 - **Domain reviewer** (`domain-reviewer`).
 - **Verifier** (`verifier`) when gating non-trivial commits.

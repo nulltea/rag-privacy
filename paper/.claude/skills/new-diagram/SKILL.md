@@ -65,7 +65,7 @@ Ask the user what the diagram should show. Edit `$DST` with the `Edit` tool:
 
 ### Step 4: Prevention pre-check (MANDATORY)
 
-Run the same shared Python checker `/extract-tikz` uses — this is the one tool that enforces both P3 and P4 consistently across the two skills:
+Run the shared Python checker — it enforces both P3 and P4 consistently:
 
 ```bash
 python3 scripts/check-tikz-prevention.py "$DST"
@@ -99,15 +99,15 @@ Loop:
 
 **Max 5 rounds.** If after 5 rounds the reviewer is still reporting CRITICAL issues, surface the situation to the user — the snippet or the requested content may need redesign, not just tweaking.
 
-### Step 7: Optional — convert to SVG for Quarto
+### Step 7: Optional — convert to SVG
 
-If the user plans to use the diagram in Quarto slides (not just Beamer), convert the compiled PDF to SVG:
+If the user wants an SVG version of the diagram (e.g. for web display), convert the compiled PDF to SVG:
 
 ```bash
 pdf2svg "${DST%.tex}.pdf" "${DST%.tex}.svg" 1
 ```
 
-Snippet-based diagrams are single-page, so a single `.svg` with the same basename as `.tex` is correct here. This differs from `/extract-tikz`, which produces a multi-page PDF from a `Figures/LectureN/extract_tikz.tex` master and names outputs `tikz_exact_00.svg, tikz_exact_01.svg, ...` (0-based filenames over 1-indexed PDF pages). If you need multi-page output for slide-by-slide reveals, use `/extract-tikz` instead.
+Snippet-based diagrams are single-page, so a single `.svg` with the same basename as `.tex` is correct here.
 
 ### Step 8: Clean up build artifacts
 
@@ -126,7 +126,7 @@ Print a summary:
 - Reviewer verdict and number of rounds
 - `.pdf` size and page count
 - `.svg` path if generated
-- Reminder to `\input` or `\includegraphics` the diagram in the target Beamer/Quarto file
+- Reminder to `\input` or `\includegraphics` the diagram in the manuscript
 
 ## Why start from a snippet?
 
@@ -137,5 +137,4 @@ Writing TikZ from scratch reliably produces collisions because the author cannot
 - [`.claude/rules/tikz-prevention.md`](../../rules/tikz-prevention.md) — the P1–P6 authoring rules.
 - [`.claude/rules/tikz-measurement.md`](../../rules/tikz-measurement.md) — the six-pass protocol with formulas the reviewer cites.
 - [`.claude/rules/tikz-visual-quality.md`](../../rules/tikz-visual-quality.md) — general visual standards.
-- [`.claude/skills/extract-tikz/SKILL.md`](../extract-tikz/SKILL.md) — for pulling TikZ out of an existing Beamer deck instead of creating new.
 - [`templates/tikz-snippets/README.md`](../../../templates/tikz-snippets/README.md) — gallery inventory and adaptation guide.

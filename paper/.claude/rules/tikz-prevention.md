@@ -1,8 +1,7 @@
 ---
 paths:
-  - "Slides/**/*.tex"
   - "Figures/**/*.tex"
-  - "Preambles/**/*.tex"
+  - "manuscript/**/*.tex"
 ---
 
 # TikZ Prevention Rules
@@ -77,7 +76,7 @@ The real failure mode is **asymmetric scaling**: `scale=0.8` shrinks coordinates
 \begin{tikzpicture}[scale=0.85, transform shape]
 ```
 
-When you stick to those forms, the `[scale=1.1]` convention from `tikz-visual-quality.md` is fine. When you write a bare `scale=` without node scaling, the prevention pre-check in `/extract-tikz` (Step 1) halts the pipeline.
+When you stick to those forms, the `[scale=1.1]` convention from `tikz-visual-quality.md` is fine. When you write a bare `scale=` without node scaling, the prevention pre-check in `/new-diagram` (Step 1) halts the pipeline.
 
 ---
 
@@ -110,10 +109,10 @@ For parallel arrows, stagger labels: use `pos=0.3` on one and `pos=0.7` on the o
 
 Preferred workflow:
 
-1. `/new-diagram <snippet-name>` — see the `/new-diagram` skill once TX3 ships; it scaffolds from the gallery.
-2. Or copy the snippet manually: `cp templates/tikz-snippets/dag-basic.tex Figures/LectureN/my-dag.tex`.
+1. `/new-diagram <snippet-name>` — the `/new-diagram` skill scaffolds from the gallery.
+2. Or copy the snippet manually: `cp templates/tikz-snippets/dag-basic.tex Figures/my-dag.tex`.
 3. Edit node labels and coordinates to fit your case. **Keep the coordinate map up to date.**
-4. Only then invoke `/extract-tikz` or `/compile-latex`.
+4. Only then invoke `/new-diagram` or `/compile-latex`.
 
 Writing a novel diagram from scratch is allowed but must still satisfy P1–P4 *and* the measurement rules in `tikz-measurement.md`.
 
@@ -129,7 +128,6 @@ This keeps each diagram small enough that the measurement rules are tractable.
 
 ## Enforcement
 
-- `/extract-tikz` runs a prevention pre-check as **Step 1** before compiling. Violations of P1 (boxed nodes only), P3 (bare `scale=`), or P4 (missing directional keyword on edge labels) halt the pipeline and report the offending block. P2 (coordinate map) and P5–P6 are reviewer concerns, not grep-checkable.
-- `/new-diagram` runs the same Step 1 grep patterns before its standalone compile — both skills use identical regexes so behavior doesn't drift.
+- `/new-diagram` runs a prevention pre-check as **Step 1** before its standalone compile. Violations of P1 (boxed nodes only), P3 (bare `scale=`), or P4 (missing directional keyword on edge labels) halt the pipeline and report the offending block. P2 (coordinate map) and P5–P6 are reviewer concerns, not grep-checkable.
 - `tikz-reviewer` cites these rules by name when reporting CRITICAL/MAJOR issues.
 - Quality scoring is defined in [`quality-gates.md`](quality-gates.md). The TikZ section there deducts −5 for a label-overlap finding (which is typically the symptom of a P1/P3/P4 violation that reached production); it does **not** currently deduct per-rule. That may change — consult `quality-gates.md` for the authoritative scoring rubric.

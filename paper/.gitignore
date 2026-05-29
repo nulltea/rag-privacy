@@ -79,3 +79,7 @@ scripts/R/_outputs/
 # Output artifacts — uncomment lines below based on your preference
 # *.rds
 # output/**/*.rds
+
+# slide-pipeline template docs — untracked, kept locally for reference then manual deletion
+guide/
+docs/

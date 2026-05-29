@@ -397,7 +397,7 @@ def check_anchor_resolution() -> list[tuple[str, str, str]]:
 RULE_KEYWORDS: dict[str, list[str]] = {
     # Only entries for rules whose scope actually targets skill files live
     # here. A rule targeting `.tex`/`.qmd`/`.R` content files (e.g.
-    # content-invariants.md, cross-artifact-review.md) is not checkable with
+    # cross-artifact-review.md) is not checkable with
     # this protocol — those rules apply to content authors, not skill
     # authors — and a dead entry here misleads future maintainers.
     "post-flight-verification.md": ["claim-verifier", "Post-Flight"],

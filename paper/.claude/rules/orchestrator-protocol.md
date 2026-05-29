@@ -31,10 +31,8 @@ Task starts (plan approved or skill invoked)
 | Skill | Steps covered | Notes |
 |-------|---------------|-------|
 | `/commit` | 2 (verifier agent), 6 (quality_score.py) | Halts on failure; user can override with explicit reason |
-| `/qa-quarto` | 3–5 (critic-fixer loop, up to 5 rounds) | Parity-focused, Beamer vs Quarto |
 | `/review-paper --adversarial` | 3–5 (critic-fixer loop, up to 5 rounds) | Manuscript review |
-| `/slide-excellence` | 3 (multi-agent parallel review) | Does not auto-fix |
-| `/create-lecture` | 1, 2, 3 (Pre-Flight → draft → review) | Fresh-fork fallback in Phase 0 |
+| `/new-diagram` | 1, 2, 3 (scaffold → compile → tikz-reviewer loop) | Loops until APPROVED (max 5 rounds) |
 | `/data-analysis` | 1, 2 (Pre-Flight → analysis → verify) | Pre-Flight is required |
 | `/review-paper --peer` | 3 (editor + 2 referees), with 6b cross-artifact | Full pipeline |
 

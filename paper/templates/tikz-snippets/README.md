@@ -42,7 +42,7 @@ Embed in Beamer by copying the contents of `\begin{tikzpicture} ... \end{tikzpic
 1. **Keep the coordinate-map comment in sync.** If you rename a node or move coordinates, update the comment block immediately. Stale comment blocks are worse than no comment blocks.
 2. **Stay explicit on node sizes.** `minimum width`, `minimum height`, and `text width` are load-bearing — removing them is a violation of prevention rule P1.
 3. **Do not add `scale=X`.** If the diagram is too large for its slot, redesign at the intended size. Scaling breaks every label-position calculation (prevention rule P3).
-4. **When in doubt, run the six-pass check.** See [`tikz-measurement.md`](../../.claude/rules/tikz-measurement.md) for formulas. The `/extract-tikz` and `/new-diagram` skills run the checks for you.
+4. **When in doubt, run the six-pass check.** See [`tikz-measurement.md`](../../.claude/rules/tikz-measurement.md) for formulas. The `/new-diagram` skill runs the checks for you.
 
 ## Contributing
 

@@ -39,10 +39,11 @@ GROUND_TRUTH = {
 SURFACES = [
     REPO / "README.md",
     REPO / "CLAUDE.md",
-    REPO / "guide/workflow-guide.qmd",
-    REPO / "docs/workflow-guide.html",
-    REPO / "docs/index.html",
     REPO / "templates/skill-template.md",
+    # NOTE: guide/ and docs/ (the Quarto-authored template guide + its rendered
+    # GitHub Pages site) were untracked when the slide pipeline was removed.
+    # They remain on disk for local reference but are no longer project surfaces,
+    # so they are intentionally excluded from the sync check.
 ]
 
 # Phrasings that assert THIS TEMPLATE's counts. We deliberately require

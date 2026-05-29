@@ -1,8 +1,7 @@
 ---
 paths:
-  - "Slides/**/*.tex"
   - "Figures/**/*.tex"
-  - "Preambles/**/*.tex"
+  - "manuscript/**/*.tex"
   - "scripts/**/*.py"
   - "scripts/**/*.R"
 ---
@@ -15,7 +14,7 @@ paths:
 
 The LaTeX and Python compilers render overlapping labels and curves crossing arrows without warning. The reviewer (`tikz-reviewer`) and any human looking at the figure catch these visually, but fixing them after the fact is expensive. Computing positions up front is cheap.
 
-Use this file as the reference when authoring, extracting (`/extract-tikz`), or reviewing (`tikz-reviewer`). Reviewers must cite the specific formula or table row when reporting a collision.
+Use this file as the reference when authoring (`/new-diagram`) or reviewing (`tikz-reviewer`). Reviewers must cite the specific formula or table row when reporting a collision.
 
 ---
 
@@ -23,23 +22,23 @@ Use this file as the reference when authoring, extracting (`/extract-tikz`), or 
 
 Run these checks on every diagram, in order. Do not stop at the first pass — later passes catch collisions earlier passes miss.
 
-### Pass 0 — Cross-slide consistency
+### Pass 0 — Cross-figure consistency
 
-When the same diagram, cycle, or visual element appears on more than one slide:
+When the same diagram, cycle, or visual element appears in more than one figure:
 
-1. **Colors must match.** A node labeled "Inspect" in `slate` on slide 31 must stay `slate` on slide 32.
+1. **Colors must match.** A node labeled "Inspect" in `slate` in one figure must stay `slate` in the next.
 2. **Layout must match.** Same nodes at same positions, same spacing, same font sizes.
-3. **Deliberate changes are the ONLY changes.** If slide 32 adds a red highlight to flag the bottleneck, that highlight should be the only difference.
+3. **Deliberate changes are the ONLY changes.** If a later figure adds a red highlight to flag the bottleneck, that highlight should be the only difference.
 
 ```bash
-# Find frames sharing the same node names
-grep -n "node.*<shared-name>" Slides/LectureN.tex
+# Find figures sharing the same node names
+grep -rn "node.*<shared-name>" manuscript/ Figures/
 ```
 
 ### Pass 1 — Bézier curves
 
 ```bash
-grep -n "bend" Slides/LectureN.tex
+grep -rn "bend" manuscript/ Figures/
 ```
 
 For each curved arrow:
@@ -258,9 +257,9 @@ Debug bounding boxes help: wrap suspect nodes in red outlines temporarily (`draw
 
 ---
 
-## Full-deck re-audit
+## Full-paper re-audit
 
-After **any** TikZ fix, re-audit **every** TikZ figure in the deck. The same error pattern repeats across slides because the same code structure gets reused. `grep -n "bend"` finds all curves — checking each takes two minutes.
+After **any** TikZ fix, re-audit **every** TikZ figure in the paper. The same error pattern repeats across figures because the same code structure gets reused. `grep -rn "bend"` finds all curves — checking each takes two minutes.
 
 ---
 
@@ -277,6 +276,6 @@ After **any** TikZ fix, re-audit **every** TikZ figure in the deck. The same err
 
 ## Integration with the workflow
 
-- **`/extract-tikz` and `/new-diagram`** — both run a Step 1 prevention pre-check against the rules in [`tikz-prevention.md`](tikz-prevention.md) (P3 bare `scale=`, P4 missing directional keyword) before compiling. Both skills use identical grep patterns so behavior doesn't drift.
+- **`/new-diagram`** — runs a Step 1 prevention pre-check against the rules in [`tikz-prevention.md`](tikz-prevention.md) (P3 bare `scale=`, P4 missing directional keyword) before compiling.
 - **`tikz-reviewer` agent** — runs the measurement passes here (Pass 1 Bézier, Pass 2 gaps, Pass 3 keywords, Pass 4 boundaries, Pass 4b arc3, Pass 4c text pairs, Pass 5 margins, Pass 5b plotted curves, Pass 6 visual). Must cite the specific pass and formula when reporting a collision.
-- **`quality_score.py`** — see [`quality-gates.md`](quality-gates.md) for the authoritative TikZ rubric. A label/arrow overlap finding currently costs −5 in the Quarto and Beamer rubrics.
+- **`quality_score.py`** — see [`quality-gates.md`](quality-gates.md) for the authoritative TikZ rubric. A label/arrow overlap finding currently costs −5 in the figure rubric.

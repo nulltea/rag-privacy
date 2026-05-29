@@ -1,7 +1,6 @@
 # CLAUDE.MD -- Academic Project Development with Claude Code
 
 <!-- HOW TO USE: Replace [BRACKETED PLACEHOLDERS] with your project info.
-     Customize Beamer environments and CSS classes for your theme.
      Keep this file under ~150 lines — Claude loads it every session.
      See the guide at docs/workflow-guide.html for full documentation. -->
 
@@ -14,8 +13,7 @@
 ## Core Principles
 
 - **Plan first** -- enter plan mode before non-trivial tasks; save plans to `quality_reports/plans/`
-- **Verify after** -- compile/render and confirm output at the end of every task
-- **Single source of truth** -- Beamer `.tex` is authoritative; Quarto `.qmd` derives from it
+- **Verify after** -- compile and confirm output at the end of every task
 - **Quality gates** -- nothing ships below 80/100
 - **[LEARN] tags** -- when corrected, save `[LEARN:category] wrong → right` to [MEMORY.md](MEMORY.md)
 
@@ -31,15 +29,12 @@ Cross-session context lives in [MEMORY.md](MEMORY.md); past plans, specs, and se
 ├── .claude/                     # Rules, skills, agents, hooks
 ├── Bibliography_base.bib        # Centralized bibliography
 ├── Figures/                     # Figures and images
-├── Preambles/header.tex         # LaTeX headers
-├── Slides/                      # Beamer .tex files
-├── Quarto/                      # RevealJS .qmd files + theme
-├── docs/                        # GitHub Pages (auto-generated)
+├── manuscript/                  # arXiv LaTeX paper sources + figures
 ├── scripts/                     # Utility scripts + R code
 ├── quality_reports/             # Plans, session logs, merge reports, decision records
 ├── explorations/                # Research sandbox (see rules)
 ├── templates/                   # Session log, quality report templates
-└── master_supporting_docs/      # Papers and existing slides
+└── master_supporting_docs/      # Papers and supporting material
 ```
 
 ---
@@ -47,26 +42,18 @@ Cross-session context lives in [MEMORY.md](MEMORY.md); past plans, specs, and se
 ## Commands
 
 ```bash
-# LaTeX (3-pass, XeLaTeX only)
-cd Slides && TEXINPUTS=../Preambles:$TEXINPUTS xelatex -interaction=nonstopmode file.tex
-BIBINPUTS=..:$BIBINPUTS bibtex file
-TEXINPUTS=../Preambles:$TEXINPUTS xelatex -interaction=nonstopmode file.tex
-TEXINPUTS=../Preambles:$TEXINPUTS xelatex -interaction=nonstopmode file.tex
-
-# Deploy Quarto to GitHub Pages
-./scripts/sync_to_docs.sh LectureN
+# LaTeX (3-pass, XeLaTeX) — run from the manuscript directory
+xelatex -interaction=nonstopmode paper.tex
+bibtex paper
+xelatex -interaction=nonstopmode paper.tex
+xelatex -interaction=nonstopmode paper.tex
 
 # Quality score
-python scripts/quality_score.py Quarto/file.qmd
-
-# Palette sync (LaTeX ↔ SCSS)
-./scripts/check-palette-sync.sh
+python scripts/quality_score.py manuscript/paper.tex
 
 # Surface-count sync (README ↔ CLAUDE.md ↔ guide ↔ landing page)
 ./scripts/check-surface-sync.sh
 ```
-
-**Palette contract:** color names in `Preambles/header.tex` must match SCSS variables in `Quarto/theme-template.scss`. See [`Preambles/README.md`](Preambles/README.md).
 
 ---
 
@@ -87,19 +74,9 @@ Enforced by `/commit` (halts + asks for override); not enforced by a git pre-com
 | Command | What It Does |
 |---------|-------------|
 | `/compile-latex [file]` | 3-pass XeLaTeX + bibtex |
-| `/deploy [LectureN]` | Render Quarto + sync to docs/ |
-| `/extract-tikz [LectureN]` | TikZ → PDF → SVG |
 | `/new-diagram [snippet] [output.tex]` | Scaffold a TikZ diagram from the gallery with prevention + review |
 | `/proofread [file]` | Grammar/typo/overflow review |
-| `/visual-audit [file]` | Slide layout audit |
-| `/pedagogy-review [file]` | Narrative, notation, pacing review |
-| `/review-r [file]` | R code quality review |
-| `/qa-quarto [LectureN]` | Adversarial Quarto vs Beamer QA |
-| `/slide-excellence [file]` | Combined multi-agent review |
-| `/translate-to-quarto [file]` | Beamer → Quarto translation |
 | `/validate-bib` | Cross-reference citations |
-| `/devils-advocate` | Challenge slide design |
-| `/create-lecture` | Full lecture creation |
 | `/commit [msg]` | Stage, commit, PR, merge |
 | `/lit-review [topic]` | Literature search + synthesis |
 | `/research-ideation [topic]` | Research questions + strategies |
@@ -125,30 +102,20 @@ Enforced by `/commit` (halts + asks for override); not enforced by a git pre-com
 
 ---
 
-<!-- CUSTOMIZE: Replace placeholder rows ([your-env], [.your-class]) with your own.
+<!-- CUSTOMIZE: Replace placeholder rows ([your-env]) with your own.
      Delete the rows marked "(example — delete)" once you've added yours. -->
 
-## Beamer Custom Environments
+## LaTeX Custom Environments
 
 | Environment | Effect | Use Case |
 | --- | --- | --- |
 | `[your-env]` | [Description] | [When to use] |
-| `keybox` | Gold background box | Key points *(example — delete)* |
 | `definitionbox[Title]` | Blue-bordered titled box | Formal definitions *(example — delete)* |
-
-## Quarto CSS Classes
-
-| Class | Effect | Use Case |
-| --- | --- | --- |
-| `[.your-class]` | [Description] | [When to use] |
-| `.smaller` | 85% font | Dense content *(example — delete)* |
-| `.positive` | Green bold | Good annotations *(example — delete)* |
 
 ---
 
 ## Current Project State
 
-| Lecture | Beamer | Quarto | Key Content |
-| --- | --- | --- | --- |
-| HelloWorld *(sample — delete when ready)* | `HelloWorld.tex` | `HelloWorld.qmd` | Minimal deck to verify setup |
-| 1: [Topic] | `Lecture01_Topic.tex` | `Lecture1_Topic.qmd` | [Brief description] |
+| Section | Source | Key Content |
+| --- | --- | --- |
+| 1: [Topic] | `manuscript/paper.tex` | [Brief description] |

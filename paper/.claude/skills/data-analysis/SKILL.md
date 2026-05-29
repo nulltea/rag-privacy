@@ -43,7 +43,6 @@ Output block (in your response to the user, before Phase 1):
 
 **Project conventions read:**
 - `.claude/rules/r-code-conventions.md` — [one-line summary of most relevant rule]
-- `.claude/rules/content-invariants.md` — [INV-9, INV-10, INV-11, INV-12 applicable]
 
 **Task interpretation:** [one sentence restating what the user asked for]
 
@@ -56,7 +55,7 @@ If any input cannot be read (missing file, unreadable format), stop and ask the 
 
 1. Create R script with proper header (title, author, purpose, inputs, outputs)
 2. Load required packages at top (`library()`, never `require()`)
-3. Set seed once at top in YYYYMMDD format (per `r-code-conventions.md`), e.g. `set.seed(20260415)` (INV-9)
+3. Set seed once at top in YYYYMMDD format (per `r-code-conventions.md`), e.g. `set.seed(20260415)`
 4. Load and inspect the dataset
 
 ### Phase 2: Exploratory Data Analysis
@@ -125,7 +124,7 @@ library(tidyverse)
 library(fixest)
 library(modelsummary)
 
-set.seed(20260415)  # YYYYMMDD per r-code-conventions.md (INV-9)
+set.seed(20260415)  # YYYYMMDD per r-code-conventions.md
 
 dir.create("output/analysis", recursive = TRUE, showWarnings = FALSE)
 

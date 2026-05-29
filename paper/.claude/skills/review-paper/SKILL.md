@@ -14,7 +14,6 @@ Produce a thorough, constructive review of an academic manuscript — the kind o
 > - **`/review-paper`** (this skill) — single comprehensive report, optional `--adversarial` critic-fixer loop, or `--peer <journal>` simulated peer-review pipeline. Best for **most drafts**.
 > - **`/seven-pass-review`** — seven independent lenses in parallel (abstract, intro, methods, results, robustness, prose, citations) then synthesized. Heavier (7× token cost). Best for **submission-ready drafts** or **R&R stage** where you need maximum coverage.
 > - **`/respond-to-referees`** — if you already have referee comments and need a response document, not another review.
-> - **`/slide-excellence`** — for lecture slides, not papers.
 
 **Input:** `$ARGUMENTS` — path to a paper (`.tex`, `.pdf`, or `.qmd`), or a filename in `master_supporting_docs/`. Optional flags:
 
@@ -38,7 +37,7 @@ One comprehensive review report. Fast, low token cost, suitable for early drafts
 
 ### Adversarial mode (`--adversarial`)
 
-Iterative critic-fixer loop modeled on [`/qa-quarto`](../qa-quarto/SKILL.md). The critic identifies issues, the fixer proposes and applies edits (with user approval), and the critic re-audits. Loops until APPROVED or max 5 rounds.
+Iterative critic-fixer loop. The critic identifies issues, the fixer proposes and applies edits (with user approval), and the critic re-audits. Loops until APPROVED or max 5 rounds.
 
 Use when: preparing a pre-submission draft, responding to a journal-desk rejection with substantive revisions, or after your own major rewrite. Costs more tokens but produces a manuscript the critic has signed off on.
 
@@ -250,7 +249,7 @@ These are the tough questions a top referee would likely raise:
 
 **Only runs if `--adversarial` is in `$ARGUMENTS`.**
 
-Pattern adapted from [`/qa-quarto`](../qa-quarto/SKILL.md), which uses the same loop to iterate on slide quality. Papers get it now because the single-pass review leaves authors doing manual fix-and-resubmit cycles.
+The critic-fixer loop pattern gives papers an iterated review because the single-pass review leaves authors doing manual fix-and-resubmit cycles.
 
 ### Flow
 

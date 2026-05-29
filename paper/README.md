@@ -14,9 +14,9 @@ A ready-to-fork foundation for AI-assisted academic work. You describe what you 
 
 ## Quick Start (5–10 minutes, plus ~30 min for first-time installs)
 
-> **Before you start:** Claude Code + git are the minimum. To run the included `HelloWorld` demos end-to-end you also need XeLaTeX (Beamer sample) and Quarto (Quarto sample). R and the GitHub CLI are recommended. Python 3 is used by a few internal scripts (`check-palette-sync.py`, `check-tikz-prevention.py`) and is pre-installed on macOS/Linux. Full list in [Prerequisites](#prerequisites) below. Fastest path: clone first, then run `./scripts/validate-setup.sh` — it reports exactly what's missing with install links.
+> **Before you start:** Claude Code + git are the minimum. To compile the LaTeX paper you also need XeLaTeX. R and the GitHub CLI are recommended. Python 3 is used by a few internal scripts (e.g. `check-tikz-prevention.py`) and is pre-installed on macOS/Linux. Full list in [Prerequisites](#prerequisites) below. Fastest path: clone first, then run `./scripts/validate-setup.sh` — it reports exactly what's missing with install links.
 >
-> **Only need Python/R/markdown?** You don't need XeLaTeX or Quarto. The agents, rules, skills, and orchestration patterns work for any text/code artifact. Skip the `HelloWorld` demos and head straight to `/data-analysis`, `/review-paper`, `/lit-review`, or `/review-r`.
+> **Note:** the lecture-slides pipeline (Beamer → Quarto → RevealJS) has been removed; this is now a standalone arXiv LaTeX paper repo. The agents, rules, skills, and orchestration patterns work for any text/code artifact. Head straight to `/data-analysis`, `/review-paper`, `/lit-review`, or `/compile-latex`.
 >
 > **Session 2 onwards:** [MEMORY.md](MEMORY.md) (committed) collects generic `[LEARN]` entries that help all forkers; `.claude/state/personal-memory.md` (gitignored) is for machine-specific notes. See [`.claude/rules/meta-governance.md`](.claude/rules/meta-governance.md) for the distinction.
 
@@ -53,20 +53,19 @@ The [full guide](https://psantanna.com/claude-code-my-workflow/workflow-guide.ht
 
 ### 3. Verify Your Setup
 
-Before building real lectures, confirm your environment works:
+Before working on the manuscript, confirm your environment works:
 
 ```bash
-./scripts/validate-setup.sh        # Checks XeLaTeX, Quarto, Python, git, etc.
+./scripts/validate-setup.sh        # Checks XeLaTeX, Python, git, etc.
 ```
 
 Then inside Claude:
 
 ```text
-/compile-latex HelloWorld          # Compiles Slides/HelloWorld.tex to PDF
-/deploy HelloWorld                 # Renders Quarto/HelloWorld.qmd to HTML
+/compile-latex manuscript/paper.tex   # 3-pass XeLaTeX + bibtex to PDF
 ```
 
-If both succeed, delete `Slides/HelloWorld.tex` and `Quarto/HelloWorld.qmd` and start on your real work.
+If it succeeds, your environment is ready for the manuscript.
 
 ---
 
@@ -74,24 +73,23 @@ If both succeed, delete `Slides/HelloWorld.tex` and `Quarto/HelloWorld.qmd` and 
 
 ### Contractor Mode
 
-You describe a task. For complex or ambiguous requests, Claude first creates a requirements specification with MUST/SHOULD/MAY priorities and clarity status (CLEAR/ASSUMED/BLOCKED). You approve the spec, then Claude plans the approach and invokes the right skill (e.g. `/create-lecture`, `/qa-quarto`, `/review-paper --adversarial`). That skill implements the orchestrator pattern internally — implement, verify, review, fix, re-verify, score — and returns a summary when the work meets quality standards. Say "just do it" and it auto-commits when the score clears 80.
+You describe a task. For complex or ambiguous requests, Claude first creates a requirements specification with MUST/SHOULD/MAY priorities and clarity status (CLEAR/ASSUMED/BLOCKED). You approve the spec, then Claude plans the approach and invokes the right skill (e.g. `/review-paper --adversarial`, `/data-analysis`). That skill implements the orchestrator pattern internally — implement, verify, review, fix, re-verify, score — and returns a summary when the work meets quality standards. Say "just do it" and it auto-commits when the score clears 80.
 
 ### Specialized Agents
 
-Instead of one general-purpose reviewer, 14 focused agents each check one dimension. A representative sample:
+Instead of one general-purpose reviewer, focused agents each check one dimension. A representative sample:
 
 - **proofreader** — grammar/typos
-- **slide-auditor** — visual layout
-- **pedagogy-reviewer** — teaching quality
+- **tikz-reviewer** — TikZ figure visual critique
 - **r-reviewer** — R code quality
-- **domain-reviewer** — field-specific correctness, slides (template — customize for your field)
+- **domain-reviewer** — field-specific correctness (template — customize for your field)
 - **domain-referee** / **methods-referee** / **editor** — manuscript peer-review pipeline (`/review-paper --peer`)
 
-Each is better at its narrow task than a generalist would be. The `/slide-excellence` skill runs the slide-review agents in parallel; `/review-paper --peer` runs the paper-review pipeline. The same pattern extends to any academic artifact — manuscripts, data pipelines, proposals.
+Each is better at its narrow task than a generalist would be. `/review-paper --peer` runs the paper-review pipeline. The same pattern extends to any academic artifact — manuscripts, data pipelines, proposals.
 
 ### Adversarial QA
 
-Two agents work in opposition: the **critic** reads both Beamer and Quarto and produces harsh findings. The **fixer** implements exactly what the critic found. They loop until the critic says "APPROVED" (or 5 rounds max). This catches errors that single-pass review misses.
+Two agents work in opposition: the **critic** produces harsh findings, and the **fixer** implements exactly what the critic found. They loop until the critic says "APPROVED" (or 5 rounds max). The `/review-paper --adversarial` mode uses this loop on manuscripts. This catches errors that single-pass review misses.
 
 ### Quality Review
 
@@ -140,7 +138,7 @@ The guide covers Claude Code's latest capabilities:
 - **Model lineup** (v1.9.0) — Opus 4.7 as Max/Team Premium default (GA 2026-04-16); Sonnet 4.6 workhorse (1M context); Haiku 4.5 fast tier. Sonnet 4 + original Opus 4 retire 2026-06-15.
 - **Effort levels** — `/effort` command for cost vs. thoroughness tradeoffs (`low` / `medium` / `high` / `xhigh` (v1.9.0 — recommended for Opus 4.7 coding) / `max`)
 - **`/goal <verifiable condition>`** (v1.9.0; Anthropic May 2026) — keep working across turns until a fast model confirms the condition holds. Pairs with `/commit` quality gates for verified-end-state runs.
-- **`claude agents` dashboard** (v1.9.0; Anthropic May 2026) — single screen for parallel review work (`/review-paper --peer`, `/slide-excellence`).
+- **`claude agents` dashboard** (v1.9.0; Anthropic May 2026) — single screen for parallel review work (`/review-paper --peer`, `/seven-pass-review`).
 - **Cost-Conscious Composition** (v1.9.0) — prompt-cache TTL change (60min → 5min), 70/20/10 model routing (Haiku/Sonnet/Opus), `/cost` + `/usage` monitoring, Agent SDK credit-pool split (2026-06-15).
 - **Skill frontmatter** — `effort`, `context: fork`, `agent`, `hooks`, `disable-model-invocation` (v1.8.0+), and dynamic content (`$ARGUMENTS`, `!command` syntax)
 - **Permission modes** — Normal, Auto-accept, Plan, Auto (Mar 2026; flag-free for Max+Opus 4.7 as of Apr 2026), Bypass
@@ -156,11 +154,10 @@ The guide covers Claude Code's latest capabilities:
 
 | Academic Task | How This Workflow Helps |
 |---------------|----------------------|
-| Lecture slides (Beamer/Quarto) | Full creation, translation, multi-agent review, deployment |
 | Research papers | Literature review, manuscript review, simulated peer review (`/review-paper --peer [journal]`), reviewer-disposition variance reporting (`--variance N`) |
+| LaTeX paper figures | TikZ scaffolding (`/new-diagram`) with prevention rules + merciless visual review |
 | Data analysis | End-to-end R pipelines (`/data-analysis`) or Stata pipelines via `stata-mcp` (`/stata-replication`, v1.9.0), replication verification, publication-ready output |
 | Replication packages | AEA-compliant packaging, reproducibility audit trails, `passport.yaml` claims provenance (v1.9.0) |
-| Presentations | Rhetoric of decks principles, visual audit, cognitive load review |
 | Research proposals | Structured drafting with adversarial critique |
 | Preregistration | OSF / AsPredicted / AEA RCT Registry-ready document (`/preregister --style`) — full workflow in Pattern 16 |
 | Manuscript submission discipline | `/humanize` (detect AI voice), `/verify-claims` HIGH-WARN gate (block fabricated citations), reviewer-disposition variance |
@@ -172,20 +169,15 @@ The guide covers Claude Code's latest capabilities:
 ## What's Included
 
 <details>
-<summary><strong>16 agents, 35 skills, 26 rules, 6 hooks</strong> (click to expand)</summary>
+<summary><strong>11 agents, 26 skills, 22 rules, 6 hooks</strong> (click to expand)</summary>
 
 ### Agents (`.claude/agents/`)
 
 | Agent | What It Does |
 |-------|-------------|
 | `proofreader` | Grammar, typos, overflow, consistency review |
-| `slide-auditor` | Visual layout audit (overflow, font consistency, spacing) |
-| `pedagogy-reviewer` | 13-pattern pedagogical review (narrative arc, notation density, pacing) |
 | `r-reviewer` | R code quality, reproducibility, and domain correctness |
 | `tikz-reviewer` | Merciless TikZ diagram visual critique |
-| `beamer-translator` | Beamer-to-Quarto translation specialist |
-| `quarto-critic` | Adversarial QA comparing Quarto against Beamer benchmark |
-| `quarto-fixer` | Implements fixes from the critic agent |
 | `verifier` | End-to-end task completion verification |
 | `domain-reviewer` | **Template** for your field-specific substance reviewer |
 | `claim-verifier` (v1.7.0) | Chain-of-Verification fact-checker in a forked context |
@@ -200,18 +192,8 @@ The guide covers Claude Code's latest capabilities:
 | Skill | What It Does |
 |-------|-------------|
 | `/compile-latex` | 3-pass XeLaTeX compilation with bibtex |
-| `/deploy` | Render Quarto + sync to GitHub Pages |
-| `/extract-tikz` | TikZ diagrams to PDF to SVG pipeline |
 | `/proofread` | Launch proofreader on a file |
-| `/visual-audit` | Launch slide-auditor on a file |
-| `/pedagogy-review` | Launch pedagogy-reviewer on a file |
-| `/review-r` | Launch R code reviewer |
-| `/qa-quarto` | Adversarial critic-fixer loop (max 5 rounds) |
-| `/slide-excellence` | Combined multi-agent review |
-| `/translate-to-quarto` | Full 11-phase Beamer-to-Quarto translation |
 | `/validate-bib` | Cross-reference citations against bibliography |
-| `/devils-advocate` | Challenge design decisions before committing |
-| `/create-lecture` | Full lecture creation workflow |
 | `/commit` | Stage, commit, create PR, and merge to main |
 | `/lit-review` | Literature search, synthesis, and gap identification |
 | `/research-ideation` | Generate research questions and empirical strategies |
@@ -265,24 +247,20 @@ Rules use path-scoped loading: **always-on** rules load every session (~100 line
 
 | Rule | Triggers On | What It Enforces |
 |------|------------|-----------------|
-| `verification-protocol` | `.tex`, `.qmd`, `docs/` | Task completion checklist |
-| `single-source-of-truth` | `Figures/`, `.tex`, `.qmd` | No content duplication; Beamer is authoritative |
-| `quality-gates` | `.tex`, `.qmd`, `*.R` | 80/90/95 scoring + tolerance thresholds |
+| `verification-protocol` | `.tex`, `docs/` | Task completion checklist |
+| `quality-gates` | `.tex`, `*.R` | 80/90/95 scoring + tolerance thresholds |
 | `r-code-conventions` | `*.R` | R coding standards + math line-length exception |
 | `tikz-visual-quality` | `.tex` | TikZ diagram visual standards |
-| `beamer-quarto-sync` | `.tex`, `.qmd` | Auto-sync Beamer edits to Quarto |
 | `pdf-processing` | `master_supporting_docs/` | Safe large PDF handling |
-| `proofreading-protocol` | `.tex`, `.qmd`, `quality_reports/` | Propose-first, then apply with approval |
-| `no-pause-beamer` | `.tex` | No overlay commands in Beamer |
+| `proofreading-protocol` | `.tex`, `quality_reports/` | Propose-first, then apply with approval |
 | `replication-protocol` | `*.R` | Replicate original results before extending |
-| `knowledge-base-template` | `.tex`, `.qmd`, `*.R` | Notation/application registry template |
+| `knowledge-base-template` | `.tex`, `*.R` | Notation/application registry template |
 | `orchestrator-research` | `*.R`, `explorations/` | Simple orchestrator for research (no multi-round reviews) |
 | `exploration-folder-protocol` | `explorations/` | Structured sandbox for experimental work |
 | `exploration-fast-track` | `explorations/` | Lightweight exploration workflow (60/100 threshold) |
-| `tikz-prevention` (v1.4.x) | `Slides/**`, `Figures/**`, `Preambles/**` | TikZ pre-flight grep checks (P3/P4 collision avoidance) |
-| `tikz-measurement` (v1.5.x) | `Slides/**`, `Figures/**`, `Preambles/**`, `scripts/**` | Bézier curve depth math + 6-pass collision protocol (from MixtapeTools) |
-| `content-invariants` (v1.6.x) | `.tex`, `.qmd`, `Preambles/`, `scripts/R/**` | Pre-Flight Reports — proves inputs were read before work |
-| `cross-artifact-review` (v1.7.0) | `master_supporting_docs/`, `.tex`, `.qmd` | Paper ↔ code dependency graph; auto-invokes `/review-r` + `/audit-reproducibility` |
+| `tikz-prevention` (v1.4.x) | `Figures/**`, `manuscript/**` | TikZ pre-flight grep checks (P3/P4 collision avoidance) |
+| `tikz-measurement` (v1.5.x) | `Figures/**`, `manuscript/**`, `scripts/**` | Bézier curve depth math + 6-pass collision protocol (from MixtapeTools) |
+| `cross-artifact-review` (v1.7.0) | `master_supporting_docs/`, `.tex` | Paper ↔ code dependency graph; auto-invokes the `r-reviewer` agent + `/audit-reproducibility` |
 | `post-flight-verification` (v1.7.0) | Skills generating factual claims | Chain-of-Verification protocol with forked verifier |
 | `summary-parity` (v1.8.x) | `CHANGELOG.md`, `README.md`, `.qmd`, skill/rule/agent `.md` | Anti-whack-a-mole: re-verify summaries against their bodies |
 | `model-routing` (v1.9.0) | `.claude/agents/**/*.md`, `.claude/skills/**/SKILL.md` | 70/20/10 architect/editor split (Haiku/Sonnet/Opus) |
@@ -315,18 +293,16 @@ Rules use path-scoped loading: **always-on** rules load every session (~100 line
 |------|-------------|---------|
 | [Claude Code](https://code.claude.com/docs/en/overview) | Everything | [claude.ai/install](https://claude.ai/install) |
 | git | Clone + version control | [git-scm.com](https://git-scm.com/downloads) |
-| Python 3 (3.9+) | Internal checkers (palette sync, TikZ prevention) | Preinstalled on macOS/Linux; [python.org](https://www.python.org/) for Windows |
-| XeLaTeX | LaTeX compilation (Beamer `HelloWorld`, real lectures) | [TeX Live](https://tug.org/texlive/) or [MacTeX](https://tug.org/mactex/) |
-| [Quarto](https://quarto.org) | Web slides (Quarto `HelloWorld`, real lectures) | [quarto.org/docs/get-started](https://quarto.org/docs/get-started/) |
+| Python 3 (3.9+) | Internal checkers (TikZ prevention, surface sync) | Preinstalled on macOS/Linux; [python.org](https://www.python.org/) for Windows |
+| XeLaTeX | LaTeX compilation (manuscript) | [TeX Live](https://tug.org/texlive/) or [MacTeX](https://tug.org/mactex/) |
 | R | Figures and analysis (`/data-analysis`, `scripts/R/` template) | [r-project.org](https://www.r-project.org/) |
-| pdf2svg | TikZ → SVG for Quarto (`/extract-tikz`) | `brew install pdf2svg` (macOS), `apt install pdf2svg` (Debian) |
 | [gh CLI](https://cli.github.com/) | PR / issue workflow | `brew install gh` (macOS), `apt install gh` (Debian) |
 
 **Minimum to fork this template:** Claude Code + git + Python 3 (Python is already installed on macOS/Linux).
 
-**Minimum to run the included HelloWorld demos end-to-end:** add XeLaTeX (for `/compile-latex HelloWorld`) and Quarto (for `/deploy HelloWorld`).
+**Minimum to compile the paper:** add XeLaTeX (for `/compile-latex`).
 
-**Your real lectures may need more** — R for `scripts/R/` analyses, pdf2svg if you use TikZ extraction, gh CLI if you use the PR-based commit workflow. `./scripts/validate-setup.sh` reports which of these are installed and what each unlocks.
+**Your work may need more** — R for `scripts/R/` analyses, gh CLI if you use the PR-based commit workflow. `./scripts/validate-setup.sh` reports which of these are installed and what each unlocks.
 
 ---
 
@@ -334,11 +310,9 @@ Rules use path-scoped loading: **always-on** rules load every session (~100 line
 
 1. **Fill in the knowledge base** (`.claude/rules/knowledge-base-template.md`) with your notation, applications, and design principles
 2. **Customize the domain reviewer** (`.claude/agents/domain-reviewer.md`) with review lenses specific to your field
-3. **Update the color palette** — this is a **two-surface contract**: change the HEX values at the top of **both** [`Preambles/header.tex`](Preambles/header.tex) (Beamer/TikZ) **and** [`Quarto/theme-template.scss`](Quarto/theme-template.scss) (Quarto slides) so they agree. Then run `./scripts/check-palette-sync.sh` to verify. Forgetting one surface silently produces mismatched Beamer vs. Quarto renderings. See [`Preambles/README.md`](Preambles/README.md) for the full contract and the TikZ style library.
-4. **Add field-specific R pitfalls** to `.claude/rules/r-code-conventions.md`
-5. **Fill in the lecture mapping** in `.claude/rules/beamer-quarto-sync.md`
-6. **Customize the workflow quick reference** (`.claude/WORKFLOW_QUICK_REF.md`) with your non-negotiables and preferences
-7. **Set up the exploration folder** (`explorations/`) for experimental work
+3. **Add field-specific R pitfalls** to `.claude/rules/r-code-conventions.md`
+4. **Customize the workflow quick reference** (`.claude/WORKFLOW_QUICK_REF.md`) with your non-negotiables and preferences
+5. **Set up the exploration folder** (`explorations/`) for experimental work
 
 ---
 
