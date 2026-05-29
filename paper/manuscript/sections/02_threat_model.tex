@@ -1,0 +1,42 @@
+\section{Threat Model and Scope}
+\label{sec:threat}
+
+% LOCKED (stage-1 decision record): semi-honest cloud + ML-capable attacker.
+% This section MUST be precise — every "what breaks" claim is bounded by it.
+
+\subsection{Adversary}
+% Honest-but-curious cloud / GPU operator. Observes everything on the untrusted
+% GPU: obfuscated activations, public model weights, access patterns, and stored
+% ciphertexts. Has ML capability: can mount inversion, GRAM, and ISA AttnScore
+% attacks. Follows the protocol (does not tamper with computation).
+\needswork{formal-ish statement of the semi-honest adversary + observation set}
+
+\subsection{Trust Anchors}
+% Trusted: TEE seal, RATLS / TLS 1.3 channel, the client endpoint.
+\needswork{enumerate trusted components and what each guarantees}
+
+\subsection{Out of Scope}
+% Explicitly OUT: active/malicious tampering (no integrity/verifiability claims);
+% microarchitectural side-channels against the TEE (Spectre/Foreshadow-class).
+% Stating these bounds pre-empts the "strawman adversary" objection.
+\needswork{explicit out-of-scope list with one-line justification each}
+
+\begin{table}[t]
+  \centering
+  \caption{Trust boundary assumed throughout the paper.}
+  \label{tab:threat}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Component & Status & Adversary capability \\
+    \midrule
+    Client endpoint        & Trusted   & --- \\
+    TEE seal               & Trusted   & --- \\
+    RATLS / TLS\,1.3       & Trusted   & --- \\
+    Untrusted GPU          & Untrusted & sees obfuscated activations, weights \\
+    Storage / vector DB    & Untrusted & sees ciphertexts, access patterns \\
+    \midrule
+    Active tampering       & \multicolumn{2}{l}{Out of scope} \\
+    Microarch.\ side-chan. & \multicolumn{2}{l}{Out of scope} \\
+    \bottomrule
+  \end{tabular}
+\end{table}

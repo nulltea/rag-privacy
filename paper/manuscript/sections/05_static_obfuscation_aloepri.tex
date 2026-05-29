@@ -1,0 +1,47 @@
+\section{Static Obfuscation (AloePri): What Breaks}
+\label{sec:aloepri}
+
+% LOCKED framing: KNOWN attack classes, FIRST instantiated & measured against
+% AloePri. Claim = "first systematic evaluation of AloePri against the attack
+% surface its authors omitted." Diligence cost: a per-attack citation map proving
+% each attack's origin in prior work. Status: DONE (repro + numbers).
+
+\subsection{AloePri in Brief}
+% Covariant obfuscation \cite{lin_aloepri}: what it protects, what it reports.
+\needswork{summarize AloePri's scheme + its reported evaluation}
+
+\subsection{Replication}
+% Reproduce their headline numbers. Report reproduced-vs-claimed with a tolerance.
+\dnote{open decision: reproduction tolerance threshold — stage-1 still-open item \#2;
+apply .claude/rules/replication-protocol.md}
+\begin{table}[t]
+  \centering
+  \caption{AloePri: reproduced vs.\ claimed.}
+  \label{tab:aloepri-repro}
+  \begin{tabular}{@{}lrrr@{}}
+    \toprule
+    Metric & Claimed & Reproduced & $\Delta$ \\
+    \midrule
+    \needswork{metric 1} & \needswork{} & \needswork{} & \needswork{} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{The Omitted Attack Surface}
+% Per-attack citation map: each attack class, its origin, why AloePri's eval
+% omitted it, and the measured success rate against AloePri's obfuscation.
+\begin{table}[t]
+  \centering
+  \caption{Attack classes instantiated against AloePri (all from prior work).}
+  \label{tab:aloepri-attacks}
+  \begin{tabular}{@{}llr@{}}
+    \toprule
+    Attack class & Origin (prior work) & Success vs.\ AloePri \\
+    \midrule
+    Embedding inversion & \cite{morris2023vec2text} & \needswork{} \\
+    GRAM leak           & \needswork{cite origin}   & \needswork{} \\
+    ISA AttnScore       & \needswork{cite origin}   & \needswork{} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\needswork{narrate each attack + the defense/accuracy tradeoff that lets it through}

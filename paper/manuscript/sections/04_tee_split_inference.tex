@@ -1,0 +1,41 @@
+\section{TEE + Untrusted-GPU Split Inference: What Holds}
+\label{sec:tee}
+
+% LOCKED campaign: 1 modern model x 1 TEE platform (e.g. TDX + H100 CC).
+% Deliverables: (a) latency/throughput/overhead breakdown + bottleneck analysis;
+% (b) the SAME attack suite as AloePri, run against the split, showing it resists.
+% Status: IN PROGRESS (co-developing with the paper).
+
+\subsection{Architecture}
+% Boundary layers (embedding lookup, lm_head / pooling) inside the TEE; transformer
+% blocks on the untrusted GPU over obfuscated activations; inverse applied before
+% non-linearities. State the exact split for the chosen model.
+\needswork{describe the split for the chosen model + platform}
+\dnote{open decision: exact model + TEE platform — stage-1 still-open item \#3}
+
+\subsection{Implementation}
+\needswork{implementation notes: what runs where, attestation/RATLS setup}
+
+\subsection{Performance: Overhead and Bottlenecks}
+% The systems result. Latency, throughput, overhead vs plaintext baseline; where
+% the time goes (attestation, data movement, inverse ops, GPU compute).
+\begin{table}[t]
+  \centering
+  \caption{Split-inference overhead vs.\ plaintext baseline.}
+  \label{tab:tee-overhead}
+  \begin{tabular}{@{}lrrr@{}}
+    \toprule
+    Configuration & Latency & Throughput & Overhead \\
+    \midrule
+    Plaintext baseline & \needswork{} & \needswork{} & --- \\
+    TEE+GPU split      & \needswork{} & \needswork{} & \needswork{} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\needswork{fill overhead table + bottleneck breakdown figure}
+
+\subsection{Attack Resistance}
+% Run inversion / GRAM / ISA AttnScore against the obfuscated activations the GPU
+% sees. Show attack success is low — this is the "holds" evidence and must use the
+% SAME harness/metrics as Sec. 5 for a fair comparison (see Sec. 6).
+\needswork{attack-success numbers on the split; same metrics as AloePri}

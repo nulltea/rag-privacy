@@ -1,0 +1,14 @@
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+sections/*.aux
+
+# Built PDF — track manually if you want a checked-in preview (git add -f main.pdf)
+main.pdf

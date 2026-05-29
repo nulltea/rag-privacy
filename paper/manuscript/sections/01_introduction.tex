@@ -1,0 +1,50 @@
+\section{Introduction}
+\label{sec:intro}
+
+% --- 1.1 Motivation --------------------------------------------------------
+\subsection{Motivation}
+% Outsourcing confidential corpora + LLM inference to the cloud; regulated
+% domains (health/finance/legal/gov). Standard pipelines leak at every stage:
+% raw docs, invertible embeddings (Vec2Text), plaintext queries, access
+% patterns, assembled prompts. Cite the leakage results that motivate the field.
+\needswork{2--3 paragraphs: why confidential LLM/RAG, grounded leakage evidence
+(\citealp{morris2023vec2text} embedding inversion; \citealp{kellaris2016leakage}
+access-pattern leakage)}
+
+% --- 1.2 The gap this paper attacks ----------------------------------------
+\subsection{The Gap}
+% Prior privacy-preserving inference work (AloePri \cite{lin_aloepri}, GELO
+% \cite{belikov_gelo}, TwinShield \cite{xue_twinshield}) are narrow studies:
+% each reports a limited evaluation. The *realistic* semi-honest attack surface
+% is under-reported, and no work measures static-obfuscation vs TEE-split
+% defenses LIKE-FOR-LIKE on a modern architecture.
+\needswork{state the gap crisply: under-reported attack surface + no like-for-like
+measurement on a modern model}
+
+% --- 1.3 Contributions -----------------------------------------------------
+\subsection{Contributions}
+This paper is a \emph{systematization plus measurement study}. Concretely:
+\begin{itemize}
+  \item \textbf{A trust-mechanism survey} (\cref{sec:survey}) of confidential
+        LLM/RAG defenses (cryptographic, TEE, static obfuscation, differential
+        privacy, hybrid split), with a tradeoff comparison.
+  \item \textbf{A measured ``holds'' result} (\cref{sec:tee}): a full
+        TEE+untrusted-GPU split inference on a modern model, with an
+        overhead/bottleneck breakdown \emph{and} the same attack suite run
+        against the split to show it resists.
+  \item \textbf{A measured ``breaks'' result} (\cref{sec:aloepri}): the first
+        systematic re-evaluation of AloePri against attack classes its authors
+        did not run (inversion, GRAM, ISA AttnScore), instantiated and measured.
+  \item \textbf{A like-for-like comparison} (\cref{sec:eval}) on one substrate
+        under one threat model: \emph{what holds vs what breaks}.
+  \item \textbf{A confidential-RAG storage reproduction} (\cref{sec:caprise}):
+        Caprise distance-preserving encryption, reproduced.
+  \item \textbf{A unified static+dynamic design} (\cref{sec:unified}) the
+        evidence motivates; full evaluation is stated future work.
+\end{itemize}
+\dnote{contribution maturity: AloePri = done; TEE split = in progress; unified
+design = proposal only (eval gated to the PoPETs v2). See stage-1 decision record.}
+
+% --- 1.4 Roadmap -----------------------------------------------------------
+\subsection{Roadmap}
+\needswork{one short paragraph mapping sections}

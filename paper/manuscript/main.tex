@@ -1,0 +1,86 @@
+% =============================================================================
+%  Confidential LLM/RAG in Practice — arXiv v1 manuscript
+%  Genre: SoK + measurement.  Headline: "what holds and what breaks."
+%  Target: arXiv long-form report (single-column) -> trim to PoPETs later.
+%  Decisions of record: quality_reports/specs/2026-05-29_confidential-llm-rag-stage1.md
+%
+%  Toolchain (this machine has pdflatex + bibtex; NO biber/latexmk):
+%     make            # pdflatex x2 + bibtex
+%     make clean
+% =============================================================================
+\documentclass[11pt,letterpaper]{article}
+
+% --- encoding & fonts (pdflatex path) ---------------------------------------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+
+% --- page layout ------------------------------------------------------------
+\usepackage[margin=1in]{geometry}
+\usepackage{setspace}
+
+% --- math -------------------------------------------------------------------
+\usepackage{amsmath,amssymb}
+
+% --- tables, graphics, color ------------------------------------------------
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\graphicspath{{figures/}}
+\usepackage{xcolor}
+
+% --- references (bibtex, not biber) -----------------------------------------
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,
+            citecolor=green!45!black,urlcolor=blue!60!black}
+% cleveref is nicer but not in minimal TeXLive installs; fall back to \autoref.
+\newif\ifhavecleveref
+\IfFileExists{cleveref.sty}{\haveclevereftrue}{\haveclevereffalse}
+\ifhavecleveref
+  \usepackage[capitalise]{cleveref}
+\else
+  \providecommand{\cref}[1]{\autoref{#1}}
+  \providecommand{\Cref}[1]{\autoref{#1}}
+\fi
+
+% --- drafting scaffolding macros (remove before submission) -----------------
+% \needswork{...}  loud red marker for an open task
+% \dnote{...}      quieter inline drafting note
+\newcommand{\needswork}[1]{{\color{red}\textbf{[TODO: #1]}}}
+\newcommand{\dnote}[1]{{\color{blue!65!black}\textit{[note: #1]}}}
+
+% --- title block ------------------------------------------------------------
+\title{\textbf{Confidential LLM and RAG in Practice:\\
+       What Holds and What Breaks under a Semi-Honest Cloud}}
+\author{%
+  Timofey \needswork{full author list + affiliations}\\
+  \texttt{timofey@chainsafe.io}}
+\date{Draft --- \today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\input{sections/00_abstract}
+\end{abstract}
+
+\input{sections/01_introduction}
+\input{sections/02_threat_model}
+\input{sections/03_background_survey}
+\input{sections/04_tee_split_inference}      % what HOLDS
+\input{sections/05_static_obfuscation_aloepri} % what BREAKS
+\input{sections/06_evaluation}                % like-for-like: holds vs breaks
+\input{sections/07_at_rest_storage_caprise}   % RAG measurement (may move to appendix)
+\input{sections/08_unified_design}            % proposal; eval deferred to v2
+\input{sections/09_related_work}
+\input{sections/10_conclusion}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\appendix
+\input{sections/99_appendix}
+
+\end{document}
