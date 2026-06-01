@@ -1113,16 +1113,22 @@ baseline is `tee:attn_cached_inplace_many` = **14 574 ms** (= 12.65 ms per
 (layer,step) → 455 ms/step over 36 layers; chronicle §9). The offload replaces
 that single CPU bucket:
 
-| metric (B=8, n=2048) | full in-TEE | offload (permuted-cover) | ratio |
+| metric (B=8, n=2048) | full in-TEE | offload, pre-O4 | **offload, O4(a)** |
 |---|--:|--:|--:|
-| attn bucket @ K=32 | **14 574 ms** | 13 832 ms | **1.05×** (≈break-even) |
-| recurring per-step (36 layers) | **455 ms** | 157 ms | **2.9×** |
-| one-time prefix re-cover (×36, amortized) | — | 8 765 ms | — |
+| attn bucket @ K=32 | **14 574 ms** | 13 832 ms (1.05×) | **9 283 ms (1.57×)** |
+| recurring per-step (36 layers) | **455 ms** | 157 ms (2.9×) | **152 ms (3.0×)** |
+| one-time prefix re-cover (×36, amortized) | — | 8 765 ms | **4 428 ms** |
+| break-even K | — | ≈30 | **≈15** |
 
-The per-step path is a clean ~2.9× win; the K=32 *bucket* is only break-even
-because the one-time `create_build` (63% of the bucket) hasn't yet amortized —
-it crosses over at K≈30 (amortization table below). Per-op decomposition of the
-offload bucket:
+**O4(a) — ✅ LANDED (2026-06-01).** The `create_build` perm+σ step was a serial
+`bh·prefix·dh` (≈16.7 M) scalar loop drawing a `StandardNormal` *per element*;
+replaced with a row-level permutation gather (attention is permutation-invariant
+over the key set, so σ=0 stays exact) + per-head σ-on-K noise, parallelised over
+the B·nkvh heads. `create_build` **8 765 → 4 428 ms** (≈halved), bucket
+**13.8 → 9.3 s = 1.57×**, break-even **K≈30 → ≈15**. The per-step path is a clean
+~3× win. What remains in `create_build` is now the **dense `O(d²)` rotate**
+(`rotate_heads`, O4(b) target) + the SIMD convert/upload. Per-op decomposition
+(pre-O4 numbers below; create_build/bucket per the table above):
 
 | op | where | total ms | × executed | per-call | count meaning |
 |---|---|--:|--:|--:|---|

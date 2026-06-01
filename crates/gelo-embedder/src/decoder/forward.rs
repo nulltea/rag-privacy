@@ -734,19 +734,40 @@ fn decoder_block_cached_batched(
                     let prefix_len = kv_views[0].0.nrows();
                     let (k_st, v_st) = stack_cache(&kv_views, batch_size, nkvh, dh);
                     // perm (row axis) + σ on K — in-TEE, per (B·nkvh) head.
+                    // O4(a): the permutation is a row-level gather (attention is
+                    // permutation-invariant over the key set, so σ=0 stays exact);
+                    // copy whole `dh`-rows instead of a scalar c-loop, parallelise
+                    // over the B·nkvh heads, and add σ-noise to K only (bulk,
+                    // per-head ChaCha stream) — replacing the serial
+                    // bh·prefix·dh per-element `StandardNormal` loop.
                     let mut perm: Vec<usize> = (0..prefix_len).collect();
                     perm.shuffle(&mut crng);
                     let bh = batch_size * nkvh;
+                    let noise_seed = rand::RngCore::next_u64(&mut crng);
                     let mut kp = Array3::<f32>::zeros((bh, prefix_len, dh));
                     let mut vp = Array3::<f32>::zeros((bh, prefix_len, dh));
-                    for h in 0..bh {
-                        for (i, &src) in perm.iter().enumerate() {
-                            for c in 0..dh {
-                                let z: f32 = StandardNormal.sample(&mut crng);
-                                kp[(h, i, c)] = k_st[(h, src, c)] + sigma * z;
-                                vp[(h, i, c)] = v_st[(h, src, c)];
-                            }
-                        }
+                    {
+                        use ndarray::parallel::prelude::*;
+                        kp.outer_iter_mut()
+                            .into_par_iter()
+                            .zip(vp.outer_iter_mut().into_par_iter())
+                            .enumerate()
+                            .for_each(|(h, (mut kph, mut vph))| {
+                                let k_src = k_st.index_axis(Axis(0), h);
+                                let v_src = v_st.index_axis(Axis(0), h);
+                                for (i, &src) in perm.iter().enumerate() {
+                                    kph.row_mut(i).assign(&k_src.row(src));
+                                    vph.row_mut(i).assign(&v_src.row(src));
+                                }
+                                if sigma > 0.0 {
+                                    let mut hrng =
+                                        ChaCha20Rng::seed_from_u64(noise_seed ^ h as u64);
+                                    for x in kph.iter_mut() {
+                                        let z: f32 = StandardNormal.sample(&mut hrng);
+                                        *x += sigma * z;
+                                    }
+                                }
+                            });
                     }
                     // Feature rotation: K·O_qk, V·O_v (shared O across heads →
                     // GQA-broadcast-consistent).
