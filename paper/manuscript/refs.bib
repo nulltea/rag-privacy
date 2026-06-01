@@ -2,26 +2,348 @@
 %  refs.bib — Confidential LLM/RAG manuscript
 %
 %  !! METADATA DISCIPLINE !!
-%  Seed entries only. Author names + titles are from the user's authoritative
-%  paper list; YEARS, VENUES, and IDENTIFIERS marked "TODO" are UNVERIFIED and
-%  must be confirmed against EdgeQuake / OpenAlex before submission. Do NOT trust
-%  a field that carries a TODO note. No arXiv IDs / DOIs have been invented.
+%  Author names + titles for ENTRIES MARKED "[verified-EdgeQuake]" are confirmed against
+%  the EdgeQuake-indexed corpus (24 papers, full-text). YEARS/VENUES/IDENTIFIERS
+%  are still TODO unless noted. Entries WITHOUT the  tag are web/corpus-sourced:
+%  author/title best-effort, ALL metadata TODO — confirm via OpenAlex before
+%  submission. No arXiv IDs / DOIs have been invented; where a research/design doc
+%  cited an ID it is recorded in the note as "doc cites arXiv:X" for later check.
+%  Run /validate-bib + /verify-claims before submission.
 % =============================================================================
 
-% ---- The five core papers --------------------------------------------------
+% ====== Cryptographic — MPC / Secret Sharing (§3.1 inference) ================
+
+@misc{permllm,
+  author = {Zheng, Fei and others},
+  title  = {{PermLLM}: Private Inference of Large Language Models within 3 Seconds under {WAN}},
+  note   = {[verified-EdgeQuake] 3-party A-SS + permutation triples. TODO: verify venue, year, arXiv/DOI},
+  year   = {2024}
+}
+
+@misc{secformer,
+  author = {Peng, Shenzhen and others},
+  title  = {{SecFormer}: Fast and Accurate Privacy-Preserving Inference for Transformer Models via {SMPC}},
+  note   = {[verified-EdgeQuake] 2Quad + Goldschmidt + Fourier-GELU. TODO: verify venue (ACL?), year, arXiv/DOI},
+  year   = {2024}
+}
+
+@misc{shaft,
+  author = {{SHAFT authors}},
+  title  = {{SHAFT}: Secure, Handy, Accurate and Fast Transformer Inference},
+  note   = {Constant-round softmax; Fourier GELU. TODO: verify authors, venue (NDSS 2025?),
+            year, arXiv/DOI (doc cites ePrint 2025/2324)},
+  year   = {2025}
+}
+
+@misc{cryptomoe,
+  author = {Zhou, Yifan and others},
+  title  = {{CryptoMoE}: Privacy-Preserving and Scalable Mixture of Experts Inference via Balanced Expert Routing},
+  note   = {[verified-EdgeQuake] balanced-expert-routing private MoE. TODO: verify venue, year, arXiv/DOI},
+  year   = {2026}
+}
+
+@misc{bumblebee,
+  author = {{BumbleBee authors}},
+  title  = {{BumbleBee}: Secure Two-party Transformer Inference},
+  note   = {2PC HE+ASS, segmented-poly exp; 2PC SOTA trust. TODO: verify authors, venue (NDSS 2025?),
+            year, arXiv/DOI},
+  year   = {2025}
+}
+
+@misc{sigma,
+  author = {{SIGMA authors}},
+  title  = {{SIGMA}: Secure {GPT} Inference with Function Secret Sharing},
+  note   = {GPU FSS LUTs; best online perf. TODO: verify authors, venue (PETS 2024?),
+            year, arXiv/DOI},
+  year   = {2024}
+}
+
+@misc{fission,
+  author = {{Fission authors}},
+  title  = {{Fission}: Secure Transformer Inference with Secret Sharing and Permutation},
+  note   = {A-SS + permutation triples; <20s (1B). TODO: verify authors, exact title, venue,
+            year (doc cites ePrint 2025/653)},
+  year   = {2025}
+}
+
+% ====== Cryptographic — FHE / HE (§3.2 inference) ============================
+
+@misc{euston,
+  author = {Gao, Xinwen and others},
+  title  = {{Euston}: Efficient and User-Friendly Secure Transformer Inference with Non-Interactivity},
+  note   = {[verified-EdgeQuake] NEXUS-successor RNS-CKKS FHE. TODO: verify venue, year, arXiv/DOI},
+  year   = {2025}
+}
+
+@misc{nexus,
+  author = {{NEXUS authors}},
+  title  = {Secure Transformer Inference Made Non-interactive ({NEXUS})},
+  note   = {non-interactive RNS-CKKS. TODO: verify authors, venue (CCS 2024?), year, arXiv/DOI},
+  year   = {2024}
+}
+
+@misc{cipherformer,
+  author = {Wang, Weize and others},
+  title  = {{CipherFormer}: Efficient Transformer Private Inference with Low Round Complexity},
+  note   = {[verified-EdgeQuake] FHE encoder, small classifiers. TODO: verify venue, year, arXiv/DOI},
+  year   = {2024}
+}
+
+% ====== Cryptographic — retrieval / storage (§3.3) ==========================
+
+@misc{p2rag,
+  author = {Ming and others},
+  title  = {Privacy-Preserving Retrieval-Augmented Generation with Secret Sharing},
+  note   = {p\textsuperscript{2}RAG; 2-server SS, arbitrary top-k. TODO: verify authors,
+            exact title, venue, year (doc cites arXiv 2603.14778)},
+  year   = {2026}
+}
+
+@misc{panther,
+  author = {Li and others},
+  title  = {{Panther}: Private Approximate Nearest Neighbor Search via Hybrid Protocols},
+  note   = {single-server ANN: PIR+SS+GC+HE. TODO: verify authors, exact title, venue (CCS 2025?), year},
+  year   = {2025}
+}
+
+@misc{pirrag,
+  author = {Wang and others},
+  title  = {{PIR-RAG}: Private Retrieval-Augmented Generation via Private Information Retrieval},
+  note   = {classical PIR into dense RAG. TODO: verify authors, exact title, venue, year},
+  year   = {2025}
+}
+
+@misc{pacmann,
+  author = {Zhou, Mingxun and Shi, Elaine and Fanti, Giulia},
+  title  = {{PACMANN}: Efficient Private Approximate Nearest Neighbor Search},
+  note   = {[verified-EdgeQuake] client-side graph-ANN traversal via batched PIR; crypto-only.
+            TODO: verify venue (ICLR 2025), year, id (doc cites ePrint 2024/1600)},
+  year   = {2025}
+}
+
+@misc{xormm,
+  author = {Patel and others},
+  title  = {Efficient Volume-Hiding Encrypted Multi-Maps with Optimal Overhead ({XorMM})},
+  note   = {non-lossy volume-hiding EMM; LightRAG adjacency/source-id leak fix.
+            TODO: verify authors, exact title, venue (CCS 2022?), year},
+  year   = {2022}
+}
+
+@misc{flash_emm,
+  author = {{FLASH authors}},
+  title  = {{FLASH}: Conjunctive Volume-Hiding Encrypted Multi-Maps},
+  note   = {conjunctive volume-hiding EMM (metadata-filtered adjacency).
+            TODO: verify authors, exact title, venue (IEEE TDSC 2024?), year},
+  year   = {2024}
+}
+
+@misc{pegraph,
+  author = {{PeGraph authors}},
+  title  = {{PeGraph}: Privacy-Preserving Encrypted Graph Search},
+  note   = {encrypted graph search: fuzzy + ranked + neighborhood at scale.
+            TODO: verify authors, exact title, venue (IEEE TIFS 2022?), year},
+  year   = {2022}
+}
+
+@misc{goram,
+  author = {Fan and others},
+  title  = {{GORAM}: Graph-oriented {ORAM} for Efficient Ego-centric Queries on Federated Graphs},
+  note   = {3PC sqrt-ORAM ego-graph queries; heavier-trust federated reserve.
+            TODO: verify authors, exact title, venue (PVLDB 2025?), year (doc cites arXiv 2410.02234)},
+  year   = {2025}
+}
+
+% ====== FHE / HE — retrieval / storage ======================================
+
+@misc{ragtime_piano,
+  author = {{RAGtime-PIANO authors}},
+  title  = {Fully Homomorphic Retrieval-Augmented Generation},
+  note   = {CKKS cluster + lattice PIR; "first fully secure RAG". TODO: verify authors,
+            exact title, venue, year (doc cites ePrint 2026/231)},
+  year   = {2026}
+}
+
+@misc{zhu_compass,
+  author = {Zhu, Jinhao and others},
+  title  = {{Compass}: Encrypted Semantic Search with High Accuracy},
+  note   = {[verified-EdgeQuake] encrypted HNSW + graph-traversal-tailored ORAM; sub-second LAN.
+            TODO: verify venue (OSDI 2025), year, id (doc cites ePrint 2024/1255)},
+  year   = {2025}
+}
+
+@misc{grass,
+  author = {Kim and others},
+  title  = {{GraSS}: Graph-based Similarity Search over Encrypted Data},
+  note   = {FHE graph-based ANN. TODO: verify authors, exact title, venue (EuroS\&P?), year
+            (doc cites ePrint 2024/2012)},
+  year   = {2025}
+}
+
+@misc{trse,
+  author = {Yu and others},
+  title  = {Toward Secure Multikeyword Top-k Retrieval over Encrypted Cloud Data ({TRSE})},
+  note   = {2-round SE + HE scoring. TODO: verify authors, venue (IEEE TDSC 2013?), year},
+  year   = {2013}
+}
+
+@misc{fuchsbauer_sap,
+  author = {Fuchsbauer, Georg and others},
+  title  = {Approximate Distance-Comparison-Preserving Symmetric Encryption},
+  note   = {[verified-EdgeQuake] Scale-and-Perturb (SAP/ADCPE); parent of CAPRISE; IronCore Cloaked AI.
+            TODO: verify venue (SCN 2022?), year, id},
+  year   = {2022}
+}
+
+@misc{ye_caprise,
+  author = {Ye, Huanyi and others},
+  title  = {Efficient Privacy-Preserving Retrieval-Augmented Generation with Distance-Preserving Encryption},
+  note   = {[verified-EdgeQuake] CAPRISE; conditional distance-preserving enc for RAG; builds on SAP.
+            TODO: verify venue, year, arXiv/DOI},
+  year   = {2026}
+}
+
+% ====== Trusted Execution Environments (§4 baseline) ========================
+
+@misc{kaviani_opal,
+  author = {Kaviani, Darya and others},
+  title  = {{Opal}: Private Memory for Personal {AI}},
+  note   = {[verified-EdgeQuake] malicious-host TEE (TDX+B200) + ORAM; in-enclave KG+ANN.
+            TODO: verify venue, year, id (doc cites arXiv 2604.02522)},
+  year   = {2026}
+}
+
+@misc{pipellm,
+  author = {{PipeLLM authors}},
+  title  = {{PipeLLM}: Pipelined Confidential {LLM} Inference on {GPU} {TEE}s},
+  note   = {pipelined PCIe-AES; <19.6\% overhead. TODO: verify authors, exact title,
+            venue (ASPLOS 2025?), year (doc cites arXiv 2411.03357)},
+  year   = {2025}
+}
+
+@misc{h2o2ram,
+  author = {{H2O2RAM authors}},
+  title  = {{H$_2$O$_2$RAM}: High-Performance Doubly Oblivious {RAM}},
+  note   = {doubly-oblivious RAM in TEE; ~1000x vs prior O2RAM; Opal-style substrate.
+            TODO: verify authors, exact title, venue, year (doc cites arXiv 2409.07167)},
+  year   = {2024}
+}
+
+@misc{h100cc,
+  author = {{NVIDIA and others}},
+  title  = {Confidential Computing on {NVIDIA} {H100} {GPU}s: Performance Characterization},
+  note   = {whole-GPU enclave, PCIe AES-GCM; 4--8\% overhead; CC-GPU baseline.
+            TODO: verify authors, exact title, venue, year (doc cites arXiv 2509.18886 / 2409.03992)},
+  year   = {2025}
+}
+
+% ====== Static Obfuscation (§5) =============================================
 
 @misc{lin_aloepri,
   author = {Lin, Yu and others},
   title  = {Towards Privacy-Preserving {LLM} Inference via Covariant Obfuscation},
-  note   = {AloePri. TODO: verify year, venue, arXiv/DOI},
+  note   = {[verified-EdgeQuake] AloePri; covariant (data+weight) obfuscation. TODO: verify venue,
+            year, arXiv/DOI},
   year   = {2025}
 }
 
+@misc{lin_collaborative_obfusc,
+  author = {Lin, Yu and others},
+  title  = {Collaborative Obfuscation for Privacy-Preserving {LLM} Inference},
+  note   = {dynamic covariance-structured masks. TODO: verify authors, exact title, venue,
+            year (doc cites arXiv 2603.01499)},
+  year   = {2026}
+}
+
+@misc{roberts_sgt,
+  author = {Roberts, Jay and others},
+  title  = {Learning Obfuscations of {LLM} Embedding Sequences: Stained Glass Transform},
+  note   = {[verified-EdgeQuake] SGT; input-conditioned learned affine/Gaussian obfuscation (Protopia).
+            TODO: verify venue, year, arXiv/DOI},
+  year   = {2025}
+}
+
+@misc{cao_osnip,
+  author = {Cao, Zhiyuan and others},
+  title  = {{OSNIP}: Breaking the Privacy-Utility-Efficiency Trilemma in {LLM} Inference via
+            Obfuscated Semantic Null Space},
+  note   = {[verified-EdgeQuake] null-space projection; KNN-attack 0.000. TODO: verify venue, year, arXiv/DOI},
+  year   = {2026}
+}
+
+@misc{eguard,
+  author = {{Eguard authors}},
+  title  = {{Eguard}: Defending Embedding Inversion with Mutual-Information Regularization},
+  note   = {RoBERTa projector, MI-loss vs Vec2Text. TODO: verify authors, exact title, venue,
+            year (doc cites arXiv 2411.05034)},
+  year   = {2024}
+}
+
+@misc{ning_arog,
+  author = {Ning, Yunfeng and others},
+  title  = {Privacy-protected Retrieval-Augmented Generation for Knowledge Graph Question Answering},
+  note   = {[verified-EdgeQuake] ARoG; KGQA anonymization (entity to machine IDs). TODO: verify venue,
+            year, id (doc cites arXiv 2508.08785)},
+  year   = {2025}
+}
+
+@misc{stip,
+  author = {{STIP authors}},
+  title  = {Secure Transformer Inference Protocol ({STIP})},
+  note   = {3-party static-permutation obfuscation; collapses for open-source weights
+            (cautionary lineage). TODO: verify authors, year, venue},
+  year   = {2024}
+}
+
+@misc{translinkguard,
+  author = {{TransLinkGuard authors}},
+  title  = {{TransLinkGuard}: Hardening Edge Deployment against Model Stealing via Static-Key Obfuscation},
+  note   = {static-key weight obfuscation; cited-as-broken lineage (TSQP/ArrowMatch).
+            TODO: verify authors, exact title, venue (ACM MM 2024?), year},
+  year   = {2024}
+}
+
+% ====== Differential Privacy (§6) ===========================================
+
+@misc{du_dpforward,
+  author = {Du, Minxin and others},
+  title  = {{DP-Forward}: Fine-tuning and Inference on Language Models with Differential
+            Privacy in Forward Pass},
+  note   = {[verified-EdgeQuake] matrix-Gaussian forward-pass (eps,delta)-SeqLDP. TODO: verify
+            venue (CCS 2023?), year, arXiv/DOI},
+  year   = {2023}
+}
+
+@misc{cheng2025remoterag,
+  author = {Cheng, Yihang and others},
+  title  = {{RemoteRAG}: A Privacy-Preserving {LLM} Cloud {RAG} Service},
+  note   = {[verified-EdgeQuake] (n,eps)-DistanceDP + PHE rerank. TODO: verify venue (ACL Findings 2025?),
+            year, arXiv/DOI},
+  year   = {2025}
+}
+
+@misc{sparse_dp,
+  author = {{SPARSE authors}},
+  title  = {{SPARSE}: Concept-Masked Metric Differential Privacy for {LLM} Embeddings},
+  note   = {concept mask + Mahalanobis-Laplace metric-DP. TODO: verify authors, exact title,
+            venue (ICLR 2026?), year (doc cites arXiv 2602.07090)},
+  year   = {2026}
+}
+
+@misc{tang_dprag,
+  author = {Tang and Flemings and Wang and Annavaram},
+  title  = {{DP-RAG}: Differentially Private Retrieval-Augmented Generation},
+  note   = {DP-KSA: output-side DP (propose-test-release); backend-agnostic. TODO: verify
+            full authors, exact title, venue, year (doc cites arXiv 2602.14374, USC)},
+  year   = {2026}
+}
+
+% ====== Hybrid Split: TEE + Obfuscation (§7 protagonist) ====================
+
 @misc{belikov_gelo,
   author = {Belikov, Anatoly and others},
-  title  = {Good-Enough {LLM} Obfuscation},
-  note   = {GELO. TODO: verify author surname (Belikov vs Belikova in design doc),
-            year, venue, arXiv/DOI},
+  title  = {Good-Enough {LLM} Obfuscation ({GELO})},
+  note   = {[verified-EdgeQuake] per-batch mask, TEE non-linears; companion-paper substrate.
+            TODO: verify co-authors, venue, year, arXiv/DOI},
   year   = {2026}
 }
 
@@ -29,70 +351,9 @@
   author = {Xue, Jiaqi and others},
   title  = {Securing Transformer-based {AI} Execution via Unified {TEE}s and
             Crypto-protected Accelerators},
-  note   = {TwinShield. TODO: verify year, venue, arXiv/DOI},
+  note   = {[verified-EdgeQuake] TwinShield; masking + SS + U-Verify integrity. TODO: verify venue,
+            year, id (doc cites arXiv 2507.03278)},
   year   = {2025}
-}
-
-@misc{ye_caprise,
-  author = {Ye, Huanyi and others},
-  title  = {Efficient Privacy-Preserving Retrieval Augmented Generation with
-            Distance-Preserving Encryption},
-  note   = {Caprise / prRAG. TODO: verify year, venue, arXiv/DOI},
-  year   = {2026}
-}
-
-@misc{zhu_compass,
-  author = {Zhu, Jinhao and others},
-  title  = {Compass: Encrypted Semantic Search with High Accuracy},
-  note   = {TODO: verify year, venue, arXiv/DOI},
-  year   = {2025}
-}
-
-% ---- Motivating / attack-origin references (cited in skeletons) ------------
-
-@inproceedings{morris2023vec2text,
-  author    = {Morris, John X. and others},
-  title     = {Text Embeddings Reveal (Almost) As Much As Text},
-  booktitle = {EMNLP},
-  year      = {2023},
-  note      = {Vec2Text. TODO: verify full author list, pages}
-}
-
-@inproceedings{kellaris2016leakage,
-  author    = {Kellaris, Georgios and Kollios, George and Nissim, Kobbi and
-               O'Neill, Adam},
-  title     = {Generic Attacks on Secure Outsourced Databases},
-  booktitle = {ACM CCS},
-  year      = {2016},
-  note      = {Access-pattern + volume leakage. TODO: verify pages}
-}
-
-@misc{cheng2025remoterag,
-  author = {Cheng and others},
-  title  = {{RemoteRAG}: Privacy-Preserving {RAG} with Distance-Based Differential Privacy},
-  note   = {DistanceDP query perturbation. TODO: verify authors, year, venue},
-  year   = {2025}
-}
-
-@inproceedings{bodea_sok,
-  author    = {Bodea, Andreea-Elena and Meisenbacher, Stephen and
-               Klymenko, Alexandra and Matthes, Florian},
-  title     = {{SoK}: Privacy Risks and Mitigations in Retrieval-Augmented
-               Generation Systems},
-  booktitle = {(unverified venue)},
-  note      = {Technical University of Munich. SLR of 72 papers; risk taxonomy
-               + RAG Privacy Process Diagram; naive-RAG scope.
-               Repo: github.com/sebischair/SoK-RAG-Privacy.
-               TODO: verify year, venue, arXiv/DOI},
-  year      = {2025}
-}
-
-@misc{kaviani_opal,
-  author = {Kaviani, Darya and others},
-  title  = {Opal: Private Memory for Personal {AI}},
-  note   = {Malicious-host TEE + ORAM; access-pattern hiding; formal
-            indistinguishability game. TODO: verify year, venue, arXiv/DOI},
-  year   = {2026}
 }
 
 @misc{frikha_obfuscatune,
@@ -100,32 +361,223 @@
             Nakka, Krishna Kanth and Jiang, Xue and Zhou, Xuebing},
   title  = {{ObfuscaTune}: Obfuscated Offsite Finetuning and Inference of
             Proprietary {LLM}s on Private Datasets},
-  note   = {Huawei Munich Research Center. ~5\% of params in TEE. TODO: verify
-            venue, arXiv/DOI},
+  note   = {[verified-EdgeQuake] GPU runs obfuscated activations; ~5\% params in TEE. TODO: verify
+            venue, year, arXiv/DOI},
+  year   = {2024}
+}
+
+@misc{secureinfer,
+  author = {{SecureInfer authors}},
+  title  = {{SecureInfer}: Heterogeneous {TEE}-{GPU} Split Inference via {XOR}-{OTP}},
+  note   = {XOR-OTP heterogeneous split. TODO: verify authors, exact title, venue, year
+            (doc cites arXiv 2510.19979)},
   year   = {2025}
 }
 
-@misc{permllm,
-  author = {Zheng and others},
-  title  = {{PermLLM}: Private {LLM} Inference with Secret Sharing and Permutation},
-  note   = {3-party hybrid-MPC; secret sharing for linear layers, permutation for
-            non-linears; secure for open-source models. TODO: verify authors,
-            title, year, venue},
+@misc{zeng_scx,
+  author = {Zeng, Liekang and others},
+  title  = {{SCX}: Stateless {KV}-Cache Encoding for Cloud-Scale Confidential Transformer Serving},
+  note   = {[verified-EdgeQuake] per-session one-time-key; (eps,0)-DP. TODO: verify venue (SIGCOMM 2025?),
+            year, arXiv/DOI},
+  year   = {2025}
+}
+
+@misc{amulet,
+  author = {{Amulet authors}},
+  title  = {{Amulet}: Per-round Fresh Invertible Masking for Confidential Transformer Inference},
+  note   = {per-round fresh invertible masks all layers. TODO: verify authors, exact title,
+            venue, year (doc cites arXiv 2512.07495)},
+  year   = {2025}
+}
+
+@misc{toges,
+  author = {Kane and Bkakria},
+  title  = {{TOGES}: Toward Oblivious Graph Encryption for Secure Shortest-path Search},
+  note   = {graph enc, Path-ORAM position-map in SGX. TODO: verify authors, exact title,
+            venue (LNCS 2024?), year (doc cites arXiv 2405.19259)},
   year   = {2024}
 }
 
-@misc{petridish_li,
-  author = {Li and others},
-  title  = {Petridish: Confidential {LLM} Serving on Confidential {VM}s},
-  note   = {CVM architecture; Secure Partitioned Decoding. TODO: verify authors,
-            exact title, year, arXiv id (design doc cites arXiv:2409.19134)},
+@misc{tan_privgemo,
+  author = {Tan and others},
+  title  = {{PrivGemo}: Privacy-Preserving Knowledge-Graph {RAG} via Dual-Tower Anonymization},
+  note   = {dual-tower KG-RAG, HMAC session anonymization; graph-RAG defense. TODO: verify
+            authors, exact title, venue, year (doc cites arXiv 2601.08739)},
+  year   = {2026}
+}
+
+@misc{portcullis,
+  author = {{Portcullis authors}},
+  title  = {{Portcullis}: A {TEE}-Attested {PII}-Anonymization Gateway for Cloud {LLM}s},
+  note   = {TEE-attested PII-anonymization before cloud LLM; 96x vs Hide-and-Seek.
+            TODO: verify authors, exact title, venue (AAAI 2025?), year},
+  year   = {2025}
+}
+
+% ====== Targeted / Composable Verification (cross-cut; §7-corpus, ms §8) =====
+
+@misc{qiu_v3db,
+  author = {Qiu, Zipeng and others},
+  title  = {{V3DB}: Audit-on-Demand Zero-Knowledge Proofs for Verifiable Vector Search
+            over Committed Snapshots},
+  note   = {[verified-EdgeQuake] ZK that top-k matches the committed encrypted index. TODO: verify
+            venue, year, arXiv/DOI},
+  year   = {2026}
+}
+
+@misc{annproof,
+  author = {{ANNProof authors}},
+  title  = {Verifiable Outsourced Approximate Nearest Neighbor Search},
+  note   = {authenticated data structure (blockchain); ms-level VO. TODO: verify authors,
+            exact title, venue (FGCS 2024?), year},
   year   = {2024}
 }
 
-@misc{stip,
-  author = {{STIP authors}},
-  title  = {Secure Transformer Inference Protocol ({STIP})},
-  note   = {3-party static-permutation obfuscation; security collapses for
-            open-source weights. TODO: verify authors, year, venue},
+@misc{zkgraph,
+  author = {Wu and others},
+  title  = {{ZKGraph}: Zero-Knowledge Verifiable Graph Query Evaluation},
+  note   = {PLONKish ZK proof of graph-traversal correctness vs committed snapshot;
+            research-stage (no perf nums). TODO: verify authors, exact title, venue,
+            year (doc cites arXiv 2507.00427)},
+  year   = {2025}
+}
+
+@misc{zkifv,
+  author = {{ZKIFV authors}},
+  title  = {Zero-Knowledge Verifiable Inverted-File Search},
+  note   = {ZK proof of keyword/inverted-index search correctness+completeness.
+            TODO: verify authors, exact title, venue, year, identifier},
+  year   = {2025}
+}
+
+@misc{anchuri_proofs,
+  author = {Anchuri and others},
+  title  = {Lightweight Proofs of Inference via Random Path Opening},
+  note   = {samples random output-to-input paths; trades soundness for speed; composable.
+            TODO: verify authors, exact title, venue, year (doc cites arXiv 2603.19025)},
+  year   = {2026}
+}
+
+% ====== Attacks (§2 / §5 / §8 — the threat side) ============================
+
+@inproceedings{morris2023vec2text,
+  author    = {Morris, John X. and others},
+  title     = {Text Embeddings Reveal (Almost) As Much As Text},
+  booktitle = {EMNLP},
+  year      = {2023},
+  note      = {Vec2Text; canonical inversion bar (~92\% token recovery). TODO: verify pages}
+}
+
+@misc{lin_inversion,
+  author = {Lin, Yu and others},
+  title  = {An Inversion Attack Against Obfuscated Embedding Matrix in Language Model Inference},
+  note   = {[verified-EdgeQuake] ~100\% recovery from glide-reflection obfuscation; substantiates
+            "static obfuscation breaks". TODO: verify venue, year, id (doc cites arXiv 2411.05034)},
   year   = {2024}
+}
+
+@inproceedings{kellaris2016leakage,
+  author    = {Kellaris, Georgios and Kollios, George and Nissim, Kobbi and O'Neill, Adam},
+  title     = {Generic Attacks on Secure Outsourced Databases},
+  booktitle = {ACM CCS},
+  year      = {2016},
+  note      = {access-pattern + volume leakage. TODO: verify pages}
+}
+
+@misc{depth_false_privacy,
+  author = {{Depth-False-Privacy authors}},
+  title  = {Depth Gives a False Sense of Privacy: {LLM} Internal States Inversion},
+  note   = {adaptive inverter recovers from deeper layers; undercuts layer-skip/sensitive-layer
+            exclusion. TODO: verify authors, exact title, venue, year (doc cites arXiv 2507.16372)},
+  year   = {2025}
+}
+
+@misc{hnm,
+  author = {Thomas and others},
+  title  = {Hidden No More: Attacking and Defending Private Third-Party {LLM} Inference},
+  note   = {99\% recovery; broke STIP/PermLLM/Centaur. TODO: verify authors, exact title,
+            venue (ICML 2025?), year (doc cites arXiv 2505.18332)},
+  year   = {2025}
+}
+
+@misc{arrowmatch,
+  author = {Wang, Pengli and others},
+  title  = {Game of Arrows: Recovering Obfuscated Weights via Direction Similarity ({ArrowMatch})},
+  note   = {>98\% weight recovery. TODO: verify authors, exact title, venue (USENIX Sec 2025?),
+            year (doc cites arXiv 2602.11088)},
+  year   = {2025}
+}
+
+@misc{tsqp,
+  author = {{TSQP authors}},
+  title  = {{TSQP}: Recovering Statically-Obfuscated Transformer Layers},
+  note   = {recovers Llama-3-8B layer in ~6 min. TODO: verify authors, exact title, venue,
+            year (doc cites arXiv 2602.11088)},
+  year   = {2026}
+}
+
+@misc{graphrag_extraction,
+  author = {Liu and others},
+  title  = {Exposing Privacy Risks in Graph Retrieval-Augmented Generation},
+  note   = {black-box entity-listing extraction. TODO: verify authors, exact title, venue,
+            year (doc cites arXiv 2508.17222)},
+  year   = {2025}
+}
+
+@misc{agea,
+  author = {Yang and others},
+  title  = {{AGEA}: Agentic Graph Extraction Attack on Graph-{RAG}},
+  note   = {agentic graph reconstruction under budget; 96\% node recovery @1000 queries.
+            TODO: verify authors, exact title, venue, year (doc cites arXiv 2601.14662)},
+  year   = {2026}
+}
+
+@misc{gragpoison,
+  author = {Liang and others},
+  title  = {{GRAGPOISON}: Targeted-Relation Corpus Poisoning of Graph-{RAG}},
+  note   = {TODO: verify authors, exact title, venue, year (doc cites arXiv 2501.14050)},
+  year   = {2025}
+}
+
+@misc{logicpoison,
+  author = {Xiao and others},
+  title  = {{LogicPoison}: Zero-Token Cyclic Entity-Swap Poisoning of Graph-{RAG}},
+  note   = {TODO: verify authors, exact title, venue (ACL 2026?), year (doc cites arXiv 2604.02954)},
+  year   = {2026}
+}
+
+@misc{linkteller,
+  author = {Wu, Fan and others},
+  title  = {{LinkTeller}: Recovering Private Edges from Graph Neural Networks via Influence Analysis},
+  note   = {edge inference, defeats DP-GCN at eps>5. TODO: verify authors, venue (S\&P 2022?), year},
+  year   = {2022}
+}
+
+% ====== Surveys / SoKs (positioning, §9) ====================================
+
+@misc{bodea_sok,
+  author = {Bodea, Andreea-Elena and Meisenbacher, Stephen and
+            Klymenko, Alexandra and Matthes, Florian},
+  title  = {{SoK}: Privacy Risks and Mitigations in Retrieval-Augmented Generation Systems},
+  note   = {[verified-EdgeQuake] TUM. SLR of 72 papers; risk taxonomy; naive-RAG scope; no perf axis;
+            excludes graph-RAG. Repo: github.com/sebischair/SoK-RAG-Privacy.
+            TODO: verify venue, year, arXiv/DOI},
+  year   = {2025}
+}
+
+@misc{mu_securerag,
+  author = {Mu and others},
+  title  = {Towards Secure Retrieval-Augmented Generation},
+  note   = {flags reranking privacy underdeveloped. TODO: verify authors, exact title, venue, year},
+  year   = {2026}
+}
+
+% ====== System baselines (cited as plaintext RAG referents) =================
+
+@misc{guo_lightrag,
+  author = {Guo, Zirui and others},
+  title  = {{LightRAG}: Simple and Fast Retrieval-Augmented Generation},
+  note   = {[verified-EdgeQuake] graph-augmented RAG; the graph-RAG referent. TODO: verify venue
+            (EMNLP 2025?), year, id (doc cites arXiv 2410.05779)},
+  year   = {2025}
 }

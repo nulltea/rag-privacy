@@ -17,6 +17,16 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
    confidential GPUs (NVIDIA H100/B200 CC). Pure-TEE-on-CC-GPU is kept only as the
    performance/trust **baseline** (§3); the protagonist family is **hybrid split**
    (CPU-TEE + any GPU, §6).
+3. **Graph-RAG selection re-balanced to LightRAG's actual retrieval surface** (2026-06-02,
+   grounded in `../docs/dev/prototype/private-graph-rag-design.md`, a direct read of the
+   LightRAG implementation). LightRAG retrieval = entity/relation/chunk ANN + **one-hop** edge
+   expansion + `source_id` fan-out; **no multi-hop BFS, no GNN message-passing**. So the kept
+   graph-RAG set covers those ops across trust tiers — ANN: Compass (TEE) / Pacmann (crypto) /
+   CAPRISE+DistanceDP (light); adjacency/multimap (the LightRAG-specific volume leak):
+   XorMM/FLASH + H₂O₂RAM; graph store: TOGES/Opal/PeGraph; integrity: ZKGraph (§7);
+   output-layer defense: PrivGemo/ARoG/DP-KSA. **GORAM** kept as the heavier-trust (3PC)
+   federated/multi-silo reserve. **Demoted to mention-only** (off-target): secure GNN inference
+   (CryptGNN, OblivGNN) and secure graph-analytics/SGA (Graphiti, GraphSC, MPC PageRank/clustering).
 
 - ★ = full-text indexed in the EdgeQuake corpus (24 papers).
 - **Cover** column: `[ ]` = undecided → mark `[x]` to include in the ~40–50
@@ -40,6 +50,7 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 |:---:|---|---|---|---|---|---|
 | [x] | PermLLM ★ | Zheng et al. 2024, NeurIPS | generate | HbC/3-party | 3s/tok (6B WAN) | A-SS + permutation triples; broken by Hidden-No-More |
 | [x] | SecFormer ★ | 2024, ACL | embed,generate | HbC/MPC | 71s (BERT-base); 3.6× vs PUMA | 2Quad + Goldschmidt + Fourier-GELU |
+| [x] | SHAFT | 2025, NDSS (ePrint 2025/2324) | embed,generate | HbC/2PC | best WAN (BERT-base) | first constant-round softmax; Fourier GELU |
 | [x] | CryptoMoE ★ | Zhou et al. 2026 | generate | HbC/MPC | 2.8–3.5× vs dense MoE | balanced-expert-routing private MoE |
 | [ ] | PUMA | 2023 (2307.12533) | embed,generate | HbC/3PC | ~200s/tok (7B); proto-design | polynomial softmax/GELU |
 | [ ] | BOLT | 2024, S&P | embed,generate | HbC/2PC | min-scale (BERT); token-prune | HE+ASS, Remez softmax |
@@ -55,10 +66,15 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [x] | p²RAG ★(?) | Ming et al. 2026 (2603.14778) | retrieve,rerank | HbC/2-server | 3–300× vs PRAG | SS, arbitrary top-k |
 | [ ] | SANNS | Chen et al. 2019/20, USENIX Sec | retrieve,rerank | HbC/2-server | 4.2s LAN @10M (clustering) | k-NN, LHE+ORAM+GC |
 | [x] | Panther ★? | Li et al. 2025, CCS | retrieve,rerank | HbC/1-server | 18s @10M | ANN: PIR+SS+GC+HE (hybrid) |
+| [x] | Pacmann ★ | Zhou et al. 2025, ICLR (ePrint 2024/1600) | retrieve,gt | HbC/1-server (PIR) | 90% ANN quality; −22% lat @100M | client-side graph-ANN traversal via batched PIR; crypto-only, no HW trust; **graph-RAG crypto tier** |
 | [x] | PIR-RAG | Wang et al. 2025 | retrieve | HbC/PIR | 16.8s @5K | classical PIR into dense RAG |
 | [ ] | Hiding Your Awful Online Choices | Mukherjee et al. 2024 | retrieve | HbC/MPC | 100M entries | HE+MPC secure k-NN |
-| [ ] | GORAM | Fan et al. 2025, PVLDB (2410.02234) | retrieve,gt | HbC/3PC | billion-edge | sqrt-ORAM ego-graph queries |
-| [ ] | Graphiti | Koti et al. 2024, CCS | gc,gt | HbC/MPC | size-indep rounds | MPC graph SGA |
+| [x] | XorMM | Patel et al. 2022, CCS | retrieve,gt | HbC/none (SSE) | 1.5–2× storage; optimal comm | non-lossy volume-hiding EMM; **direct fit for LightRAG adjacency/source\_id leak** |
+| [x] | FLASH | 2024, IEEE TDSC | retrieve,gt | HbC/none (SSE) | 2–3× storage | conjunctive volume-hiding EMM (metadata-filtered adjacency) |
+| [ ] | Veil | 2023, SIGMOD | retrieve,gt | HbC/none (SSE) | 1.2–1.8× storage (tunable) | overlapping-bucket volume-hiding EMM (mention; XorMM/FLASH preferred) |
+| [x] | PeGraph | 2022, IEEE TIFS | store,retrieve,gt | HbC/none (SSE+SS) | <1s/query @multi-M | encrypted (social-)graph search: fuzzy + ranked + neighborhood queries at scale |
+| [x] | GORAM | Fan et al. 2025, PVLDB (2410.02234) | retrieve,gt | HbC/3PC | billion-edge | sqrt-ORAM ego-graph queries; **heavier-trust (3PC) federated/multi-silo reserve, not single-tenant default** |
+| [ ] | Graphiti | Koti et al. 2024, CCS | gc,gt | HbC/MPC | size-indep rounds | MPC graph SGA (graph *analytics*, off-target for LightRAG 1-hop retrieval → foundational/lineage) |
 | [ ] | swanky | Galois Inc | — | — | — | Rust OT/GC/ZK/VOLE MPC toolkit (tooling) |
 
 ## 2. Cryptographic — FHE / HE
@@ -95,6 +111,7 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [x] | PipeLLM | 2025, ASPLOS (2411.03357) | generate | HbC/GPU-TEE | <19.6% | pipelined PCIe-AES |
 | [ ] | Oblix | Mishra et al. 2018, S&P | retrieve,rerank | HbC/SGX+ORAM | 4.5–6.5× vs ZeroTrace | doubly-oblivious search index |
 | [ ] | Snoopy | Dauterman et al. 2021, SOSP | store,retrieve | HbC/TEE-obliv | 13.7× vs Obladi | scalable oblivious object store |
+| [x] | H₂O₂RAM | 2024 (2409.07167) | store,retrieve,gt | HbC/TEE (doubly-obliv) | ~1000× vs prior O₂RAM; 5–44× less mem | doubly-oblivious RAM in TEE; **drop-in substrate under Opal-style graph-RAG** |
 | [x] | H100 CC baseline | (2509.18886 / 2409.03992) | embed,generate | HbC/GPU-TEE | 4–8% | whole-GPU enclave, PCIe AES-GCM |
 | [ ] | CC-GPU perf studies | (2505.16501; ACM Queue 2024; 2507.02770) | e2e | — | varies | confidential-GPU measurement studies |
 
@@ -105,6 +122,7 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [x] | AloePri ★ | Lin et al. (ByteDance) | embed,generate | HbC/none (wb+scheme) | ~0% (near-plaintext) | covariant (data+weight) obfusc; **the vignette target** |
 | [x] | Collaborative Obfuscation | Lin et al. 2026 (2603.01499) | generate | HbC/none | near-plaintext | dynamic covariance-structured masks |
 | [ ] | STIP | — | generate | HbC/3-party | near-plaintext | static permutation; breaks for open weights |
+| [ ] | TransLinkGuard | 2024, ACM MM | generate | HbC/none (static-key) | near-plaintext | static-key weight obfusc; cited-as-broken lineage (TSQP/ArrowMatch) — prose, not comparison |
 | [x] | SGT / Stained Glass ★ | Protopia 2025 | embed | HbC/none | ~0ms; −0.4% util | input-conditioned learned affine/Gaussian obfusc |
 | [x] | OSNIP ★ | Cao et al. 2026 | embed | HbC/none | 0.96ms | null-space projection; KNN-attack 0.000 |
 | [ ] | TextObfuscator | Zhou et al. 2023, ACL Findings | embed | HbC/none | ~0; −1pp util | cluster-prototype token substitution |
@@ -125,7 +143,8 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [ ] | JL + Gaussian | Blocki et al. (1204.2606) | embed | HbC/none | ~0; (1±ε) dist | random proj + noise, (ε,δ)-DP |
 | [ ] | ReuseKNN | Müllner et al. 2023, ACM TOIST | retrieve | HbC/none | 17s @100M (Netflix) | DP KNN recommender, fixed-neighbour reuse |
 | [ ] | P-NGDB | Hu et al. 2024, KDD | retrieve,gt | HbC/none | no runtime; −92% private MRR | adversarial-loss obfusc for neural graph DBs |
-| [ ] | DP-RAG / DP-SGD | — | retrieve | HbC/none | ? | ε-DP retrieval / training baselines |
+| [x] | DP-RAG / DP-KSA | Tang et al. 2026 (USC, 2602.14374) | generate,e2e | HbC/none | output-DP (propose-test-release) | DP keyword-sketch+augment; **output-side DP vs extraction; backend-agnostic, orthogonal to retrieval crypto** |
+| [ ] | DP-SGD | — | retrieve | HbC/none | ? | ε-DP training baseline (lineage) |
 
 ## 6. Hybrid Split (TEE + Obfuscation)
 
@@ -139,6 +158,7 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [x] | SCX ★ | 2025, SIGCOMM | generate | HbC/TEE | near-zero online | per-session one-time-key; (ε,0)-DP not OTP |
 | [x] | Amulet | 2025 (2512.07495) | embed,generate | HbC/TEE | 2.8–4.8× vs GPU; 8–9× vs TEE | per-round fresh invertible masks all layers |
 | [ ] | TOGES | Kane & Bkakria 2024, LNCS (2405.19259) | retrieve,gt | HbC/SGX+ORAM | wall-clock n/a (paywalled) | graph enc, Path-ORAM position-map in SGX |
+| [x] | Portcullis | 2025, AAAI | generate,e2e | HbC/TEE | 96× vs Hide-and-Seek | TEE-attested PII-anonymization gateway before cloud LLM |
 | [x] | PrivGemo | Tan et al. 2026 (2601.08739) | retrieve,generate,gt,e2e | HbC/none+anon | no crypto cost (quality only) | dual-tower KG-RAG, HMAC session anonymization; **graph-RAG defense** |
 
 ## 7. Targeted / Composable Verification (lightweight integrity)
@@ -158,6 +178,8 @@ proving overhead is 100×–1000s×.
 |  | **B. Retrieval correctness & completeness** — composes w/ §1–§2 retrieval |  |  |  |  |  |
 | [x] | V3DB ★ | Qiu et al. 2026 | retrieve | Mal/integrity | 22× vs circuit; ms-verify | audit-on-demand ZK that top-k matches the committed (encrypted) index |
 | [x] | ANNProof | BIT 2024, FGCS | retrieve | Mal/integrity | ms-level VO; 160×/120× vs SOTA (gen/verify); VO −28×; +≤2% index-build | verifiable outsourced ANN via authenticated data structure (blockchain) |
+| [x] | ZKGraph | Wu et al. 2025 (2507.00427) | retrieve,gt | Mal/integrity | ZK (no perf nums; research-stage) | PLONKish ZK proof that graph traversal/neighborhood is correct vs committed snapshot; **graph-RAG integrity vs GRAGPOISON/LogicPoison** |
+| [x] | ZKIFV | — | retrieve | Mal/integrity | ZK (no perf nums) | ZK proof of inverted-index/keyword-search correctness+completeness |
 |  | **C. Code / enclave attestation** — composes w/ every §3/§6 TEE scheme |  |  |  |  |  |
 | [x] | Remote attestation / RATLS | TDX DCAP · SEV-SNP · H100 CC | setup | Mal/code-identity | ~0 (one-time) | verifies the *right enclave code/version* runs before trust — identity, not computation |
 |  | **D. Corpus provenance / freshness / anti-rollback** — composes w/ §2 storage+RAG; defends §8 poisoning |  |  |  |  |  |
@@ -186,6 +208,7 @@ proving overhead is 100×–1000s×.
 | [x] | Mohaisen & Hong ICA | 2008 (0906.0202) | rotation/Hadamard mask | ICA attack on single-mask obfusc |
 | [ ] | Precomputed-Noise break | Saini, Jiang, Liu 2026 (2602.11088) | precomputed-basis TEE | breaks precomputed-noise schemes |
 | [ ] | Speculative-Decoding split leak | Cunningham 2026 (2602.16760) | fp16 activations | MLP inversion 59% top-1 (negative result) |
+| [x] | Depth Gives a False Sense of Privacy | 2025 (2507.16372) | deep-layer activations | adaptive inverter recovers from deeper layers; **undercuts sensitive-layer-exclusion / layer-skip defenses** |
 | [ ] | TEE.Fail / WeSee | 2025 / (2404.03526) | TEE/SEV-SNP | CC-eroding side-channel/VMM attacks |
 | [x] | Exposing Privacy Risks in Graph RAG | Liu et al. 2025 (2508.17222) | graph-RAG | black-box entity-listing extraction |
 | [x] | AGEA | Yang et al. 2026 (2601.14662) | graph-RAG | agentic graph reconstruction under budget |
@@ -214,8 +237,11 @@ or obsoleted by descendants — per scope correction #1).
 
 - **MPC/SS:** Iron (2022 — foundational 2PC HE+OT; superseded on comm by BumbleBee/BOLT) ·
   GraphSC (2015 — foundational oblivious SGA; 13h@1M) · Multiple-Millionaires (building
-  block; circuit-depth only) · OblivGNN / Influential-Spreaders / Local-Clustering
-  (graph-MPC niche; no LLM-scale perf).
+  block; circuit-depth only) · **secure graph-analytics / GNN-inference (off-target for
+  LightRAG's 1-hop retrieval — no message-passing, no global SGA): CryptGNN (CCS 2025,
+  secure GNN inference, drops non-colluding-3rd-party) · OblivGNN · Graphiti (MPC SGA) ·
+  Influential-Spreaders / Local-Clustering (MPC PageRank/clustering); cite only if a
+  GNN-reasoner step is added**.
 - **TEE:** Obladi / ZeroTrace / Metal (oblivious-store baselines; superseded by Snoopy) ·
   DarkneTZ (TrustZone CNN-layer shielding; CNN-era) · Goten (needs 2–3 non-colluding TEEs;
   impractical) · **TEESlice** (security *analysis*, not a perf scheme — shows naive
@@ -252,12 +278,12 @@ Lattica · Javelin AI · Corvex (B200).
 
 Comparison-table sizes (after the practical-frontier reclassification):
 
-- Cryptographic (MPC/SS): 22 · (FHE/HE): 20
-- TEE (baseline): 7 · Static obfuscation: 11 · DP: 8 · Hybrid split: 9
-- Targeted verification: 8 (full-ZK inference excluded — separate SoK) · Attacks: ~25 · Surveys/SoK: 7
-- **Foundational/superseded (mention-only): ~16** · Supporting machinery: ~30 · Commercial: ~11
-- **EdgeQuake-indexed (★): 24** | **In-comparison privacy schemes (§1–§7): ~91** |
-  selection target for the SoK: **~40–50 cited**.
+- Cryptographic (MPC/SS): 28 (+SHAFT, Pacmann, XorMM, FLASH, Veil, PeGraph) · (FHE/HE): 20
+- TEE (baseline): 8 (+H₂O₂RAM) · Static obfuscation: 12 (+TransLinkGuard) · DP: 9 (+DP-KSA) · Hybrid split: 10 (+Portcullis)
+- Targeted verification: 10 (+ZKGraph, ZKIFV; full-ZK inference excluded — separate SoK) · Attacks: ~26 (+Depth-False-Privacy) · Surveys/SoK: 7
+- **Foundational/superseded (mention-only): ~18** (graph-analytics/GNN demoted here: CryptGNN, OblivGNN, Graphiti, MPC-PageRank/clustering) · Supporting machinery: ~30 · Commercial: ~11
+- **EdgeQuake-indexed (★): 24** | **In-comparison privacy schemes (§1–§7): ~97** |
+  selection target for the SoK: **~55–57 cited** (was ~45; grill-me #4 added the graph-RAG cluster A + family-completers B + defenses/attacks C).
 
 > Sources: `../docs/research/{private-llm-inference, private-embedding-research,
 > private-reranking-research, private-information-retrieval, fhe-encrypted-vector-db,
