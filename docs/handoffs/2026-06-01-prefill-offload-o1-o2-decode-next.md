@@ -12,21 +12,24 @@ archive_reason: >
   remains the live reference — hence companion, not supersedes.
 ---
 
-# Handoff — prefill offload (2.71×) + decode O4(a)/O5 (~4×); next = O6 / AloePri
+# Handoff — prefill 2.83× + decode ~4×; next = cubek read-index / O6 / AloePri
 
-**One-liner.** Phase-5a perf, largely done. **Prefill** attention offload wired
-into the production path (`decoder_block_batched`, default-off): O1 (SIMD
-convert) + O2 (un-replicated K/V + on-device GQA expand) → **2.71×** (44.1 →
-16.2 s). **Decode** permuted-cover: O4(a) (vectorised `build_covered_prefix`
-perm+σ) + O5 (build the cover at the prefill→decode handoff) → decode attention
-bucket **9.3 → 3.6 s (~4× vs in-TEE), recurring-only, no break-even K**. All
-committed (`a6a17ac`→`b25f0c3`), parity-verified, default-off (security gated on
-AloePri). **Two negative results recorded** (dev-log): the upload-bandwidth
-anomaly micro-levers are deferred, and the **HD₃ structured-orthogonal cover was
-implemented + reverted** (per-`d`-block FWHT loses to BLAS at d=128; needs a
-batched feature-axis FWHT — a deferred spike). **Next:** decode **O6** (fused
-partial-stats kernel) is the only remaining perf lever; otherwise the real
-default-on gate is **AloePri (Phase 5b)**.
+**One-liner.** Phase-5a perf, largely done — all default-off, parity-verified,
+committed (`a6a17ac`→`4499898`). **Prefill** attention offload wired into the
+production path (`decoder_block_batched`, `GELO_GPU_PREFILL_OFFLOAD`): O1 (SIMD
+convert) + O2 (un-replicated K/V + on-device GQA expand) + loop-batching (one
+fold/rotate over B·Hq) + fused `O_vᵀ` → **2.83×** (44.1 → 15.6 s). **Decode**
+permuted-cover: O4(a) (vectorised `build_covered_prefix` perm+σ) + O5 (build the
+cover at the prefill→decode handoff) → decode attention bucket **9.3 → 3.6 s
+(~4× vs in-TEE), recurring-only, no break-even K**. **Three findings recorded
+(dev-log):** HD₃ cover implemented + reverted (per-`d`-block FWHT loses to BLAS
+at d=128); cubek dispatch settled per-sequence via a controlled warm A/B
+(per-seq **1.48× faster** than one big dispatch — a materialised-GQA-expand
+artifact, not "small is better"); O3 upload is `queue.write_buffer` staging,
+alloc/submit-bound. **Next perf levers:** prefill **cubek kv-head read-index**
+(kills the materialised expand → lets the single dispatch win + cuts `cubek_gpu`;
+the biggest remaining prefill upside, touches cubek) and decode **O6** (fused
+partial-stats kernel). The real default-on gate is **AloePri (Phase 5b)**.
 
 The design source of truth is **`docs/dev/logs/perm-attn-gpu-offload.md`** — read
 the *Offload perf-upside* + *Sequencing* sections first. This handoff only
@@ -34,42 +37,48 @@ captures session deltas + what to do next; do not re-derive the plan.
 
 ## What this session did (commits on `dgpu-nvidia-bringup`)
 
-- `a6a17ac` — prefill offload **engine wire-up** + **O1 SIMD convert** + cubek
-  prep **instrumentation** (`CUBEK_PROFILE=1`).
-- `1c84b2e` — **O2**: un-replicated K/V + on-device GQA broadcast.
+- `a6a17ac` — prefill engine **wire-up** + **O1 SIMD convert** + cubek prep
+  **instrumentation** (`CUBEK_PROFILE=1`).
+- `1c84b2e` — **O2**: un-replicated K/V + on-device GQA broadcast (→ 2.71×).
+- `8606bd0` — decode **O4(a)**: vectorised `build_covered_prefix` perm+σ.
+- `03c525a` — rename `create_build`→`build_covered_prefix`; HD₃ negative result.
+- `b25f0c3` — decode **O5**: build the cover at the prefill→decode handoff.
+- `a35e041` — handoff refresh.
+- `4499898` — prefill **loop-batching + fused `O_vᵀ`** (→ 2.83×); cubek dispatch
+  granularity settled (per-seq); O3 probe findings.
 
-New surface (see commits for detail): `cubek_causal_attend` on
-`GpuOffloadEngine` + `TrustedExecutor` (takes un-replicated K/V + `group`);
-`cubek_attention_folded_gqa` (`gelo-gpu-wgpu/src/lib.rs`, burn `repeat_dim`
-expand bridged to cubek's cubecl `TensorHandle` via `into_primitive().tensor()`);
-`forward.rs` prefill branch behind `GELO_GPU_PREFILL_OFFLOAD` (GLOBAL only) +
-helpers `fold_heads_2d`/`unfold_heads_2d` + `gpu_prefill_offload_enabled`.
+Key new surface: `cubek_causal_attend` (un-replicated K/V + `group`) on
+`GpuOffloadEngine`/`TrustedExecutor`; `cubek_attention_folded_gqa`
+(`gelo-gpu-wgpu/src/lib.rs`, burn `repeat_dim` expand bridged to cubek's cubecl
+`TensorHandle` via `into_primitive().tensor()`); `forward.rs` prefill branch
+(`GELO_GPU_PREFILL_OFFLOAD`, GLOBAL only) with uniform-batched fold/rotate +
+`correct_unfold_into` (fused `O_vᵀ`+unfold) + per-seq cubek + ragged fallback;
+`build_covered_prefix_session`/`_all_global` (decode O5). Tests:
+`cover_prefill_matches_in_tee`, `cover_prefill_batched_matches_in_tee`,
+`hd3_cover_roundtrips_and_cancels` (in `forward.rs`), `cubek_dispatch_granularity`
+(in `cubek_prefill_cover.rs`).
 
-**Measured (real engine, Qwen3-4B, B=8, n=2048, RTX 5090/Vulkan, blackbox):**
-prefill attention `tee:attn_inplace_many` 44.1 s (in-TEE) → 23.5 s (O1, 1.88×)
-→ **16.2 s (O1+O2, 2.71×)**. Full per-op table in the dev-log
-(*Prefill offload — real-engine wire-up*).
+**Honest caveats (dev-log):** O1 SIMD convert delivered **~2×, not ~10×**
+(memory-bound); the 15×/35× figures are *compute-only ceilings*, not achievable
+(upload irreducible) — realised prefill win is **2.83×**, decode **~4×**. See
+memory `feedback-ceiling-vs-achievable`.
 
-**Correctness:** `cover_prefill_matches_in_tee` (lib unit test, f32 floor, no GPU)
-+ `cubek_folded_causal_parity` (fp16). Both green.
+## Deferred prefill levers (in rough EV order)
 
-**Two honest caveats (recorded in dev-log):** O1 SIMD convert delivered **~2×,
-not ~10×** (half's F16C path is memory-bound); the 15×/35× "ceiling" numbers are
-*compute-only ceilings*, not achievable (upload is irreducible) — realized win is
-the measured 2.71×. See memory `feedback-ceiling-vs-achievable`.
+1. **cubek kv-head read-index** *(biggest upside, touches cubek)* — broadcast K/V
+   in cubek's loader instead of the materialised `repeat_dim` expand. The
+   controlled A/B (`cubek_dispatch_granularity`) showed the materialised expand
+   makes one big `bh=B·Hq` dispatch 1.48× *slower* than B per-seq ones; the
+   read-index removes that, would let the single batched dispatch win, and cuts
+   `cubek_gpu` (the largest prefill bucket, ~6–9 s). Currently worked around by
+   dispatching cubek per-sequence.
+2. **O3 — upload via pinned/persistent buffers.** Probed: cubecl-wgpu uses
+   `queue.write_buffer` (staging belt); ~1.5 GB/s is **alloc/submit-bound**, not
+   a double-convert. A persistent/pinned operand buffer would help but is a
+   deeper cubecl-side change; un-replication (O2) already captured the easy win.
 
-## Deferred (do NOT pursue now, per this session's scope call)
-
-Remaining prefill micro-levers, in rough EV order if revisited:
-1. **Batch the per-sequence loop** — 288 cubek calls/prefill (36 layers × 8 seq);
-   one fold per layer would drop per-call launch/alloc overhead.
-2. **`O_vᵀ` correction** (`prefill_cover:correct_tee` ≈ 2.6 s) — now the largest
-   in-TEE term; fuse the f16→f32 readback into it, or rotate on-device-adjacent.
-3. **O3 — upload bandwidth probe** — 267 ms / ~400 MB ≈ **1.5 GB/s, ~8× under
-   PCIe5**; likely a staging/non-pinned-copy artifact. If real, un-replication
-   already halved it; if artifact, fixing it dwarfs everything.
-
-These are diminishing returns on a default-off, security-blocked path. Stop here.
+The loop-batching + fused-`O_vᵀ` levers from the prior handoff are **DONE**
+(commit `4499898`).
 
 ## Decode optimizations — O4(a) + O5 DONE; O6 remaining
 
