@@ -37,6 +37,51 @@ never get to matter. **Naive GPU attention is non-viable; viability is
 gated entirely on persistent K/V** — keeping the cache device-resident
 so only the per-step delta moves.
 
+## Threat model — standardized assumptions
+
+These named assumptions are fixed for the whole document; every gate,
+attack, and cover claim below is stated against them. (They replace the
+older "reference-free / reference-equipped" vocabulary, which was
+ambiguous — see the note at the end.)
+
+- **`TEE-TRUST`** — The trust boundary is the SEV-SNP enclave. The TEE holds
+  the plaintext Q/K/V, the secret permutations/rotations and the noise RNG,
+  and performs the un-cover/merge. Everything inside the enclave is trusted.
+- **`GPU-ADV`** — The VFIO-passed GPU is **fully adversarial**. The
+  adversary observes everything the GPU touches: covered operand bytes in
+  VRAM, every intermediate it chooses to compute (it controls the kernel —
+  fused *or* un-fused, so e.g. it can always recompute `Q̃·K̃ᵀ = QKᵀ` from
+  the operands it holds), dispatch shapes/timing, and its own per-step VRAM
+  **write locations**. *Corollary:* a fused kernel is a **performance**
+  boundary, never a confidentiality one — security may never rest on the
+  kernel staying fused.
+- **`WEIGHTS-PUB`** — **(conservative default, DECIDED 2026-05-29.)** The
+  adversary knows the model weights `W_Q/W_K/W_V` and the
+  embedding/unembedding tables (the deployment serves open Qwen3). This
+  turns every rotation-invariant Gram into a *known* bilinear form of the
+  secret hidden states `X` (`K·Kᵀ = X(W_K W_Kᵀ)Xᵀ`, …) — an algebraic
+  anchor for reconstruction. Its negation **`WEIGHTS-BLIND`** (private
+  fine-tune, adversary lacks the weights) is the optimistic case; where a
+  gate's result depends on this axis we **measure both** and report the
+  `WEIGHTS-PUB` number as the bar.
+- **`NO-PLAINTEXT`** — The adversary never possesses the user's plaintext
+  activations or tokens. This is the **definition of the secret**, not an
+  attacker capability: an "attack" that consumes the plaintext is not an
+  attack (it already holds the answer). All attacks in this document
+  operate under `NO-PLAINTEXT` by construction; clean activations may be
+  used **only for offline scoring** of an attack's success.
+
+> **Why the old "reference" vocabulary is gone.** Earlier decode gates
+> labelled attacks "reference-free" vs "reference-equipped," where the
+> "reference" was a *clean copy of the user's activations*. A
+> "reference-equipped" attack therefore violated `NO-PLAINTEXT` — it
+> assumed the secret it was trying to recover — so those results were
+> meaningless under our threat model and are **removed**. The only
+> legitimate side-knowledge axis is `WEIGHTS-PUB` vs `WEIGHTS-BLIND`; the
+> document now uses those names exclusively. ("Reference" survives in this
+> document **only** in its unrelated numerical sense — a "CPU reference
+> implementation" for fp16-parity checks.)
+
 ## Decisions taken (grill, 2026-05-29)
 
 - **Scope:** phased — VRAM-resident K/V first (solves the production
@@ -177,7 +222,7 @@ per-step write. The GPU is **untrusted (VFIO-passed) and can log its own
 VRAM writes**, so it observes *which slot is written each step*. Over a
 block it sees `perm⁻¹(p), perm⁻¹(p+1), …` for consecutive positions —
 i.e. it **reads off the permutation of the appended tokens directly,
-reference-free, from the write sequence.** This bypasses the entire cover
+with no plaintext, from the write sequence.** This bypasses the entire cover
 (it's a side channel on *writes*, not on the covered *contents* the gates
 evaluated). Tail-on-GPU cannot escape it: sequential-slot writes expose
 positions outright; permuted-slot writes expose π via the write order.
@@ -236,6 +281,116 @@ MANDATORY, not a prefill/perf fast-follow** — it closes a channel that
 otherwise reads the appended permutation directly, at ~zero (favourable)
 runtime cost. Phase 3 is promoted from "gated on security" to a required
 v1 component.
+
+---
+
+## Offloaded-prefill attention: the attack vector (2026-05-29)
+
+The decode threat model above concerns a *resident* cache read one query at
+a time. **Offloading prefill** — the single largest in-TEE bucket
+(`tee:attn_inplace_many` ≈ 43.7 s, 23.6 % of prefill) — is a different
+exposure, and it is the reason the offload path cannot use the permutation
+cover. This section defines what we are defending against; the cover that
+answers it (feature rotation) and the gate are in the fused-kernel section.
+
+### What the adversary wants and what it sees
+
+**Goal.** The untrusted GPU reconstructs the user's **prompt tokens** from
+the prefill attention it is asked to run.
+
+**Setting.** To offload prefill, the TEE hands the GPU the prefill operands
+`Q, K, V` for all `n` prompt tokens (per layer, per head) under a cover,
+and the GPU runs the fused causal self-attention `softmax(QKᵀ/√d + M)·V`.
+
+**Capabilities (conservative, DECIDED 2026-05-29).** The adversary controls
+the GPU: it sees every covered operand handed to it, every intermediate it
+chooses to compute (fused *or* un-fused — see below), dispatch
+shapes/timing, and — the conservative assumption for an **open base model
+(Qwen3)** — **the public weights** `W_Q, W_K, W_V` and the embedding table.
+
+**A fused kernel is a *performance* boundary, not a *security* one.** This
+is the load-bearing clarification. A feature rotation cancels in the score
+for *anyone holding the rotated operands*, not only inside the kernel:
+`(Q·O_qk)(K·O_qk)ᵀ = QKᵀ`, so the GPU can reconstruct the true score matrix
+`S = QKᵀ` (and `P = softmax(S)`) on its own at any time — the scores are a
+*rotation-invariant* of operands it already possesses. So an administrator
+who replaces the fused kernel with an un-fused one that spills `S` to HBM
+**learns nothing extra**. Security therefore rests entirely on the
+rotation-invariant view being insufficient to reconstruct — never on the
+kernel staying fused (the fused kernel only buys the no-`[n,n]`-scores-in-HBM
+*speed*; cf. TwinShield, where the score *magnitudes* are blinded, so the
+accelerator genuinely never holds un-blinded scores).
+
+**The rotation-invariant view (what is and isn't exposed under feature
+rotation).** Exposed: the same-rotation Grams `Q·Qᵀ`, `K·Kᵀ`, `V·Vᵀ` (norms +
+all pairwise similarities), the cross-Gram `Q·Kᵀ = S` hence the attention
+pattern `P = softmax(S)`, and token **order / positions**. Hidden: absolute
+operand **coordinates**, the **QK↔V cross-geometry** (`O_v` is independent of
+`O_qk`, so `Q̃·Ṽᵀ = Q·O_qk·O_vᵀ·Vᵀ` does not cancel), and the un-rotated
+output `P·V`. With **public weights** the exposed Grams are *known bilinear
+forms* of the secret hidden states `X` (`Q = X·W_Q`, …):
+
+```
+K·Kᵀ = X (W_K W_Kᵀ) Xᵀ,   Q·Kᵀ = X (W_Q W_Kᵀ) Xᵀ,   Q·Qᵀ = X (W_Q W_Qᵀ) Xᵀ
+```
+
+— a system of quadratic constraints on `X` that *anchors* the otherwise-free
+global rotation. **The bar the offload cover must clear** is therefore:
+*can a `WEIGHTS-PUB` adversary (under `NO-PLAINTEXT`) solve `X` (→ tokens, via
+the known embedding table) from `{X·M·Xᵀ : M known}` + `P` + positions?* That is
+exactly the question Phase 5 measures.
+
+### Why permutation cannot defend offloaded prefill — the causal-mask leak
+
+The block-fresh-π cover defends *decode* (where the mask is trivial) but is
+**structurally defeated at prefill by the causal mask** — independent of how
+well the contents are covered, because the mask is binary *structure*, not
+data.
+
+**Setup.** Prefill is self-attention over `n` tokens with a causal mask: in
+original order, query `a` may attend key `b` iff `b ≤ a`. The cover permutes
+the sequence axis by secret π (physical slot `s` holds original token
+`π(s)`). For the attention to be *correct*, the GPU must apply the mask in
+its own (permuted) coordinates, i.e. the **permuted causal mask**:
+
+```
+M_phys[i][j] = 1  iff  π(j) ≤ π(i)
+```
+
+(cubek's built-in `causal:true` masks in physical-slot order, which over
+permuted bytes is the *wrong* math — correctness forces supplying this true
+permuted mask, and the untrusted GPU sees it.)
+
+**Recovery — step by step.**
+1. Sum any physical row `i`:  `rᵢ = Σⱼ M_phys[i][j] = #{ j : π(j) ≤ π(i) }`.
+2. π is a bijection onto `{0,…,n−1}`, so the number of values `≤ π(i)` is
+   exactly `π(i)+1`. Hence `rᵢ = π(i)+1`.
+3. Therefore `π(i) = rᵢ − 1` — read off π for every slot directly, no
+   inversion, no plaintext, **independent of the content cover**.
+
+**Worked example (`n = 4`, secret π = `[2,0,3,1]`):**
+
+```
+            j=0  j=1  j=2  j=3   row-sum   π(i)=sum−1
+ i=0 (π=2)   1    1    0    1       3          2   ✓
+ i=1 (π=0)   0    1    0    0       1          0   ✓
+ i=2 (π=3)   1    1    1    1       4          3   ✓
+ i=3 (π=1)   0    1    0    1       2          1   ✓
+read row-sums [3,1,4,2] − 1 → [2,0,3,1] = π, recovered exactly.
+```
+
+**Why it can't be patched.** The leak is information-theoretic: a *correct*
+causal mask must encode the total order of the `n` tokens — `log₂(n!)` bits,
+exactly π's entropy. Any faithful representation carries it; the row-sum is
+merely the cheapest extractor. Permuting columns does not help (the row-sum
+is invariant to it), and a *different* column permutation is impossible —
+self-attention's softmax-equivariance requires the same π on Q, K, V to
+cancel. **Decode is exempt**: with `n_q = 1` the single new token attends
+everything, its mask row is all-ones, and there is no pairwise order to leak.
+
+⇒ Permutation rides along on offloaded *decode* but is fatal to offloaded
+*prefill*. The offload cover must hide *coordinates without permuting the
+token axis* — i.e. feature rotation (next section).
 
 ---
 
@@ -341,12 +496,16 @@ mask, f16, portable `Unit` and tensor-core `BlackboxAccelerated`
 strategies, remainder tiling for arbitrary sequence lengths. **We
 integrate it; we do not author GPU kernels** (no in-repo `#[cube]`).
 
-Two capability gaps, and what each costs:
+cubek-attention is the **prefill** kernel. Decode does **not** route
+through it — decode keeps the permutation cover served by the composed
+`attend_session_partial` engine path (which already returns the
+`(m,l,acc)` stats tail-in-TEE needs); cubek's two gaps are exactly why it
+is unfit for decode and therefore prefill-scoped:
 
-| gap | prefill (the target) | decode |
+| gap | prefill (cubek, the target) | why it rules cubek out of decode |
 |---|---|---|
-| **no native GQA** — single `num_heads`; K/V shaped `[B,num_heads,skv,d]`, so K/V must be expanded 8→32 heads | modest: ~2.1 GB transient expanded K/V (B=8, n=2048) vs ~0.5 GB un-replicated; the extra HBM reads hide under the n_q=2048 matmul (compute-bound). One `repeat_dim`, once. | costly: decode is memory-bound, so 4× per-step K/V read bandwidth + 4× resident VRAM, and it breaks the un-replicated-storage / NVMe-spill economics. Closeable later by a kv-head-broadcast read-index in the K/V loader (a fast-follow, **not** a new kernel). |
-| **no `(m,l)`/LSE output** — `launch(...) -> Result<()>` writes only normalized `out` | none: prefill is one-shot, no tail to merge. | under permutation: blocks tail-in-TEE (which needs the GPU's partial stats). **Under feature-rotation (no permutation): moot** — token order is public, so there is no write-location channel to close; the full normalised attend is correct. See below. |
+| **no native GQA** — single `num_heads`; K/V shaped `[B,num_heads,skv,d]`, so K/V must be expanded 8→32 heads | modest: ~2.1 GB transient expanded K/V (B=8, n=2048) vs ~0.5 GB un-replicated; the extra HBM reads hide under the n_q=2048 matmul (compute-bound). One `repeat_dim`, once. | costly at decode: memory-bound, so 4× per-step K/V read bandwidth + 4× resident VRAM, breaking the un-replicated-storage / NVMe-spill economics. (Closeable later by a kv-head-broadcast read-index — a fast-follow, **not** a new kernel.) |
+| **no `(m,l)`/LSE output** — `launch(...) -> Result<()>` writes only normalized `out` | none: prefill is one-shot, no tail to merge. | decode's permutation cover needs tail-in-TEE, which needs the GPU's partial `(m,l,acc)` stats — cubek can't emit them. Decode therefore stays on the composed `attend_session_partial` path. |
 
 ### Why the offload cover is feature-rotation-only (two eliminations)
 
@@ -354,19 +513,11 @@ Two independent arguments rule out the other two covers for a fused,
 normalised-output kernel, leaving feature rotation as the only survivor.
 
 **Elimination 1 — permutation leaks π through the causal mask (prefill).**
-At prefill the query and key axes are the same `n` tokens, so the causal
-mask is the `n × n` "who-may-attend-whom" matrix. Over a permuted buffer
-it is a *permuted* lower-triangular matrix that must be supplied to the
-kernel explicitly (cubek's built-in `causal:true` masks in physical-slot
-order — over permuted bytes that is simply the *wrong* math, so
-correctness forces handing over the true permuted mask). That matrix
-leaks π **exactly**: if physical slot `i` holds original position `pᵢ`,
-its row-sum is `#{j : pⱼ ≤ pᵢ} = pᵢ + 1` — **the row-sum equals the rank**,
-so π is read off directly, no inversion, no reference, regardless of how
-well the *contents* are covered. (Verified 2026-05-29.) At decode this
-vanishes: `n_q = 1`, the new token attends everything, its mask row is
-all-ones and carries no pairwise order — so permutation *can* offload
-decode, just never prefill.
+The permuted `n×n` causal mask reveals π *exactly* via its row-sums
+(`rᵢ = π(i)+1`), independent of the content cover — derived step by step,
+with a worked example, in *Offloaded-prefill attention: the attack vector*
+above. Decode is exempt (`n_q=1`, all-ones mask, no order), so permutation
+offloads decode but never prefill.
 
 **Elimination 2 — additive (TwinShield) is incompatible with a fused
 kernel.** Verified against arXiv 2507.03278 v2: TwinShield's softmax
@@ -387,65 +538,115 @@ needs the full probability matrix `P` to undo. TwinShield stays a
 *separate lever* (GEMM-offload + TEE softmax), evaluated on its own terms,
 not this lever's cover.
 
-**The survivor — orthogonal feature rotation.** `O_qk` on Q and K cancels
-in the score (`(Q·O_qk)(K·O_qk)ᵀ = QKᵀ` for orthogonal `O_qk`), so the GPU
-computes identical scores while never seeing clean Q/K and **the softmax
-is untouched**; `O_v` on V passes through the value contraction, so the
-GPU returns `O_true·O_v` (normalised) and the TEE corrects with a single
-`·O_vᵀ`. Both rotations are on the **head-dim axis** — the token axis is
-untouched, so the causal mask is the standard *public* triangular and
-leaks nothing. This is the cover we already have
-(`PermAttnConfig::feature_rotation`, `O_qk`/`O_v`), it serves prefill and
-decode identically, and it dissolves the LSE gap (no permutation ⇒ no
-write-location channel ⇒ no partial stats needed). σ-noise is **off** on
-the offload path (additive noise on K is non-correctable through a fused
-softmax, same as Elimination 2). Block-fresh-π + σ remain the cover for
-the **in-TEE default path**; the **offloaded path is rotation-only**.
+**The survivor — orthogonal feature rotation (prefill offload).** `O_qk`
+on Q and K cancels in the score (`(Q·O_qk)(K·O_qk)ᵀ = QKᵀ` for orthogonal
+`O_qk`), so the GPU computes identical scores while never seeing clean Q/K
+and **the softmax is untouched**; `O_v` on V passes through the value
+contraction, so the GPU returns `O_true·O_v` (normalised) and the TEE
+corrects with a single `·O_vᵀ`. Both rotations are on the **head-dim
+axis** — the token axis is untouched, so the causal mask is the standard
+*public* triangular and leaks nothing. σ-noise is **off** on this path
+(additive noise on K is non-correctable through a fused softmax, per
+Elimination 2). This is the cover we already have, behind
+`PermAttnConfig::feature_rotation` (`O_qk`/`O_v`, `attention.rs:408–508`) —
+to be sampled per-head and wired to `cubek-attention`.
+
+### The cover split: feature-rotation prefill, permutation decode
+
+The two phases use **different covers**, because they face different leaks:
+
+| phase | computation | cover | why |
+|---|---|---|---|
+| **prefill** (offloaded, one-shot) | `softmax(QKᵀ+M)·V` over `n` prompt tokens | **feature rotation** `O_qk`/`O_v`, σ=0, public causal mask | permutation leaks π via the square mask (Elim. 1); additive can't run on a fused kernel (Elim. 2) |
+| **decode** (resident, per-step) | one query over the growing cache | **permutation** (block-fresh-π + σ + `O_v`) **+ tail-in-TEE** | decode's mask is trivial (no π leak), so the gate-2/3-validated permutation cover is kept; tail-in-TEE closes the write-location channel |
+
+**The prefill→decode handoff.** The covers protect two *different*
+computations and never mix on one buffer. Prefill's offloaded attention
+uses a **transient** rotation-covered `Q,K,V` (per head: `K·O_qk`,
+`V·O_v`), discarded after the prompt's contextualised output is produced.
+The **resident decode cache** is a *separately* permutation-covered `K,V`
+that the TEE builds from the clean prompt K/V (which it holds — it computed
+the K/V projections) at the prefill→decode boundary. That one-time
+re-cover-and-upload is the "re-permute upload" already cost-analysed in
+gate-1 / §10 (≈488 ms current pipeline → modelled ≈5 ms with the
+un-replicated + bf16-native substrate). So enabling prefill offload does
+**not** change the decode cover; it adds a rotation-covered prefill pass
+plus the existing residency upload.
+
+**Security posture differs by phase, deliberately.** Prefill offload runs
+the *weaker* rotation-only cover — its residual (the row-Gram, token order,
+and the weights-equipped reconstruction of *Offloaded-prefill attention:
+the attack vector*) is what the sufficiency spike must clear. Decode keeps
+the permutation cover under gates 2/3. Turning prefill offload on accepts
+the rotation-only residual **for the prefill computation only**; the
+resident decode path is unaffected.
 
 ### The offload-cover sufficiency spike (the gate the lever hangs on)
 
-Rotation-only is the only *correctable, causal-safe* cover for the fused
-kernel — but it is also the **weakest** of the three: orthogonal rotation
-preserves the row norms `‖Kᵢ‖`, the full row-Gram `KKᵀ` (every pairwise
-inner product), and — with no permutation — the **token order** (positions
-are public). So the adversary holds the entire token-set geometry up to a
-single global orthonormal transform, tied to known positions. The spike
-asks one question: **is that residual breakable reference-free?** Reusing
-the gate-3 capture harness + the container attack rig, on real Qwen3
-activations (iterate on 1.7B, confirm on 4B):
+This spike gates the **prefill offload cover only** (decode keeps the
+permutation cover under gates 2/3). Rotation-only is the only *correctable,
+causal-safe* cover for the fused kernel — but the **weakest**: it preserves
+row norms, the full row-Gram, the cross-Gram/scores, and (no permutation)
+token order. **The spike is run in both regimes** — `WEIGHTS-PUB` (the
+conservative default) and `WEIGHTS-BLIND` (the private-fine-tune case) — to
+bracket the outcome and isolate exactly how much the public weights buy the
+attacker. It asks: **is the rotation-invariant view — optionally anchored by
+public weights — enough to reconstruct the prompt?** Reusing the gate-3
+capture harness + the container attack rig, on real Qwen3 activations
+(iterate on 1.7B, confirm on 4B):
 
-1. **Reference-free rotation recovery.** The adversary has `KKᵀ` exactly
-   (rotation-invariant), so classical MDS recovers K up to one global
-   `O*`; the attack is "pin `O*` reference-free." Run FastICA / JADE on the
-   rotation-only view (`k_rot = K·O_qk`, `v_rot = V·O_v`) — the existing
-   gate-3 attacks, but on the *no-permutation* view — and score mean
-   matched `|corr|` of recovered coordinates to the clean (position-known)
-   columns. Establish the chance floor with a random-rotation control.
-2. **Order-is-public residual.** Quantify what preserved order + Gram buys
-   an attacker that permutation previously denied: e.g. does `‖Kᵢ‖` or the
-   Gram structure correlate with positional/semantic structure usefully?
-   (This is the gap vs the permutation path, made explicit.)
-3. **Fixed-rotation accumulation (the rotation analog of HNM √N).** `O_qk`
-   is fixed for the session (it must be, to cancel against the resident
-   `K·O_qk`), so the adversary observes many ephemeral `Q·O_qk` uploads +
-   the fixed `K·O_qk`/`V·O_v` over a long generation. Does sample
-   accumulation let ICA/JADE pin the rotation that one-shot cannot? Sweep
-   observation count; this sets any re-rotation cadence.
+1. **`WEIGHTS-PUB` reconstruction (the load-bearing attack).** With public
+   `W_Q/W_K/W_V`, the exposed Grams are known bilinear forms `X·M·Xᵀ` (M
+   known). Attack: solve the secret hidden states `X` from the system
+   `{Q·Qᵀ, K·Kᵀ, V·Vᵀ, Q·Kᵀ}` (+ positions + `P`) — or, the cheap form, match
+   the per-token-pair Gram dictionary `D[t_i,t_j]=e_{t_i}(W_V W_Vᵀ)e_{t_j}ᵀ`
+   (sharpest at early layers where `X≈E[tokens]`) — then map to tokens via
+   the known embedding table; score token-recovery rate vs a chance floor.
+   This is the conservative bar the cover must clear — *not* blind ICA.
+2. **`WEIGHTS-BLIND` rotation recovery.** The weaker baseline: FastICA /
+   JADE on the rotation-only view (`k_rot = K·O_qk`, `v_rot = V·O_v`) — the
+   existing gate-3 attacks on the *no-permutation* view — scoring mean
+   matched `|corr|` to the clean (position-known) columns, with a
+   random-rotation chance control.
+3. **Order-is-public residual.** Quantify what preserved order + Gram buys
+   the attacker that permutation previously denied (e.g. does `‖Kᵢ‖` / Gram
+   structure correlate with positional/semantic structure usefully?) — the
+   explicit gap vs the permutation path.
+4. **Fixed-rotation accumulation (rotation analog of HNM √N).** `O_qk` is
+   fixed for a prefill (and, if a rotated prefix were ever reused, longer),
+   so the adversary observes many `Q·O_qk` against fixed `K·O_qk`/`V·O_v`.
+   Does sample accumulation pin the rotation that one-shot cannot? Sweep
+   observation count; sets any re-rotation cadence.
 
-**Correctness + cost (Rust, alongside the attacks).** A parity test that
-cubek's normalised attend over rotated, GQA-expanded K/V, public causal
+**Correctness + cost (Rust, alongside the attacks).** Parity test that
+cubek's normalised attend over rotated, GQA-expanded K/V + public causal
 mask, then in-TEE `·O_vᵀ`, equals clean attention at the fp16 floor (mirror
 `kv_session_partial_tail_merge_matches_full`); measure the `O_vᵀ`
 correction (one `[B, H·d, d]` right-multiply per layer — `O(B·H·d²)`,
 expected trivial).
 
-**Pass ⇒ rotation-only ships as the offload cover; cubek-attention serves
-prefill + decode. Fail ⇒ the offload needs token-order hiding, which the
-fused kernel cannot provide (permutation = mask leak, additive =
-kernel-incompatible) ⇒ no fused-kernel prefill offload; fall back to
-in-TEE prefill, or evaluate the TwinShield GEMM-offload lever separately
-on its score-round-trip cost.** Everything in the fused-kernel lever is
-downstream of this gate.
+**Three-way outcome:**
+- **Pass under `WEIGHTS-PUB`** ⇒ rotation-only ships as the prefill offload
+  cover on `cubek-attention` (decode unchanged).
+- **Pass under `WEIGHTS-BLIND` but fail under `WEIGHTS-PUB`** (the expected
+  result, per the Gram-dictionary analysis) ⇒ the leak is precisely the
+  *public-weight anchor*. Before abandoning, explore **covariant weight
+  obfuscation (AloePri)**: statically transform the deployed weights (and
+  compensate covariantly so the computation is unchanged) so that the
+  attacker's *public* `W` no longer matches the *deployed* `W'` — collapsing
+  the known bilinear forms `X·M·Xᵀ` back to *unknown* `M'` and removing the
+  dictionary the attack relies on. This converts the open-model
+  `WEIGHTS-PUB` deployment into an effective `WEIGHTS-BLIND` one for the
+  attacker. Re-run the spike against the obfuscated-weight deployment to
+  confirm. (Open cost questions: the obfuscation's correctness/overhead and
+  whether it composes with the fused kernel — a sub-spike if we reach here.)
+- **Fail under both** ⇒ no fused-kernel prefill offload — the offload would
+  need token-order hiding the fused kernel cannot provide (permutation =
+  mask leak, additive = kernel-incompatible) — so prefill stays in-TEE, or
+  the TwinShield GEMM-offload lever is evaluated separately on its
+  score-round-trip cost.
+
+The whole prefill-offload lever is downstream of this gate.
 
 ## Open questions (the load-bearing gates)
 
@@ -486,41 +687,53 @@ ships or we fall to TwinShield-Xue.
    not measured. Async double-buffering is **not** a v1 lever — it hides
    transfer, not the CPU rotation that dominates when `O_v` refreshes.
 
-2. **σ-vs-N thresholds (gate 2 — the `perm_kv` clock).** **Partial
-   measurement done (2026-05-29, Rust)** — `gate2_perm_recovery_vs_sigma_and_n`
-   in `crates/gelo-protocol/tests/permutation_attention.rs`, log
-   `bench-results/gate2-perm-recovery-sigma-n-2026-05-29.log`. Two
-   measured findings (ARROWMATCH cosine recovery, cleartext reference =
-   worst case, random Q at d=128):
-   - **σ-noise is not a usable lever.** Single-observation recovery is
-     100% until σ≈1.2, but attention quality is destroyed by σ≈0.3
-     (drift 0.08) — the quality ceiling sits **~20× below** where the
-     attack even begins to fail. No quality-compatible σ defeats a
-     reference-equipped cosine attack at production d=128.
-   - **Persistence is strictly worse, via √N denoising (confirmed).** At
-     σ=5, single-obs recovery 0.064 → **N=64 fixed-π observations recover
-     fully (1.00)**. Fixed-π-across-N lets the attacker average out the
-     noise. ⇒ **prefill-only is the *worst* case for `perm_kv`** (maximal
-     accumulation); this validates the design decision that `perm_kv`
-     **refreshes per block** (bounded N), and `O_v` alone is session-fixed.
-   - **Implication:** the cover's security rests on the **no-clean-reference
-     GELO mask invariant**, not σ-noise. The reference-*free* HNM attack
-     (the real adversary, who lacks clean K) is **not yet measured** — it
-     needs the Python HNM driver + real activations (see gate-status note).
-   The remaining quantitative output (max N before reference-free recovery)
-   comes from that driver.
+2. **σ-vs-N thresholds (gate 2 — the `perm_kv` clock).** The
+   threat-model-valid (`NO-PLAINTEXT`) measurement is pending (Python HNM
+   driver + real activations — see gate-status). Settled so far
+   (2026-05-29, Rust, `gate2_perm_recovery_vs_sigma_and_n` /
+   `bench-results/gate2-perm-recovery-sigma-n-2026-05-29.log`):
+   - **σ-noise is not a usable lever (quality ceiling).** Attention quality
+     is destroyed by σ≈0.3 (drift 0.08), far below any σ that could blunt
+     recovery, so σ cannot be the security knob. (A model-quality
+     measurement, independent of any attacker — valid under all
+     assumptions.)
+   - **Persistence is strictly worse, via √N denoising (HNM principle).**
+     Holding π fixed for N steps gives the attacker N correlated looks; the
+     signal averages up ~√N, so fixed-π-across-N is the *worst* case for
+     `perm_kv`. ⇒ `perm_kv` **refreshes per block** (bounded N); `O_v`
+     alone is session-fixed. *(The earlier √N recovery curve was produced
+     by a probe that assumed clean Q — it violated `NO-PLAINTEXT` — so the
+     curve is **withdrawn**; the √N conclusion stands as the HNM structural
+     result, and the realistic driver will quantify the max N.)*
+   - **Implication:** the cover's security rests on the **GELO mask
+     invariant** (the GPU never sees plaintext positions), not σ-noise.
+     The `NO-PLAINTEXT` HNM attack that yields the actual max-N — and, under
+     `WEIGHTS-PUB`, the weights-anchored variant (gate 3 below) — is not yet
+     run.
 
-3. **Covariance-alignment thresholds (gate 3 — the `O_v` clock).** Runs
-   in parallel to gate 2 against the *same* attack suite, but targets the
-   rotation rather than the permutation. Feed JADE / anchor_ica / JD the
-   observed `V·O_v` cloud (noiseless) plus the model's
-   activation-covariance prior; measure how many distinct token-values
-   must be observed before `O_v` is recovered up to sign/axis flips at
-   our shapes (d_head=128, production context lengths). Output: the max
-   `O_v`-fixed observation budget → the refresh cadence `M`. Determines
-   whether v1 ships `O_v` session-fixed (cheap — gate 1) or must refresh
-   every `M` blocks, and whether the structured-orthogonal O(L·d)
-   signed-permutation trick is needed to make a finite `M` affordable.
+3. **Content-recovery thresholds (gate 3 — the `O_v` clock).** Targets the
+   value cover. **Two attacker regimes, and the distinction is decisive:**
+   - **`WEIGHTS-BLIND`:** feed JADE / anchor_ica the observed `V·O_v` cloud
+     and ask whether blind un-mixing recovers `O_v` up to sign/axis flips.
+     This is what the 2026-05-29 run measured (`O_v` held).
+   - **`WEIGHTS-PUB` (the conservative default — the gate that actually
+     matters):** a weights-equipped attacker **does not try to recover
+     `O_v` at all** — the value Gram is `O_v`-invariant, so with public
+     `W_V` and the embedding table it becomes a *known* per-token-pair
+     dictionary `D[t_i,t_j] = e_{t_i}(W_V W_Vᵀ)e_{t_j}ᵀ`, and the attack is
+     to match the observed (permuted) Gram / per-row norms against `D` to
+     recover token **identity**. `O_v` is irrelevant to this attack, so the
+     `WEIGHTS-BLIND` "`O_v` holds" result **does not cover it**. The
+     permutation still hides *order* (recovers a multiset, not a sequence)
+     and σ is on K not V, so the V Gram is clean — this is the untested
+     exposure. **This regime is run as an updated gate 3 (see report
+     below).**
+   Output: the max `O_v`-fixed observation budget → refresh cadence `M`,
+   and — under `WEIGHTS-PUB` — whether token membership leaks via the V
+   Gram at all. Determines whether v1 ships `O_v` session-fixed (cheap —
+   gate 1) or must refresh every `M` blocks (and whether the
+   structured-orthogonal `O(L·d)` signed-permutation trick is needed to make
+   a finite `M` affordable).
 
 ### Gate-measurement status + environment split
 
@@ -528,15 +741,18 @@ The gates run in two environments, and only part runs on the dGPU box:
 
 - **Rust, on the dGPU box (done 2026-05-29):** the **quality ceiling**
   (`permutation_attention.rs` drift-vs-σ: σ=0.01 drift < 5e-2, tolerable;
-  σ≥0.3 destroys output) and the **reference-equipped** perm-recovery
-  attack + the √N-accumulation effect (`gate2_perm_recovery_vs_sigma_and_n`).
-  These establish: σ is not the security lever, and persistence amplifies
-  recovery via √N — so `perm_kv` must refresh per block.
+  σ≥0.3 destroys output) and the √N-accumulation principle
+  (`gate2_perm_recovery_vs_sigma_and_n`). These establish: σ is not the
+  security lever, and persistence amplifies recovery via √N — so `perm_kv`
+  must refresh per block. *(The recovery curve in that test assumed clean
+  Q, violating `NO-PLAINTEXT`; the curve is withdrawn, the √N conclusion
+  kept — see gate 2.)*
 - **Python AloePri harness, on the eval env / CI (NOT runnable on the
   dGPU box — no pip/ensurepip/apt/sudo; numpy/scipy/sklearn absent):**
-  the **reference-free** attacks that produce the actual cadence numbers —
-  HNM statistical permutation recovery (gate 2 proper → max N) and
-  JADE / anchor_ica covariance-alignment for `O_v` (gate 3 → max T / M).
+  the `NO-PLAINTEXT` attacks that produce the actual cadence numbers —
+  HNM statistical permutation recovery (gate 2 proper → max N) and the
+  `O_v` / value-content attacks (gate 3 → max T / M), run in **both**
+  `WEIGHTS-BLIND` and `WEIGHTS-PUB` regimes.
   Drivers exist (`evals/aloepri-attacks/attack_drivers/run_{jade,anchor_ica}.py`)
   but target the linear-mask channel; the attention-cover scenario
   (fixed `perm_kv`+noise on K across N; fixed `O_v` on the V cloud) is a
@@ -553,47 +769,91 @@ Qwen3-4B adversary view (prefill-only cover: `perm_kv` + σ=0.01 on K +
 (in the `gelo-attack` container) attacks it. Artefacts:
 `evals/aloepri-attacks/{persistent_attn_gate.py, captures/gate_results.json}`.
 
-All attacks are **reference-free** (operate on the cover-applied data
-alone); ground truth is used **only for scoring**, the max
-benefit-of-the-doubt convention — so a passing result is robust.
+**Regime of this run: `WEIGHTS-BLIND` (and `NO-PLAINTEXT`).** All attacks
+operate on the cover-applied data alone, with **no use of the model
+weights**; ground truth is used **only for scoring**
+(benefit-of-the-doubt). So these are robust passes *within the
+`WEIGHTS-BLIND` regime* — they do **not** speak to `WEIGHTS-PUB` (see the
+caveat below).
 
-| attack | result (n_kv=545, layers 0/17/35) | reading |
+| attack (`WEIGHTS-BLIND`) | result (n_kv=545, layers 0/17/35) | reading |
 |---|---|---|
 | baseline (direct cos-match `v_sent`→`v_clean`) | cos ≈ 0.07, perm ≈ chance | cover defeats naive coordinate matching |
 | **gate 3 (content / `O_v`): FastICA** | corr **0.25** | nothing recovered above the coincidental floor |
 | **gate 3 (content / `O_v`): JADE (4th-order)** | corr **0.36** ≈ no-attack floor **0.35** | **`O_v` HOLDS** — even 4th-order JADE doesn't un-mix; far from recovery (self-test ref 0.998) |
-| **gate 2 (position): K-Gram spectral seriation** | \|Kendall τ\| **0.05 / 0.06 / 0.20** (avg **0.10**) | **position largely HELD reference-free** — RoPE's relative-position signal does not survive `perm_kv`+`O_qk`+σ for seriation (mild residual only at the deepest layer) |
+| **gate 2 (position): K-Gram spectral seriation** | \|Kendall τ\| **0.05 / 0.06 / 0.20** (avg **0.10**) | **position largely HELD** — RoPE's relative-position signal does not survive `perm_kv`+`O_qk`+σ for seriation (mild residual only at the deepest layer) |
 
 JADE validated on a known Laplace mixture (`--self-test`, matched corr
-0.998), so the gate-3 negative is trustworthy. All attacks reference-free
-(ground truth used only for scoring — benefit-of-doubt), so these are
-robust *passes*, not artifacts.
+0.998), so the gate-3 negative is trustworthy *as a `WEIGHTS-BLIND`
+result*. (An earlier probe suggested position leaked at 0.70–1.00, but it
+assumed clean Q — it violated `NO-PLAINTEXT` — and is **removed**.)
 
-**This overturns the earlier pessimism.** The reference-*equipped*
-norm-match (now removed) suggested position leaked at 0.70–1.00; that was
-a non-realistic attacker. Under the real threat model **both content
-(`O_v`) and position (`perm_kv`+`O_qk`) are largely protected** for the
-prefill-only cover. The only *confirmed* reference-free leak is the
-**geometry residual** (row-norm multiset + Gram are `O_v`-invariant) —
-the documented, accepted residual; `O_v` hides coordinates, not the
-cloud's shape.
+> **`WEIGHTS-PUB` caveat — these passes do not clear the conservative
+> bar.** The result above measured whether *blind* un-mixing recovers
+> `O_v`. A `WEIGHTS-PUB` attacker never targets `O_v`: the value Gram is
+> `O_v`-invariant, so with public `W_V` it is a known per-token-pair
+> dictionary, and the very **geometry residual** these runs flagged as
+> "accepted" (row-norm multiset + Gram) is *exactly* its input. So under
+> the conservative default the gate-3 question changes from "does `O_v`
+> hold?" (it does, blindly) to "does the `O_v`-invariant Gram leak token
+> identity to a weights-equipped matcher?" — **untested here.** The
+> permutation still hides *order* (→ multiset, not sequence) and σ is on K
+> not V (V Gram clean). The `WEIGHTS-PUB` rerun is the updated gate 3
+> **reported below**.
 
-**Breadth — confirmed.** A 2nd prompt × 5 layers (0/9/18/27/35, n_kv=479)
-reproduces both findings: gate-3 ICA 0.25 / JADE 0.37 ≈ no-attack 0.35
-(`O_v` holds, stable across prompts); gate-2 seriation |τ| avg 0.15
-(per-layer 0.05–0.26, no systematic layer trend — L35 high in run 1, low
-in run 2 → the position residual is weak/noisy, not structural).
+**Breadth — confirmed (still `WEIGHTS-BLIND`).** A 2nd prompt × 5 layers
+(0/9/18/27/35, n_kv=479) reproduces both findings: gate-3 ICA 0.25 / JADE
+0.37 ≈ no-attack 0.35 (`O_v` holds blindly, stable across prompts); gate-2
+seriation |τ| avg 0.15 (per-layer 0.05–0.26, no systematic layer trend).
 
-**Still to do:** the **HNM score-structure** attack (the √N channel) as a
-second reference-free gate-2; wider σ sweep; and tightening whether the
-weak τ≈0.1–0.15 position residual matters.
+**Still to do:** the `WEIGHTS-PUB` gate-3 rerun (weights-anchored Gram /
+norm dictionary — below); the **HNM score-structure** attack (the √N
+channel) as a second `NO-PLAINTEXT` gate-2; wider σ sweep.
 
-**Design implication (updated).** The prefill-only cover (`perm_kv` +
-`O_qk` + `O_v` + σ) looks **substantially viable** on this evidence —
-content and position both largely hidden reference-free, leaving only the
-accepted geometry residual. That strengthens the prefill-only 16.4× path
-and lowers the urgency of the TwinShield fallback (still the escalation if
-the geometry residual or the HNM channel proves unacceptable).
+**Design implication (updated).** The decode permutation cover (`perm_kv` +
+`O_qk` + `O_v` + σ) looks **substantially viable under `WEIGHTS-BLIND`** —
+content and position both largely hidden. The `WEIGHTS-PUB` rerun (below)
+clears the covariance-alignment form; order-hiding (π) and the K-path (σ)
+survive regardless.
+
+### Gate-3 @ `WEIGHTS-PUB` — covariance-alignment rerun (2026-06-01)
+
+The updated gate-3 (`evals/aloepri-attacks/gate3_weights_anchor.py`, run in
+the `gelo-attack` container) gives the `WEIGHTS-PUB` attacker the model's
+**population value-covariance** as an anchor and eigen-aligns it to the
+observed `Cov(v_sent)` to recover `O_v` — the attack the blind FastICA/JADE
+never ran. The anchor is prompt **B**'s clean V (`captures2`, a *different*
+prompt — a public-data population proxy, `NO-PLAINTEXT`-faithful); the
+target is prompt **A** (`captures`); scored on the shared layers 0 & 35.
+
+| layer | no-attack | covalign (`WEIGHTS-PUB`, pop. anchor) | covalign (self-anchor*) | `O_v` |
+|---|--:|--:|--:|---|
+| 0  | 0.334 | **0.329** | 1.000 | **HOLDS** |
+| 35 | 0.327 | **0.326** | 1.000 | **HOLDS** |
+
+**`O_v` HOLDS under `WEIGHTS-PUB` covariance-alignment.** Knowing the
+population covariance does **not** pin the per-session `O_v`: recovery sits
+at the no-attack floor. The mechanism is that the value covariance is
+**instance-specific** — a different prompt's eigenvectors don't align to the
+target's, so `Cov(v_sent)=O_vᵀ·Cov(V)·O_v` can't be solved without the
+target's *own* `Cov(V)`. The self-anchor column (target's own clean
+covariance) recovers `O_v` at **1.000**, which is the *method validation* —
+it proves the attack works given a matching covariance, so the population
+result is a real negative, not a broken attack. (*self-anchor uses the
+instance's own clean second moments — an upper bound, not a `WEIGHTS-PUB`
+capability.)
+
+**Two caveats this rerun does not close:**
+1. **It tests the covariance/2nd-moment attack, not the token-identity Gram
+   dictionary.** A `WEIGHTS-PUB` attacker could instead match the
+   `O_v`-invariant V-Gram against a per-token-pair dictionary
+   `D[t_i,t_j]=e_{t_i}(W_V W_Vᵀ)e_{t_j}ᵀ` (needs `W_V`+embeddings+token-ids
+   dumped). For **decode** the permutation independently caps this at the
+   token *multiset* (order stays hidden); for **prefill** (no permutation)
+   it is the sharper, still-open Phase-5 vector.
+2. **Measured at n_kv≈500.** As context grows the instance covariance
+   approaches the population, so covariance-alignment may strengthen at
+   production lengths (2k–16k) — recheck there before relying on this.
 
 ## Acceptance gate (v1)
 
@@ -615,7 +875,7 @@ Layered — failing any tier reopens the TwinShield-Xue fallback:
 ## Sequencing (committed forward plan)
 
 **Strategy: build the prefill-only permute cover (the simplest, fastest,
-*weakest* variant), attack it with a real reference-free HNM bench as
+*weakest* variant), attack it with a real `NO-PLAINTEXT` HNM bench as
 early as possible, and harden only if it fails — with TwinShield-Xue as
 the parallel-de-risked fallback.** The ordering change vs a naive
 "build-all-then-test" is to **gate the expensive kernel + decode wire-up
@@ -635,7 +895,8 @@ kernel or the integration.
    (~5 ms modeled) to amortize — lands in Phase 2.
    Gate-2 σ-sweep probe (`gate2_perm_recovery_vs_sigma_and_n`): σ is not a
    lever, √N accumulation real ⇒ `perm_kv` refresh per block; but this is a
-   *cleartext-reference* probe, **not** the realistic gate.
+   *plaintext-assuming* probe (violates `NO-PLAINTEXT`), **not** the
+   realistic gate.
 
 9. **Phase 4 — gated decode wire-up + full bench** — ✅ **2026-05-29.**
    GPU-resident attention threaded through `decoder_block_cached_batched`
@@ -694,7 +955,7 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
 2. **Real-activation capture** (Rust, this box): dump real Qwen3-4B
    attention Q/K/V at the production decode shape + apply the cover →
    the adversary view the HNM/ICA bench consumes.
-3. **Security bench** (Python eval env — *not* this box): reference-free
+3. **Security bench** (Python eval env — *not* this box): `NO-PLAINTEXT`
    HNM (gate 2 → max N) + JADE/anchor_ica covariance-alignment
    (gate 3 → max T / `O_v` cadence M) against the captured adversary
    view. **Prefill-only first; if recovery is bad, flip on per-block /
@@ -743,7 +1004,7 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
    answer.
 
    **Does it beat in-TEE? Regime-dependent:**
-   - **Prefill-only** (no decode re-permute — the case the reference-free
+   - **Prefill-only** (no decode re-permute — the case the `NO-PLAINTEXT`
      gates leaned toward): per-step decode is the resident read only
      (0.40 ms) → **25× under in-TEE; the convert is moot** (one-time
      prefill cost).
@@ -787,26 +1048,30 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
      spike — not a free fast-follow.
 6. **Phase 4 — decode wire-up (perf)** — ✅ **2026-05-29** (see Done #9).
    Gated GPU-resident `attend_session` (full normalised), in-TEE default.
-   *Note:* this shipped the **perf** path. Under the rotation-only offload
-   cover the write-location channel is moot (token order public), so the
-   full normalised attend is the correct decode shape — partial-stats /
-   `kv_refresh_block` are not needed on the offload path.
-7. **Phase 5 — offload-cover sufficiency spike** (the gate the offload
-   lever hangs on). Reference-free attacks on the rotation-only view
-   (rotation recovery, order-is-public residual, fixed-rotation
-   accumulation) + a cubek-parity / `O_vᵀ`-cost check — see *The
-   offload-cover sufficiency spike*. **Pass ⇒ prefill+decode offload ship
-   on `cubek-attention`; fail ⇒ in-TEE prefill (or the separate TwinShield
-   GEMM-offload lever).**
+   *Note:* this shipped the bare **perf** path (no cover). The secure
+   decode path stays on the **permutation cover** (block-fresh-π + σ +
+   `O_v` + tail-in-TEE via the composed `attend_session_partial`) — decode
+   is **not** affected by the prefill-offload cover decision below.
+7. **Phase 5 — prefill-offload cover sufficiency spike** (the gate the
+   prefill-offload lever hangs on). Run in **both** `WEIGHTS-PUB` and
+   `WEIGHTS-BLIND`: `WEIGHTS-PUB` reconstruction (the load-bearing attack) +
+   `WEIGHTS-BLIND` rotation recovery + order-is-public residual +
+   fixed-rotation accumulation, plus a cubek-parity / `O_vᵀ`-cost check —
+   see *The offload-cover sufficiency spike*. **Pass (`WEIGHTS-PUB`) ⇒
+   rotation-only ships (decode unchanged); pass blind / fail public ⇒
+   explore covariant weight obfuscation (AloePri); fail both ⇒ in-TEE
+   prefill (or the separate TwinShield GEMM-offload lever).**
 8. **Phase 6 — prefill-attention offload** (on a spike pass): integrate
    `cubek-attention` into the engine (`fused_attention_batched`), feed
-   rotation-covered (`O_qk`/`O_v`) + GQA-expanded K/V, public triangular
-   mask, `Unit`/`Blackbox` autotune; correct `·O_vᵀ` in-TEE on readback;
-   bench vs the 43.7 s in-TEE `tee:attn_inplace_many` prefill bucket.
+   rotation-covered (`O_qk`/`O_v`, σ=0) + GQA-expanded prompt K/V, public
+   triangular mask, `Unit`/`Blackbox` autotune; correct `·O_vᵀ` in-TEE on
+   readback; the resident decode cache is built separately under the
+   permutation cover at the handoff. Bench vs the 43.7 s in-TEE
+   `tee:attn_inplace_many` prefill bucket.
 9. **Acceptance + flip** — the 4-tier gate, then default-on behind the
    c5 AloePri condition (mirrors R3).
 10. **Fast-follows** — kv-head-broadcast in cubek's K/V loader (recover the
-    4× GQA cost, esp. for decode-via-cubek); NVMe `SpillProvider`.
+    4× GQA cost); NVMe `SpillProvider`.
 
 ### TwinShield reuse (what a pivot costs)
 
