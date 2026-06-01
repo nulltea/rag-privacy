@@ -551,6 +551,106 @@ fn stack_tail_expanded(
     (k, v)
 }
 
+/// Build the session-fixed **covered resident prefix** for one GLOBAL layer
+/// (perm-attn-gpu-offload): permute the frozen-prefix rows + add σ-noise to K +
+/// feature-rotate K/V (shared per-layer `O_qk`/`O_v`), then upload to a GPU
+/// resident K/V session. One-time per layer; idempotent at the call sites
+/// (callers guard on `kv_cache.gpu_session(..).is_none()`). Hoisted out of the
+/// decode block so it can run either lazily on the first decode step **or** at
+/// the prefill→decode handoff (O5 — moves the cost off the decode critical
+/// path). σ-on-K uses per-head ChaCha streams (O4(a); skipped at σ=0).
+fn build_covered_prefix_session(
+    exec: &mut impl TrustedExecutor,
+    layer_idx: usize,
+    kv_cache: &mut KvCache,
+    batch_size: usize,
+    nkvh: usize,
+    dh: usize,
+    sigma: f32,
+) -> Result<()> {
+    use rand::SeedableRng;
+    use rand::seq::SliceRandom;
+    use rand_chacha::ChaCha20Rng;
+    use rand_distr::{Distribution, StandardNormal};
+    const SALT: u64 = 0xC0FFEE_5EED;
+    let mut crng = ChaCha20Rng::seed_from_u64(SALT ^ layer_idx as u64);
+    let o_qk = sample_orthogonal(dh, &mut crng);
+    let o_v = sample_orthogonal(dh, &mut crng);
+    let kv_views: Vec<(ArrayView2<'_, f32>, ArrayView2<'_, f32>)> = (0..batch_size)
+        .map(|b| kv_cache.view_b(layer_idx, b))
+        .collect::<Result<Vec<_>>>()?;
+    let prefix_len = kv_views[0].0.nrows();
+    let (k_st, v_st) = stack_cache(&kv_views, batch_size, nkvh, dh);
+    // perm (row gather) + σ on K — O4(a): row-level copies, per-head ChaCha
+    // noise, parallel over the B·nkvh heads.
+    let mut perm: Vec<usize> = (0..prefix_len).collect();
+    perm.shuffle(&mut crng);
+    let bh = batch_size * nkvh;
+    let noise_seed = rand::RngCore::next_u64(&mut crng);
+    let mut kp = Array3::<f32>::zeros((bh, prefix_len, dh));
+    let mut vp = Array3::<f32>::zeros((bh, prefix_len, dh));
+    {
+        use ndarray::parallel::prelude::*;
+        kp.outer_iter_mut()
+            .into_par_iter()
+            .zip(vp.outer_iter_mut().into_par_iter())
+            .enumerate()
+            .for_each(|(h, (mut kph, mut vph))| {
+                let k_src = k_st.index_axis(Axis(0), h);
+                let v_src = v_st.index_axis(Axis(0), h);
+                for (i, &src) in perm.iter().enumerate() {
+                    kph.row_mut(i).assign(&k_src.row(src));
+                    vph.row_mut(i).assign(&v_src.row(src));
+                }
+                if sigma > 0.0 {
+                    let mut hrng = ChaCha20Rng::seed_from_u64(noise_seed ^ h as u64);
+                    for x in kph.iter_mut() {
+                        let z: f32 = StandardNormal.sample(&mut hrng);
+                        *x += sigma * z;
+                    }
+                }
+            });
+    }
+    // Feature rotation: K·O_qk, V·O_v (shared O across heads →
+    // GQA-broadcast-consistent).
+    let k_cov = rotate_heads(kp.view(), o_qk.view());
+    let v_cov = rotate_heads(vp.view(), o_v.view());
+    let cap = kv_cache.capacity();
+    let id = exec.resident_kv_create(k_cov.view(), v_cov.view(), cap)?;
+    kv_cache.set_gpu_session(layer_idx, id);
+    kv_cache.set_gpu_cover(layer_idx, DecodeCover { prefix_len, o_qk, o_v });
+    Ok(())
+}
+
+/// Build covered resident prefixes for **all GLOBAL layers** at the
+/// prefill→decode handoff (O5). Gated by the caller on
+/// `gpu_resident_cover_enabled()`; idempotent (skips layers already built).
+/// Moves the one-time `build_covered_prefix` cost off the first decode step.
+fn build_covered_prefix_all_global(
+    cfg: &DecoderConfig,
+    exec: &mut impl TrustedExecutor,
+    kv_cache: &mut KvCache,
+    batch_size: usize,
+) -> Result<()> {
+    let (nkvh, dh) = (cfg.num_key_value_heads, cfg.head_dim_value());
+    let sigma = resident_cover_sigma();
+    for layer_idx in 0..cfg.num_hidden_layers {
+        if !matches!(
+            cfg.effective_attention_class(layer_idx),
+            AttentionClass::Global
+        ) {
+            continue;
+        }
+        if kv_cache.gpu_session(layer_idx).is_some() {
+            continue;
+        }
+        profile::time("cover:build_covered_prefix+upload", || {
+            build_covered_prefix_session(exec, layer_idx, kv_cache, batch_size, nkvh, dh, sigma)
+        })?;
+    }
+    Ok(())
+}
+
 fn decoder_block_cached_batched(
     cfg: &DecoderConfig,
     layer: &DecoderLayerWeights,
@@ -703,7 +803,6 @@ fn decoder_block_cached_batched(
         // newest tokens in-TEE (partial-stats prefix attend + in-TEE tail +
         // online merge → closes the write-location channel; no per-step GPU
         // write, no per-block re-permute).
-        use rand::seq::SliceRandom;
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
         use rand_distr::{Distribution, StandardNormal};
@@ -723,64 +822,19 @@ fn decoder_block_cached_batched(
             if kv_cache.gpu_session(layer_idx as usize).is_none() {
                 // One-time covered-prefix build + upload (the session-fixed
                 // "re-permute" cost, paid once per layer; amortized over K).
-                profile::time("cover:build_covered_prefix+upload", || -> Result<()> {
-                    let mut crng = ChaCha20Rng::seed_from_u64(SALT ^ layer_idx as u64);
-                    let o_qk = sample_orthogonal(dh, &mut crng);
-                    let o_v = sample_orthogonal(dh, &mut crng);
-                    let kv_views: Vec<(ArrayView2<'_, f32>, ArrayView2<'_, f32>)> = (0
-                        ..batch_size)
-                        .map(|b| kv_cache.view_b(layer_idx as usize, b))
-                        .collect::<Result<Vec<_>>>()?;
-                    let prefix_len = kv_views[0].0.nrows();
-                    let (k_st, v_st) = stack_cache(&kv_views, batch_size, nkvh, dh);
-                    // perm (row axis) + σ on K — in-TEE, per (B·nkvh) head.
-                    // O4(a): the permutation is a row-level gather (attention is
-                    // permutation-invariant over the key set, so σ=0 stays exact);
-                    // copy whole `dh`-rows instead of a scalar c-loop, parallelise
-                    // over the B·nkvh heads, and add σ-noise to K only (bulk,
-                    // per-head ChaCha stream) — replacing the serial
-                    // bh·prefix·dh per-element `StandardNormal` loop.
-                    let mut perm: Vec<usize> = (0..prefix_len).collect();
-                    perm.shuffle(&mut crng);
-                    let bh = batch_size * nkvh;
-                    let noise_seed = rand::RngCore::next_u64(&mut crng);
-                    let mut kp = Array3::<f32>::zeros((bh, prefix_len, dh));
-                    let mut vp = Array3::<f32>::zeros((bh, prefix_len, dh));
-                    {
-                        use ndarray::parallel::prelude::*;
-                        kp.outer_iter_mut()
-                            .into_par_iter()
-                            .zip(vp.outer_iter_mut().into_par_iter())
-                            .enumerate()
-                            .for_each(|(h, (mut kph, mut vph))| {
-                                let k_src = k_st.index_axis(Axis(0), h);
-                                let v_src = v_st.index_axis(Axis(0), h);
-                                for (i, &src) in perm.iter().enumerate() {
-                                    kph.row_mut(i).assign(&k_src.row(src));
-                                    vph.row_mut(i).assign(&v_src.row(src));
-                                }
-                                if sigma > 0.0 {
-                                    let mut hrng =
-                                        ChaCha20Rng::seed_from_u64(noise_seed ^ h as u64);
-                                    for x in kph.iter_mut() {
-                                        let z: f32 = StandardNormal.sample(&mut hrng);
-                                        *x += sigma * z;
-                                    }
-                                }
-                            });
-                    }
-                    // Feature rotation: K·O_qk, V·O_v (shared O across heads →
-                    // GQA-broadcast-consistent).
-                    let k_cov = rotate_heads(kp.view(), o_qk.view());
-                    let v_cov = rotate_heads(vp.view(), o_v.view());
-                    let cap = kv_cache.capacity();
-                    let id = exec.resident_kv_create(k_cov.view(), v_cov.view(), cap)?;
-                    kv_cache.set_gpu_session(layer_idx as usize, id);
-                    kv_cache.set_gpu_cover(
+                // Lazy fallback — normally built at the prefill→decode handoff
+                // (O5, `build_covered_prefix_all_global`); this fires only if
+                // that hoist was skipped.
+                profile::time("cover:build_covered_prefix+upload", || {
+                    build_covered_prefix_session(
+                        exec,
                         layer_idx as usize,
-                        DecodeCover { prefix_len, o_qk, o_v },
-                    );
-                    Ok(())
+                        kv_cache,
+                        batch_size,
+                        nkvh,
+                        dh,
+                        sigma,
+                    )
                 })?;
             }
             let id = kv_cache.gpu_session(layer_idx as usize).unwrap();
@@ -1473,6 +1527,15 @@ pub fn run_prefill_batched(
             }))
         },
     )?;
+
+    // O5 (perm-attn-gpu-offload): build the permuted-cover resident prefix for
+    // all GLOBAL layers **now**, at the prefill→decode handoff, so the one-time
+    // `build_covered_prefix` cost lands here instead of on the first decode
+    // step. Gated on the decode-cover path; the decode block's lazy build
+    // remains as an idempotent fallback.
+    if gpu_resident_cover_enabled() {
+        build_covered_prefix_all_global(cfg, exec, kv_cache, batch_size)?;
+    }
 
     let mut out = Array3::<f32>::zeros((batch_size, n_max, d));
     for b in 0..batch_size {

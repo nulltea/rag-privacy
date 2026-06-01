@@ -1113,12 +1113,12 @@ baseline is `tee:attn_cached_inplace_many` = **14 574 ms** (= 12.65 ms per
 (layer,step) → 455 ms/step over 36 layers; chronicle §9). The offload replaces
 that single CPU bucket:
 
-| metric (B=8, n=2048) | full in-TEE | offload, pre-O4 | **offload, O4(a)** |
-|---|--:|--:|--:|
-| attn bucket @ K=32 | **14 574 ms** | 13 832 ms (1.05×) | **9 283 ms (1.57×)** |
-| recurring per-step (36 layers) | **455 ms** | 157 ms (2.9×) | **152 ms (3.0×)** |
-| one-time prefix re-cover (×36, amortized) | — | 8 765 ms | **4 428 ms** |
-| break-even K | — | ≈30 | **≈15** |
+| metric (B=8, n=2048) | full in-TEE | pre-O4 | O4(a) | **O5** |
+|---|--:|--:|--:|--:|
+| decode attn bucket @ K=32 | **14 574 ms** | 13 832 (1.05×) | 9 283 (1.57×) | **3 636 (~4×)** |
+| recurring per-step (36 layers) | **455 ms** | 157 (2.9×) | 152 (3.0×) | **~114 (4×)** |
+| one-time `build_covered_prefix` | — | 8 765 (decode) | 4 428 (decode) | **→ prefill (5 446)** |
+| decode break-even K | — | ≈30 | ≈15 | **none (relocated)** |
 
 **O4(a) — ✅ LANDED (2026-06-01).** The `build_covered_prefix` perm+σ step was a serial
 `bh·prefix·dh` (≈16.7 M) scalar loop drawing a `StandardNormal` *per element*;
@@ -1127,8 +1127,21 @@ over the key set, so σ=0 stays exact) + per-head σ-on-K noise, parallelised ov
 the B·nkvh heads. `build_covered_prefix` **8 765 → 4 428 ms** (≈halved), bucket
 **13.8 → 9.3 s = 1.57×**, break-even **K≈30 → ≈15**. The per-step path is a clean
 ~3× win. What remains in `build_covered_prefix` is the **dense `O(d²)` rotate**
-(`rotate_heads`) + the SIMD convert/upload. Per-op decomposition (pre-O4 numbers
-below; build_covered_prefix/bucket per the table above):
+(`rotate_heads`) + the SIMD convert/upload.
+
+**O5 — ✅ LANDED (2026-06-01).** `build_covered_prefix` is now built for all
+GLOBAL layers at the **prefill→decode handoff** (`build_covered_prefix_all_global`
+at the end of `run_prefill_batched`, gated on the decode-cover path; the decode
+block keeps an idempotent lazy-build fallback), instead of lazily on the first
+decode step. The one-time build (5 446 ms ×36 layers) **moves out of the decode
+bucket into prefill**: decode `tee:attn_resident_cover` **9.3 → 3.6 s (~4× vs
+in-TEE 14.6 s)**, **recurring-only, no break-even K**. This is a *relocation*,
+not a speedup — total work is unchanged — but it is the correct structure
+(decode steps shouldn't pay a one-time setup) and it clears the ≥30%
+decode-wall acceptance tier outright. (The build overlaps the offloaded prefill;
+prefill attention itself is the separately-offloaded `tee:attn_prefill_offload`.)
+Per-op decomposition (pre-O4 numbers below; build_covered_prefix/bucket per the
+table above):
 
 > **Structured-orthogonal cover — tried, reverted (2026-06-01).** Two
 > replacements for the dense Haar rotate were considered. **(O4b) signed
