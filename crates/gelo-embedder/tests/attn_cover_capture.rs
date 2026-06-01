@@ -25,7 +25,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use ndarray::{Array2, ArrayView2};
-use rand::{SeedableRng, seq::SliceRandom};
+use rand::{RngCore, SeedableRng, seq::SliceRandom};
 use rand_chacha::ChaCha20Rng;
 use rand_distr::{Distribution, StandardNormal};
 use safetensors::{Dtype, View, serialize_to_file};
@@ -113,6 +113,13 @@ fn capture_attn_cover_adversary_view() -> Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0.01);
+    // Rotation-only cover = the offloaded-PREFILL cover (feature rotation
+    // O_qk/O_v, no permutation, σ=0). The Phase-5 WEIGHTS-PUB spike attacks
+    // this view. Default off → the decode capture is unchanged.
+    let rotation_only = std::env::var("GELO_CAPTURE_COVER")
+        .map(|v| v.eq_ignore_ascii_case("rotation"))
+        .unwrap_or(false);
+    let sigma = if rotation_only { 0.0 } else { sigma };
     let prompt = std::env::var("GELO_CAPTURE_PROMPT").unwrap_or_else(|_| {
         "The mitochondria is the powerhouse of the cell. In distributed \
          systems, consensus protocols like Raft elect a leader to order writes."
@@ -195,8 +202,12 @@ fn capture_attn_cover_adversary_view() -> Result<()> {
         assert_eq!(k_clean.dim(), (n_kv, kv_dim));
 
         // Cover: one fixed perm_kv over the n_kv axis (prefill-only).
+        // In rotation-only mode the permutation is the identity (the
+        // offloaded-prefill cover hides coordinates, not order).
         let mut perm: Vec<usize> = (0..n_kv).collect();
-        perm.shuffle(&mut rng);
+        if !rotation_only {
+            perm.shuffle(&mut rng);
+        }
 
         let mut k_sent = Array2::<f32>::zeros((n_kv, kv_dim));
         let mut v_sent = Array2::<f32>::zeros((n_kv, kv_dim));
@@ -235,6 +246,76 @@ fn capture_attn_cover_adversary_view() -> Result<()> {
         tensors.push((format!("layer{li:03}.perm_kv"), i64_vec_tensor(&perm_i64)));
     }
 
+    // Token ids — the ground truth for the WEIGHTS-PUB dictionary attack.
+    let input_ids_i64: Vec<i64> = input_ids.iter().map(|&x| x as i64).collect();
+    tensors.push(("input_ids".to_string(), i64_vec_tensor(&input_ids_i64)));
+
+    // Layer-0 value dictionary for the WEIGHTS-PUB Gram/norm attack. At
+    // layer 0, V(t) = rms_norm(embed(t), norm_attn[0])·W_V[0] is
+    // context-free (no attention, no positional dependence on the V path),
+    // so it is a single value projection over the candidate embeddings —
+    // not a 36-layer forward. Uses the model's own `rms_norm` + bf16
+    // weights; the Python attack verifies it matches `v_clean` on the
+    // prompt tokens (faithfulness check → no false negative).
+    if std::env::var("GELO_CAPTURE_DICT").map(|v| v == "1").unwrap_or(false) {
+        use gelo_embedder::decoder::rms_norm::rms_norm;
+        let vocab = weights.token_embedding.nrows();
+        let hidden = weights.token_embedding.ncols();
+        let n_distract: usize = std::env::var("GELO_CAPTURE_DICT_N")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1800);
+        let promptset: std::collections::HashSet<u32> = input_ids.iter().copied().collect();
+        let mut cand: Vec<u32> = {
+            let mut u: Vec<u32> = promptset.iter().copied().collect();
+            u.sort_unstable();
+            u
+        };
+        let n_true = cand.len();
+        let mut dr = ChaCha20Rng::seed_from_u64(0xD1C7_5EED_u64);
+        while cand.len() < n_true + n_distract {
+            let t = (dr.next_u32() as usize % vocab) as u32;
+            if !promptset.contains(&t) {
+                cand.push(t);
+            }
+        }
+        let mut emb = Array2::<f32>::zeros((cand.len(), hidden));
+        for (i, &t) in cand.iter().enumerate() {
+            let row = weights.token_embedding.row(t as usize);
+            for c in 0..hidden {
+                emb[(i, c)] = row[c].to_f32();
+            }
+        }
+        let normed = rms_norm(
+            emb.view(),
+            weights.layers[0].norm_attn.as_slice().expect("norm_attn contiguous"),
+            cfg.rms_norm_eps,
+        );
+        let wv0 = weights.layers[0].wv.as_ref().expect("wv[0]");
+        let mut wv0_f = Array2::<f32>::zeros((hidden, kv_dim));
+        for r in 0..hidden {
+            for c in 0..kv_dim {
+                wv0_f[(r, c)] = wv0[(r, c)].to_f32();
+            }
+        }
+        let dict_v = normed.dot(&wv0_f); // (K, kv_dim), layer-0 V per candidate token
+        tensors.push(("dict.v".to_string(), f32_tensor(dict_v.view())));
+        let cand_i64: Vec<i64> = cand.iter().map(|&x| x as i64).collect();
+        tensors.push(("dict.ids".to_string(), i64_vec_tensor(&cand_i64)));
+        eprintln!(
+            "[capture] dict: {} candidates ({} prompt-unique + {} distractors), layer-0 V (direct projection)",
+            cand.len(),
+            n_true,
+            cand.len() - n_true
+        );
+    }
+
+    let cover_str = if rotation_only {
+        "O_qk(K) + O_v(V), rotation-only (no perm, sigma=0) — offloaded-prefill cover"
+    } else {
+        "perm_kv + sigma-noise(K) + O_qk(K) + O_v(V), prefill-only"
+    };
+
     let st_path = out_dir.join("attn_cover.safetensors");
     let no_meta: Option<std::collections::HashMap<String, String>> = None;
     serialize_to_file(tensors.iter().map(|(k, t)| (k.clone(), t)), &no_meta, &st_path)
@@ -250,7 +331,7 @@ fn capture_attn_cover_adversary_view() -> Result<()> {
         "{{\n  \"schema_version\": \"attn-cover-1\",\n  \"model_id\": \"{}\",\n  \
          \"n_kv\": {n_kv},\n  \"kv_dim\": {kv_dim},\n  \"n_kv_heads\": {n_kv_heads},\n  \
          \"d_head\": {d_head},\n  \"sigma\": {sigma},\n  \"layers\": [{layers_json}],\n  \
-         \"cover\": \"perm_kv + sigma-noise(K) + O_qk(K) + O_v(V), prefill-only\",\n  \
+         \"cover\": \"{cover_str}\",\n  \
          \"keys\": \"layer{{L:03}}.{{k_clean,v_clean,k_sent,v_sent,perm_kv,o_v.head{{H:02}}}}\"\n}}\n",
         variant.hf_model_id(),
     );

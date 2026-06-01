@@ -628,8 +628,11 @@ expected trivial).
 **Three-way outcome:**
 - **Pass under `WEIGHTS-PUB`** ⇒ rotation-only ships as the prefill offload
   cover on `cubek-attention` (decode unchanged).
-- **Pass under `WEIGHTS-BLIND` but fail under `WEIGHTS-PUB`** (the expected
-  result, per the Gram-dictionary analysis) ⇒ the leak is precisely the
+- **Pass under `WEIGHTS-BLIND` but fail under `WEIGHTS-PUB`** — **this is the
+  MEASURED outcome (2026-06-01):** decode covariance-alignment held, but the
+  prefill rotation cover leaks every token (top-1 = 1.000) to the
+  norm/Gram-dictionary attack; see *Phase-5 spike — prefill rotation cover
+  BREAKS*. ⇒ the leak is precisely the
   *public-weight anchor*. Before abandoning, explore **covariant weight
   obfuscation (AloePri)**: statically transform the deployed weights (and
   compensate covariantly so the computation is unchanged) so that the
@@ -855,6 +858,172 @@ capability.)
    approaches the population, so covariance-alignment may strengthen at
    production lengths (2k–16k) — recheck there before relying on this.
 
+### Phase-5 spike — prefill rotation cover BREAKS under `WEIGHTS-PUB` (2026-06-01)
+
+This is the token-identity Gram/norm-dictionary attack caveat #1 named — run
+against the **rotation-only prefill cover** (the cover the fused kernel
+forces). Capture: `GELO_CAPTURE_COVER=rotation` in `attn_cover_capture.rs`
+(feature rotation only, no perm, σ=0) plus a layer-0 value **dictionary**
+`V(t)=rms_norm(embed(t))·W_V` built from the public weights (context-free at
+layer 0). Attack (`evals/aloepri-attacks/gate3_prefill_dict.py`, in the
+container): `O_v` is per-head orthogonal, so the per-head value **norm**
+`‖v_sent[p,h]‖=‖V(token_p)[h]‖` is `O_v`-invariant — match each (publicly
+ordered) position's `H`-head norm fingerprint to the nearest dictionary
+token.
+
+| run | n positions | K dict | dict faithfulness | top-1 | median rank | `O_v` |
+|---|--:|--:|--:|--:|--:|---|
+| short prompt | 26 | 1 224 | rel-err 0.00 | **1.000** | 0 | **BROKEN** |
+| longer prompt | 126 | 8 091 | rel-err 0.00 | **1.000** | 0 | **BROKEN** |
+
+**Every prompt token is recovered perfectly** (top-1 = 1.000, median rank 0
+vs chance ~1e-4) from the per-head value norms **alone** — the *cheapest*
+`O_v`-invariant; the full Gram is strictly stronger, so this is a lower
+bound. The faithfulness check (dictionary `V(t)` vs the captured `v_clean`
+on the prompt tokens, rel-err exactly 0) confirms the dictionary is the
+model's true layer-0 value map, so the result is valid, not an artifact.
+
+**Conclusion — rotation-only prefill offload does NOT clear the conservative
+(`WEIGHTS-PUB`) bar.** It confirms the first-principles prediction: the
+feature-rotation cover the fused kernel forces is defeated by a
+weights-equipped adversary, because the rotation cancels in every inner
+product / norm and the public weights turn those invariants into a per-token
+dictionary. Layer 0 suffices (its `V` is the input prompt). Combined with
+the decode covariance result, the spike lands at **pass-blind / fail-public**
+→ the next move is **covariant weight obfuscation (AloePri)**; absent a
+working obfuscation, **prefill stays in-TEE** and Phase 6 does not ship.
+
+*Caveats:* layer-0 only (deeper layers' `V` is contextual — untested, but
+layer-0 break already exposes the prompt); candidate pool 8 091, not the
+full 152 k vocab (median rank 0 implies it would survive full-vocab, but
+top-1 may dip with more collisions). Artefacts: rotation-only mode in
+`attn_cover_capture.rs`, `gate3_prefill_dict.py`, `captures_prefill/`.
+
+### Gate-3 @ `WEIGHTS-PUB` — decode permutation cover: membership leaks, order holds (2026-06-01)
+
+The same token-dictionary attack run against the **decode permutation cover**
+(default capture: `perm_kv` + σ(K) + `O_qk` + `O_v`; `gate3_prefill_dict.py`
+with `GELO_GATE_CAPDIR=captures_decode`), scoring per **physical slot** (the
+true token at slot `i` is `input_ids[perm_kv[i]]`):
+
+| cover | n slots | K dict | dict faithfulness | per-slot top-1 | median rank |
+|---|--:|--:|--:|--:|--:|
+| decode (perm + σ + `O_qk` + `O_v`) | 126 | 8 091 | rel-err 0.00 | **1.000** | 0 |
+
+**Token membership leaks; order does not.** The per-head value norm is
+`O_v`-invariant *and* the permutation merely relabels rows, so every slot's
+**token identity** is recovered perfectly (top-1 = 1.000) — i.e. the
+**bag-of-tokens (multiset)** of the context is exposed under `WEIGHTS-PUB`,
+exactly as for prefill. What the permutation **does** protect is **order**:
+recovering *which position* a slot maps to is the separate gate-2 seriation
+channel, measured weak (|τ| ≈ 0.1). σ on K is irrelevant here (the V path
+carries no σ).
+
+This **coexists with the covariance-alignment result** above: `O_v` is not
+*pinned* (covariance alignment failed → "O_v holds"), but the dictionary
+attack never tries to — it rides the `O_v`-invariant. So the precise decode
+statement under the conservative bar is: **`O_v` hides value *coordinates*,
+`perm_kv` hides *order*, but neither hides *which tokens are present* once the
+weights are public.**
+
+#### Why it leaks — and a minimal recovery attack (step by step)
+
+The resident value cache is covered with three secrets — a row permutation
+`π`, a per-head orthogonal rotation `O_v`, and σ-noise — yet **none of them
+perturbs the per-head value *norm***, and that norm is a public per-token
+quantity. Write the covered cache (per head `h`, physical slot `i`):
+
+```
+v_sent[i,h] = V[π(i), h] · O_v[h]            (σ is on K only — the V path is clean)
+```
+
+**What each secret protects, and why the norm slips through all three:**
+- `O_v[h]` is **orthogonal** ⇒ it preserves length: `‖x·O_v[h]‖ = ‖x‖`. It
+  hides the value *direction* (coordinates), not its *norm*.
+- `π` only **relabels** slots; the value at a slot is still some token's value,
+  so a per-slot quantity remains a per-token quantity. `π` hides *order*, not
+  *identity*.
+- σ-noise is applied to **K**, never to **V** (the `probs·V` contraction over
+  the token axis makes additive V-noise uncorrectable — see the fallback
+  section), so the V fingerprint carries no noise at all.
+
+⇒ the H-vector `r_i = (‖v_sent[i,0]‖, …, ‖v_sent[i,H-1]‖)` equals
+`(‖V[π(i),0]‖, …)` — a clean fingerprint of the token in slot `i`, free of all
+three secrets. The only remaining unknown is the map token → fingerprint, and
+`WEIGHTS-PUB` supplies it.
+
+**Minimal recovery attack** (uses only the per-head norm and public `W_V` —
+no `π`, no `O_v`, no optimisation):
+
+1. **Fingerprint each slot.** For every physical slot `i`, compute
+   `r_i[h] = ‖v_sent[i, h·d:(h+1)·d]‖` (`H` scalars). `O_v`-invariant by the
+   orthogonality above; `π`-relabelled only; σ-free.
+2. **Build the dictionary from public weights (layer 0, context-free).** For
+   every vocabulary token `t`, compute its layer-0 value
+   `V(t) = rms_norm(E[t], γ₀)·W_V` and its norm fingerprint
+   `D[t] = (‖V(t)[0]‖, …, ‖V(t)[H-1]‖)`. Context-free because at layer 0 the
+   V path has no attention/positional dependence (RoPE is Q/K-only), so a
+   single value projection over the embedding table suffices — no forward.
+3. **Nearest-fingerprint match.** Assign slot `i` the token
+   `t*_i = argmin_t ‖r_i − D[t]‖` (per-head-standardised L2).
+4. **Read membership.** `{ t*_i }` is the recovered **multiset** of context
+   tokens. Order is not recovered (slot↔position is `π`); coordinates are not
+   recovered (`O_v`) — but the bag-of-tokens is out.
+
+Measured: per-slot top-1 = 1.000 (n=126, K=8091) — perfect — from `H=8`
+scalars per token. **Escalation if fingerprints collide:** the full per-head
+Gram `G[i,j] = v_sent[i,h]·v_sent[j,h]ᵀ = V[π(i),h]·V[π(j),h]ᵀ` is also
+`O_v`-invariant and disambiguates via a quadratic-assignment match against the
+dictionary's cross-Gram — strictly stronger than norms, and unneeded here. The
+**only** step that depends on a secret-the-defender-controls is step 2's public
+`W_V`; obfuscating it (AloePri, Phase 5b) is the sole lever that closes the
+attack.
+
+**Decode finalization (`WEIGHTS-PUB`).** The offloaded decode cover protects
+sequence order, not membership. Whether a bag-of-tokens leak is acceptable is
+a deployment/policy call: the adversary learns the set of tokens in the
+context window (a bag-of-words view of prompt + generation), not their
+arrangement. If membership-hiding is required, the only lever that closes it
+is the same as prefill — **covariant weight obfuscation (AloePri, Phase 5b)**,
+which removes the public-weight dictionary. Absent that, decode offload ships
+**only if the bag-of-tokens residual is accepted** (gate it at the c5 AloePri
+acceptance condition). Artefact: `captures_decode/`.
+
+#### Alternative mitigation — decoy tokens / k-anonymity (NOT planned)
+
+Recorded as the one cover-independent alternative to covariant obfuscation,
+**not on the roadmap.** Since no correctable *cover* can hide membership
+without being a covariant representation (the impossibility above), the only
+other way to blunt the bag-of-tokens leak is to **obscure rather than
+eliminate** it: pad the resident K/V cache with **decoy ("chaff") token
+rows**, permuted in among the real ones by `perm_kv`. The norm/Gram-dictionary
+attack then recovers the token identity of *every* slot — so the adversary
+gets `real ∪ decoy`, and each real token hides among the decoys. This is a
+**k-anonymity / plausible-deniability** guarantee (≈ "the prompt is some
+size-`m` subset of these `m·(1+r)` tokens"), **not** elimination — the real
+tokens are still recovered, just not isolated.
+
+**Why it stays an alternative, not the plan:**
+- **Statistical, not structural.** It weakens an attacker's *certainty*, not
+  their *recovery*. A determined attacker with content/language priors can
+  re-rank real vs decoy (decoys drawn from a flat vocab distribution stand out;
+  realistic decoys are themselves expensive to generate).
+- **Cost hits exactly what the offload optimises.** Per-step decode attention
+  and the resident cache scale with `(1+r)·n` — the chaff ratio `r` directly
+  inflates the V-cache reads the offload exists to make cheap, and worsens the
+  NVMe-spill economics.
+- **Correctly excluding decoys without revealing them is an open ORAM-flavoured
+  problem.** Decoys must not perturb the true `P·V`, yet masking their scores
+  to `−∞` makes their softmax weight exactly zero — an observable zero/score
+  pattern that re-identifies them, defeating the hiding. A construction that
+  both neutralises decoys *and* keeps them indistinguishable is non-trivial and
+  unbudgeted.
+
+⇒ **covariant weight obfuscation (AloePri, Phase 5b) remains the planned lever**
+(it closes the leak *and* keeps the offload); decoys are noted only as the
+fallback shape if obfuscation proves unviable *and* the bag-of-tokens residual
+is judged unacceptable.
+
 ## Acceptance gate (v1)
 
 Layered — failing any tier reopens the TwinShield-Xue fallback:
@@ -1061,12 +1230,22 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
    rotation-only ships (decode unchanged); pass blind / fail public ⇒
    explore covariant weight obfuscation (AloePri); fail both ⇒ in-TEE
    prefill (or the separate TwinShield GEMM-offload lever).**
-8. **Phase 6 — prefill-attention offload** (on a spike pass): integrate
-   `cubek-attention` into the engine (`fused_attention_batched`), feed
-   rotation-covered (`O_qk`/`O_v`, σ=0) + GQA-expanded prompt K/V, public
-   triangular mask, `Unit`/`Blackbox` autotune; correct `·O_vᵀ` in-TEE on
-   readback; the resident decode cache is built separately under the
-   permutation cover at the handoff. Bench vs the 43.7 s in-TEE
+   **⛔ BLOCKED by the Phase-5 result (2026-06-01):** the rotation cover
+   leaks every prompt token under `WEIGHTS-PUB` (top-1 = 1.000), so Phase 6
+   does **not** proceed as-is. It is gated behind **Phase 5b** below.
+7b. **Phase 5b — covariant weight obfuscation (AloePri), if pursuing prefill
+   offload.** Statically transform the deployed weights (compensated
+   covariantly) so the attacker's public `W` no longer matches the deployed
+   `W'`, collapsing the known bilinear forms to unknown and removing the
+   dictionary. Then re-run the Phase-5 spike against the obfuscated
+   deployment. Open: obfuscation correctness/overhead + composition with the
+   fused kernel. If it does not pan out, **prefill stays in-TEE**.
+8. **Phase 6 — prefill-attention offload** (gated on Phase 5b clearing):
+   integrate `cubek-attention` into the engine (`fused_attention_batched`),
+   feed rotation-covered (`O_qk`/`O_v`, σ=0) + GQA-expanded prompt K/V,
+   public triangular mask, `Unit`/`Blackbox` autotune; correct `·O_vᵀ`
+   in-TEE on readback; the resident decode cache is built separately under
+   the permutation cover at the handoff. Bench vs the 43.7 s in-TEE
    `tee:attn_inplace_many` prefill bucket.
 9. **Acceptance + flip** — the 4-tier gate, then default-on behind the
    c5 AloePri condition (mirrors R3).
