@@ -157,7 +157,7 @@ per-op tables **with execution counts** are in the dev-log §*Offload perf-upsid
   session-fixed; `GELO_GPU_RESIDENT_COVER`, greedy-parity byte-identical at σ=0):
   attention bucket **13.8 s** vs in-TEE 14.6 s (bare-resident 8.7 s) at n=2048,
   K=32. **Per step it is ~2.9× faster than in-TEE** (157 vs 455 ms/step over 36
-  layers); the one-time prefix re-cover `create_build+upload` (8.8 s = 36 layers ×
+  layers); the one-time prefix re-cover `build_covered_prefix+upload` (8.8 s = 36 layers ×
   243 ms — dense-`O` rotate + permute + upload of the 2048-row prefix) is **63%
   of the K=32 bucket**, so it is break-even at **K≈30** and a growing win beyond
   (≈2.4× at K=256, →2.9×).
@@ -175,7 +175,7 @@ the same "upload tax" the original triage flagged, not the attention math:
 - **Prefill:** per-call **f32→f16 convert + 4× GQA-expanded K/V upload** (cubek
   has no native GQA), a ~680 ms fixed cost that only amortizes at long context →
   marginal at n=2048, strong at n≥8k.
-- **Decode:** the **one-time dense-`O` prefix re-cover + upload** (`create_build`,
+- **Decode:** the **one-time dense-`O` prefix re-cover + upload** (`build_covered_prefix`,
   ~243 ms/layer), dominating at short K; the per-step path is already a 2.9× win.
 
 Common root: the cover/operand **convert + upload + dense rotation**. Covariant
@@ -194,7 +194,7 @@ independently, and it sets the real go/no-go for each offload.
   a **kv-head-broadcast** read-index to cubek's K/V loader to drop the 4×
   GQA-expanded upload. Target: lift n=2048 from 1.09× toward the ~5× compute
   ceiling. Re-run `crates/gelo-gpu-wgpu/tests/cubek_prefill_cover.rs`.
-- **Decode:** cut the one-time `create_build` — use the **structured
+- **Decode:** cut the one-time `build_covered_prefix` — use the **structured
   signed-permutation `O(L·d)`** cover instead of the dense rotate (the bulk of
   243 ms/layer), and/or build the cover **at prefill** (overlap), and/or
   bf16/un-replicated upload. Target: break-even K well below 30. Secondary: the

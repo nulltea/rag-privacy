@@ -1120,19 +1120,37 @@ that single CPU bucket:
 | one-time prefix re-cover (×36, amortized) | — | 8 765 ms | **4 428 ms** |
 | break-even K | — | ≈30 | **≈15** |
 
-**O4(a) — ✅ LANDED (2026-06-01).** The `create_build` perm+σ step was a serial
+**O4(a) — ✅ LANDED (2026-06-01).** The `build_covered_prefix` perm+σ step was a serial
 `bh·prefix·dh` (≈16.7 M) scalar loop drawing a `StandardNormal` *per element*;
 replaced with a row-level permutation gather (attention is permutation-invariant
 over the key set, so σ=0 stays exact) + per-head σ-on-K noise, parallelised over
-the B·nkvh heads. `create_build` **8 765 → 4 428 ms** (≈halved), bucket
+the B·nkvh heads. `build_covered_prefix` **8 765 → 4 428 ms** (≈halved), bucket
 **13.8 → 9.3 s = 1.57×**, break-even **K≈30 → ≈15**. The per-step path is a clean
-~3× win. What remains in `create_build` is now the **dense `O(d²)` rotate**
-(`rotate_heads`, O4(b) target) + the SIMD convert/upload. Per-op decomposition
-(pre-O4 numbers below; create_build/bucket per the table above):
+~3× win. What remains in `build_covered_prefix` is the **dense `O(d²)` rotate**
+(`rotate_heads`) + the SIMD convert/upload. Per-op decomposition (pre-O4 numbers
+below; build_covered_prefix/bucket per the table above):
+
+> **Structured-orthogonal cover — tried, reverted (2026-06-01).** Two
+> replacements for the dense Haar rotate were considered. **(O4b) signed
+> permutation** (`O(L·d)`) was deferred: it collapses the cover's entropy and
+> would forfeit the `WEIGHTS-BLIND` content-hiding (gate-3 "`O_v` holds" assumes
+> a dense rotation). **HD₃** (FWHT cascade — well-mixed, no entropy collapse) was
+> implemented end-to-end (decode + prefill, behind a parity test) but **measured
+> a regression and was reverted**: applied per-`d`-block through the existing
+> `Hd3Mask::apply_in_place_slice` API, the per-call overhead loses to the BLAS
+> dense matmul at our shapes — prefill `rotate_tee` 4.2 s → 6.6 s, `correct_tee`
+> 2.6 s → 3.7 s (pure-CPU buckets, so attributable), prefill bucket 2.71× →
+> 2.29×; decode was ~neutral (small per-step `q_cover`/`acc_uncover` wins offset
+> by a convert/upload-bound `build_covered_prefix` that the rotate no longer
+> dominates). Realising HD₃'s `O(d·log d)` advantage needs a **batched
+> feature-axis FWHT** (transpose to feature-major + the cols-vectorised kernel),
+> whose transposes likely erode the win at `d=128` where BLAS is already
+> efficient — left as a deferred spike, not the current lever. The cover stays
+> dense Haar.
 
 | op | where | total ms | × executed | per-call | count meaning |
 |---|---|--:|--:|--:|---|
-| `create_build+upload` | TEE+GPU | 8 765 | **36** | 243.5 ms | once per layer (first decode step) — the session-fixed prefix re-cover |
+| `build_covered_prefix+upload` | TEE+GPU | 8 765 | **36** | 243.5 ms | once per layer (first decode step) — the session-fixed prefix re-cover |
 | `prefix_partial_gpu` | **GPU** | 3 399 | **1 152** | 2.95 ms | every layer × step (36×32) — partial-stats attend over the frozen prefix |
 | `q_cover_tee` | TEE | 384 | **1 152** | 0.33 ms | every layer × step — `q·O_qk` + σ |
 | `acc_uncover_tee` | TEE | 210 | **1 152** | 0.18 ms | every layer × step — `acc·O_vᵀ` |
@@ -1142,7 +1160,7 @@ the B·nkvh heads. `create_build` **8 765 → 4 428 ms** (≈halved), bucket
 | **total** (`tee:attn_resident_cover`) | | **13 832** | **1 152** | 12.0 ms | per-(layer,step) closure |
 
 **Finding — the overhead is a one-time cost that amortizes, not a per-step
-tax.** `create_build+upload` is **63% of the wall but 3% of the executions**
+tax.** `build_covered_prefix+upload` is **63% of the wall but 3% of the executions**
 (36 / 1 152): the heavy dense-`O` rotation + permute + upload of the whole
 2048-row prefix, paid once per layer. The **recurring per-step** cost (all 36
 layers) is only ≈157 ms (`5 036 ms / 32`) vs in-TEE ≈455 ms (`14 574 / 32`) —
@@ -1157,7 +1175,7 @@ Amortization model `bucket(K) ≈ 8 765 + 157·K` vs in-TEE `455·K`:
 | →∞ | — | — | 2.9× |
 
 **Break-even at K≈30; a win for realistic generation lengths.** The one-time
-`create_build` is itself reducible (the structured signed-permutation `O(L·d)`
+`build_covered_prefix` is itself reducible (the structured signed-permutation `O(L·d)`
 `O` instead of the dense rotate; building the cover at prefill; bf16/un-
 replicated upload), which lowers break-even further. (Earlier un-cached runs
 read 19.6 s because `O` was re-derived via scalar Gram-Schmidt every step — an

@@ -19,7 +19,7 @@ the production forward path** (`decoder_block_batched`, default-off) with O1
 (SIMD convert) + O2 (un-replicated K/V + on-device GQA expand) landed —
 **measured 2.71×** on the real prefill-attention bucket (44.1 s → 16.2 s),
 verified correct. Remaining prefill micro-levers are **deferred**. Next session:
-**decode optimizations** (cut the one-time `create_build`, then the fused
+**decode optimizations** (cut the one-time `build_covered_prefix`, then the fused
 partial-stats kernel).
 
 The design source of truth is **`docs/dev/logs/perm-attn-gpu-offload.md`** — read
@@ -70,17 +70,17 @@ These are diminishing returns on a default-off, security-blocked path. Stop here
 Decode permuted-cover tail-in-TEE is already wired (`GELO_GPU_RESIDENT_COVER`,
 greedy-parity byte-identical at σ=0). State: attn bucket ≈ 13.8 s vs in-TEE
 14.6 s; **recurring per-step already ~2.9× faster** (157 vs 455 ms/step); the
-one-time **`create_build` is 63 % of the bucket** and sets break-even at K≈30.
+one-time **`build_covered_prefix` is 63 % of the bucket** and sets break-even at K≈30.
 Levers (dev-log *Next steps* / *Sequencing* §O4–O6):
 
-- **O4 — cut `create_build`** (≈250 ms/layer, the gating term). Two parts:
+- **O4 — cut `build_covered_prefix`** (≈250 ms/layer, the gating term). Two parts:
   (a) **vectorize the perm+σ scalar loop** (`forward.rs` create branch — a triple
   `for h/i/c` with a per-element `StandardNormal` sample; bulk-generate K-noise
   via the existing parallel-ChaCha `add_gaussian_noise_3d`, do the perm as
   `d`-length row copies, skip RNG at σ=0); (b) **structured signed-permutation
   `O(L·d)`** cover instead of the dense `[d,d]` rotate (the swing term). Security
   is Phase-5b's concern — the cover only needs correctable orthogonality here.
-- **O5 — build the decode cover at prefill** (overlap; moves `create_build` off
+- **O5 — build the decode cover at prefill** (overlap; moves `build_covered_prefix` off
   the decode critical path entirely — biggest mover for the decode-wall metric).
 - **O6 — fused partial-stats kernel** — collapse the 5-dispatch
   `prefix_partial_gpu` (≈3 ms × 1152) that the composed `attend_session_partial`
@@ -134,7 +134,7 @@ Quick refs:
   the O5 prefill-overlap shape, before implementing (user prefers being grilled
   on design forks; explain mechanism in prose before structured options — memory
   `feedback-elaborate-before-options`).
-- **`code-review`** — before committing the decode `create_build` changes
+- **`code-review`** — before committing the decode `build_covered_prefix` changes
   (touches the parity-critical cover path).
 - **`diagnose`** — if an O4 change breaks the σ=0 greedy byte-parity, for a tight
   loop to find why.

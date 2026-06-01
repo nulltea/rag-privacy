@@ -723,7 +723,7 @@ fn decoder_block_cached_batched(
             if kv_cache.gpu_session(layer_idx as usize).is_none() {
                 // One-time covered-prefix build + upload (the session-fixed
                 // "re-permute" cost, paid once per layer; amortized over K).
-                profile::time("cover:create_build+upload", || -> Result<()> {
+                profile::time("cover:build_covered_prefix+upload", || -> Result<()> {
                     let mut crng = ChaCha20Rng::seed_from_u64(SALT ^ layer_idx as u64);
                     let o_qk = sample_orthogonal(dh, &mut crng);
                     let o_v = sample_orthogonal(dh, &mut crng);
