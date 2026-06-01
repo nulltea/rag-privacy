@@ -43,9 +43,9 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [x] | CryptoMoE ★ | Zhou et al. 2026 | generate | HbC/MPC | 2.8–3.5× vs dense MoE | balanced-expert-routing private MoE |
 | [ ] | PUMA | 2023 (2307.12533) | embed,generate | HbC/3PC | ~200s/tok (7B); proto-design | polynomial softmax/GELU |
 | [ ] | BOLT | 2024, S&P | embed,generate | HbC/2PC | min-scale (BERT); token-prune | HE+ASS, Remez softmax |
-| [ ] | BumbleBee | 2025, NDSS | embed,generate | HbC/2PC | ~8min/tok (7B) | HE+ASS, segmented-poly exp |
+| [x] | BumbleBee | 2025, NDSS | embed,generate | HbC/2PC | ~8min/tok (7B) | HE+ASS, segmented-poly exp; **2PC SOTA — most robust trust (no dealer/3-party)** |
 | [ ] | MPCFormer | 2023, ICLR | embed,generate | HbC/MPC | ~68s (BERT-base); quad approx | 2Quad + distillation |
-| [ ] | SIGMA | 2024, PETS | embed,generate | HbC/2PC | 45GB FSS key (BERT-large) | GPU FSS LUTs for max/exp/recip |
+| [x] | SIGMA | 2024, PETS | embed,generate | HbC/2PC (FSS setup) | 45GB FSS key (BERT-large) | GPU FSS LUTs; **best online perf / billion-param scale**; weaker trust (setup) |
 | [ ] | Nimbus | 2024, NeurIPS | embed,generate | HbC/2PC | ? | distribution-aware poly nonlinears |
 | [ ] | Ditto | 2024, ICML | embed,generate | HbC/3PC | ? | quantization-aware |
 | [ ] | FABLE | 2025, USENIX | embed | HbC/MPC | ? | secret-table embedding lookup |
@@ -95,7 +95,7 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [x] | PipeLLM | 2025, ASPLOS (2411.03357) | generate | HbC/GPU-TEE | <19.6% | pipelined PCIe-AES |
 | [ ] | Oblix | Mishra et al. 2018, S&P | retrieve,rerank | HbC/SGX+ORAM | 4.5–6.5× vs ZeroTrace | doubly-oblivious search index |
 | [ ] | Snoopy | Dauterman et al. 2021, SOSP | store,retrieve | HbC/TEE-obliv | 13.7× vs Obladi | scalable oblivious object store |
-| [ ] | H100 CC baseline | (2509.18886 / 2409.03992) | embed,generate | HbC/GPU-TEE | 4–8% | whole-GPU enclave, PCIe AES-GCM |
+| [x] | H100 CC baseline | (2509.18886 / 2409.03992) | embed,generate | HbC/GPU-TEE | 4–8% | whole-GPU enclave, PCIe AES-GCM |
 | [ ] | CC-GPU perf studies | (2505.16501; ACM Queue 2024; 2507.02770) | e2e | — | varies | confidential-GPU measurement studies |
 
 ## 4. Static Obfuscation
@@ -139,7 +139,7 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [x] | SCX ★ | 2025, SIGCOMM | generate | HbC/TEE | near-zero online | per-session one-time-key; (ε,0)-DP not OTP |
 | [x] | Amulet | 2025 (2512.07495) | embed,generate | HbC/TEE | 2.8–4.8× vs GPU; 8–9× vs TEE | per-round fresh invertible masks all layers |
 | [ ] | TOGES | Kane & Bkakria 2024, LNCS (2405.19259) | retrieve,gt | HbC/SGX+ORAM | wall-clock n/a (paywalled) | graph enc, Path-ORAM position-map in SGX |
-| [ ] | PrivGemo | Tan et al. 2026 (2601.08739) | retrieve,generate,gt,e2e | HbC/none+anon | no crypto cost (quality only) | dual-tower KG-RAG, HMAC session anonymization |
+| [x] | PrivGemo | Tan et al. 2026 (2601.08739) | retrieve,generate,gt,e2e | HbC/none+anon | no crypto cost (quality only) | dual-tower KG-RAG, HMAC session anonymization; **graph-RAG defense** |
 
 ## 7. Targeted / Composable Verification (lightweight integrity)
 
@@ -161,7 +161,7 @@ proving overhead is 100×–1000s×.
 |  | **C. Code / enclave attestation** — composes w/ every §3/§6 TEE scheme |  |  |  |  |  |
 | [x] | Remote attestation / RATLS | TDX DCAP · SEV-SNP · H100 CC | setup | Mal/code-identity | ~0 (one-time) | verifies the *right enclave code/version* runs before trust — identity, not computation |
 |  | **D. Corpus provenance / freshness / anti-rollback** — composes w/ §2 storage+RAG; defends §8 poisoning |  |  |  |  |  |
-| [ ] | Corpus commitment + freshness | Merkle/version (Opal-style) | store,retrieve | Mal/integrity | ~0 (hash) | answer grounded in an authorized, untampered, fresh corpus; the cheap default |
+| [x] | Corpus commitment + freshness | Merkle/version (Opal-style) | store,retrieve | Mal/integrity | ~0 (hash) | answer grounded in an authorized, untampered, fresh corpus; **the cheap defense vs §8 poisoning** |
 | [x] | ZKPROV\* | 2025 (2506.20915) | retrieve,e2e | Mal/integrity | ZK provenance (\*heavier) | ZK dataset-provenance — the heavy-crypto variant of the row above |
 |  | **E. Model commitment / anti-substitution** — composes w/ any inference scheme |  |  |  |  |  |
 | [x] | Model commitment | hash/Merkle + attested hash | setup | Mal/integrity | ~0 (hash) | served model = the committed one; blocks silent model swap/backdoor |
