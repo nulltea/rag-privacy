@@ -1148,3 +1148,130 @@ impl GpuOffloadEngine for WgpuVulkanEngine {
         }
     }
 }
+
+/// Folded-head attention via the `cubek-attention` portable kernel.
+///
+/// Treats the leading dim of `q`/`k`/`v` (`[B*Hq, n_q, d]` /
+/// `[B*Hq, n_kv, d]`) as cubek's `batch` with `num_heads = 1` — each
+/// folded head is an independent attention problem. K/V must already be
+/// GQA-expanded to `Hq` by the caller, so the fold is uniform.
+///
+/// Inputs are f32 host arrays; converted to f16 LE bytes, uploaded as
+/// device tensors, attended with `Strategy::Unit(BlueprintStrategy::Inferred(()))`
+/// (the portable, non-tensor-core kernel), then read back and converted
+/// f16 → f32. Returns `[B*Hq, n_q, d]`.
+///
+/// Acquires its own cubecl client on the default device (mirrors the
+/// `cubek_attention_spike` test); independent of `WgpuVulkanEngine`
+/// internals.
+pub fn cubek_attention_folded(
+    q: ArrayView3<'_, f32>,
+    k: ArrayView3<'_, f32>,
+    v: ArrayView3<'_, f32>,
+    scale: f32,
+    causal: bool,
+) -> Array3<f32> {
+    use cubecl::ir::{ElemType, FloatKind, StorageType};
+    use cubecl::std::tensor::TensorHandle;
+    use cubek_attention::definition::{
+        AccumulatorPrecision, AttentionDims, AttentionGlobalTypes, AttentionOptions,
+        AttentionProblem,
+    };
+    use cubek_attention::launch::{BlueprintStrategy, Strategy, launch};
+
+    let bh = q.shape()[0];
+    let n_q = q.shape()[1];
+    let d = q.shape()[2];
+    let n_kv = k.shape()[1];
+    assert_eq!(k.shape()[0], bh, "K leading dim must match Q (GQA-expanded)");
+    assert_eq!(v.shape()[0], bh);
+    assert_eq!(k.shape()[2], d);
+    assert_eq!(v.shape()[2], d);
+    let _ = scale; // cubek derives scale = 1/sqrt(head_dim) internally.
+
+    let device = Dev::default();
+    let client = <Rt as cubecl::Runtime>::client(&device);
+
+    let f16_dtype = StorageType::Scalar(ElemType::Float(FloatKind::F16));
+    let global_dtypes = AttentionGlobalTypes::from_single_dtype(f16_dtype);
+
+    let to_f16_bytes = |arr: ArrayView3<'_, f32>| -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(arr.len() * 2);
+        for &val in arr.iter() {
+            bytes.extend_from_slice(&f16::from_f32(val).to_le_bytes());
+        }
+        bytes
+    };
+
+    let q_bytes = to_f16_bytes(q);
+    let k_bytes = to_f16_bytes(k);
+    let v_bytes = to_f16_bytes(v);
+
+    // cubek shape: [batch, num_heads, seq, head_dim] with num_heads = 1.
+    let q_shape = vec![bh, 1, n_q, d];
+    let kv_shape = vec![bh, 1, n_kv, d];
+    let out_shape = vec![bh, 1, n_q, d];
+    let elem_size = 2;
+
+    let q_alloc = client.create_tensor_from_slice(&q_bytes, &q_shape, elem_size);
+    let k_alloc = client.create_tensor_from_slice(&k_bytes, &kv_shape, elem_size);
+    let v_alloc = client.create_tensor_from_slice(&v_bytes, &kv_shape, elem_size);
+
+    let q_tensor: TensorHandle<Rt> =
+        TensorHandle::new(q_alloc.handle, q_shape, q_alloc.strides, f16_dtype);
+    let k_tensor: TensorHandle<Rt> =
+        TensorHandle::new(k_alloc.handle, kv_shape.clone(), k_alloc.strides, f16_dtype);
+    let v_tensor: TensorHandle<Rt> =
+        TensorHandle::new(v_alloc.handle, kv_shape, v_alloc.strides, f16_dtype);
+    let out_tensor: TensorHandle<Rt> =
+        TensorHandle::empty(&client, out_shape, f16_dtype);
+
+    let options = AttentionOptions {
+        causal,
+        accumulator_precision: AccumulatorPrecision::default(),
+    };
+    let problem = AttentionProblem {
+        dims: AttentionDims {
+            batch: bh,
+            num_heads: 1,
+            seq_q: n_q,
+            seq_kv: n_kv,
+            head_dim: d,
+            val_dim: d,
+        },
+        masked: false,
+        global_dtypes: global_dtypes.clone(),
+        options: options.clone(),
+    };
+    let _ = problem;
+
+    // Strategy: `unit` = portable (no tensor cores); `blackbox` = accelerated
+    // (cooperative-matmul / tensor cores). Select via CUBEK_STRATEGY.
+    let strategy = match std::env::var("CUBEK_STRATEGY").as_deref() {
+        Ok("blackbox") => {
+            Strategy::BlackboxAccelerated(BlueprintStrategy::Inferred(Default::default()))
+        }
+        _ => Strategy::Unit(BlueprintStrategy::Inferred(())),
+    };
+
+    launch::<Rt>(
+        strategy,
+        &client,
+        q_tensor,
+        k_tensor,
+        v_tensor,
+        None,
+        out_tensor.clone(),
+        &global_dtypes,
+        options,
+    )
+    .expect("cubek_attention_folded launch failed");
+
+    let out_bytes = client.read_one(out_tensor.handle);
+    let mut out = Array3::<f32>::zeros((bh, n_q, d));
+    for (dst, chunk) in out.iter_mut().zip(out_bytes.chunks_exact(2)) {
+        let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
+        *dst = f16::from_bits(bits).to_f32();
+    }
+    out
+}

@@ -7,14 +7,18 @@ tags: [gelo, dgpu, attention, gpu, prefill, feature-rotation, threat-model, aloe
 companion: [perm-attn-gpu-offload]
 ---
 
-# Handoff — feature-rotated prefill offload breaks under public weights; next is AloePri obfuscation
+# Handoff — offload covers break under public weights; both paths now wired + benched; next is perf-opt then AloePri
 
 **One-liner.** The permutation cover can't defend *offloaded prefill* (causal-mask
-leak), so the prefill-offload path pivoted to a **feature-rotation cover**. A
-Phase-5 security spike then showed feature rotation is **broken under the
-public-weights threat model** — perfect token recovery. The open question for the
-next session: is feature-rotated prefill offload viable if we add **covariant
-weight obfuscation (AloePri)**?
+leak), so prefill pivoted to a **feature-rotation cover**; the Phase-5
+`WEIGHTS-PUB` spike then showed *both* covers leak token identity (prefill rotation:
+token + position; decode permutation: membership). Both offload paths are now
+**wired with their cover applied end-to-end and benched** (see *Perf-upside
+measured*): the GPU compute is fast, but a **convert/upload/dense-rotate
+bottleneck** keeps them from cleanly beating in-TEE at production shape. Two open
+threads for the next session, **in order**: **Phase 5a** optimize that bottleneck
+on both paths (pure perf), then **Phase 5b** verify + implement **covariant weight
+obfuscation (AloePri)** to make the rotation cover secure.
 
 Everything design-level lives in **`docs/dev/logs/perm-attn-gpu-offload.md`** — read it
 first. This handoff only captures the load-bearing math, the current artifact
@@ -92,34 +96,112 @@ covariance.
 
 ## Current artifact state
 
-- **Plan** `docs/dev/logs/perm-attn-gpu-offload.md` — fully refactored: standardized
-  assumptions, attack vector + causal-mask leak, cubek/cover-split, the two gate-3
-  `WEIGHTS-PUB` results, and sequencing with **Phase 6 ⛔ BLOCKED** behind a new
-  **Phase 5b (AloePri weight obfuscation)**.
-- **Commit `6f5b31c`** = plan (threat-model standardization, cover-split) +
-  `gate3_weights_anchor.py` (decode covariance rerun).
-- **UNCOMMITTED** (this session's prefill spike): `crates/gelo-embedder/tests/attn_cover_capture.rs`
-  (new `GELO_CAPTURE_COVER=rotation` mode + faithful layer-0 value dictionary via a
-  single projection), `evals/aloepri-attacks/gate3_prefill_dict.py`, and the plan's
-  Phase-5 prefill-break subsection. Commit these first.
-- Capture data `evals/aloepri-attacks/captures_prefill/` is **gitignored** (regenerate
-  via the command below).
+**The design log is the source of truth:** `docs/dev/logs/perm-attn-gpu-offload.md`
+(promoted from a plan; standardized threat model, attack vector + causal-mask leak,
+cubek/cover-split, both `WEIGHTS-PUB` gate-3 results, the *Offload perf-upside —
+per-op breakdowns* tables, sequencing with **Phase 6 ⛔ BLOCKED** behind Phase 5a
+(perf) → Phase 5b (AloePri)).
 
-## Reproduce the spike
+Committed:
+- `6f5b31c` — threat-model standardization + cover-split + `gate3_weights_anchor.py`.
+- `9935d34` — Phase-5 spike (rotation cover capture mode, `gate3_prefill_dict.py`, prefill-break + decode-membership results).
+- `b33409f` — promote plan → dev-log (moved to `docs/dev/logs/`) + paper-review fixes.
+
+**UNCOMMITTED (this session — the two offload wires + the perf section):**
+- *Permuted-decode secure wire* (greedy-parity byte-identical at σ=0): `forward.rs`
+  (cover branch + `gpu_resident_cover_enabled`/`rotate_heads`/`stack_tail_expanded`/
+  `sample_orthogonal`), `kv_cache.rs` (`DecodeCover` + accessors),
+  `substrate.rs`/`sim.rs` (`resident_kv_attend_partial`), `gelo-protocol/lib.rs`
+  (re-export `attention_partial`/`merge_attention_partials`), `gelo-embedder/Cargo.toml`
+  (`rand_distr`). Flags: `GELO_GPU_RESIDENT_COVER`, `GELO_RESIDENT_SIGMA`.
+- *Prefill cubek bench*: `gelo-gpu-wgpu/src/lib.rs` (`cubek_attention_folded` +
+  `CUBEK_STRATEGY` env: `unit`|`blackbox`), `tests/cubek_prefill_cover.rs`.
+- *Dev-log* perf-upside per-op breakdowns section.
+- Capture/bench data (`evals/aloepri-attacks/captures_*`) is **gitignored**.
+
+## Reproduce
 
 ```bash
+# --- Phase-5 WEIGHTS-PUB spike (the break) ---
 # rotation-only prefill capture + layer-0 dictionary (CPU, ~40s; GPU not needed)
 GELO_CAPTURE_COVER=rotation GELO_CAPTURE_DICT=1 GELO_CAPTURE_DICT_N=8000 \
 GELO_CAPTURE_LAYERS=0 GELO_CAPTURE_PROMPT="<any sensitive-looking text>" \
 GELO_CAPTURE_DIR="$PWD/evals/aloepri-attacks/captures_prefill" \
   cargo test -p gelo-embedder --test attn_cover_capture --release \
   capture_attn_cover_adversary_view -- --ignored --nocapture
-# attack (numpy only; runs in the container — host has no numpy)
 evals/aloepri-attacks/run-in-container.sh \
-  python3 evals/aloepri-attacks/gate3_prefill_dict.py
+  python3 evals/aloepri-attacks/gate3_prefill_dict.py   # numpy → in-container
+
+# --- Perf-upside benches (re-run after Phase 5a optimizations) ---
+# Prefill: in-TEE vs cubek+cover, per-op breakdown (n=2048 & 8192), tensor cores
+CUBEK_STRATEGY=blackbox cargo test --release -p gelo-gpu-wgpu \
+  --test cubek_prefill_cover prefill_attention_breakdown -- --ignored --nocapture
+# Decode: permuted-cover secure, end-to-end per-op breakdown (σ=0.01)
+GELO_GPU_RESIDENT_COVER=1 GELO_RESIDENT_SIGMA=0.01 \
+GELO_BENCH_VARIANT=4b GELO_BENCH_B=8 GELO_BENCH_N=2048 GELO_BENCH_MAX_TOKENS=32 \
+  cargo test --release -p gelo-gpu-wgpu --test qwen3_m1_12_r1_q1_microbench \
+  gelo_llm_prefill_decode_breakdown -- --ignored --nocapture   # cover:* buckets
+# Decode greedy-parity (σ=0 must be byte-identical to flag-off):
+GELO_GPU_RESIDENT_COVER=1 GELO_RESIDENT_SIGMA=0 GELO_BENCH_VARIANT=4b \
+GELO_BENCH_MAX_TOKENS=16 cargo test --release -p gelo-gpu-wgpu \
+  --test qwen3_m1_12_r1_q1_microbench m1_12_r1_q1_microbench -- --ignored --nocapture
 ```
 
-## Next steps — Phase 5b: viability of feature-rotated prefill offload under AloePri
+## Perf-upside measured — what the offload buys, and the bottlenecks (2026-06-01)
+
+Both paths are now wired with their cover applied end-to-end and benched. Full
+per-op tables **with execution counts** are in the dev-log §*Offload perf-upside
+— per-op breakdowns (2026-06-01)*; headlines (B=8, Qwen3-4B, RTX 5090 / Vulkan):
+
+- **Decode — permuted-cover, secure** (perm + σ + `O_qk` + `O_v` + tail-in-TEE,
+  session-fixed; `GELO_GPU_RESIDENT_COVER`, greedy-parity byte-identical at σ=0):
+  attention bucket **13.8 s** vs in-TEE 14.6 s (bare-resident 8.7 s) at n=2048,
+  K=32. **Per step it is ~2.9× faster than in-TEE** (157 vs 455 ms/step over 36
+  layers); the one-time prefix re-cover `create_build+upload` (8.8 s = 36 layers ×
+  243 ms — dense-`O` rotate + permute + upload of the 2048-row prefix) is **63%
+  of the K=32 bucket**, so it is break-even at **K≈30** and a growing win beyond
+  (≈2.4× at K=256, →2.9×).
+- **Prefill — feature-rotation + `cubek` (tensor cores)** (per layer): n=2048
+  **1.09×**, n=8192 **4.70×**. The cover is cheap (**10–14%**); cubek's attend at
+  n=2048 is ~680 ms fixed overhead (scalar f32→f16 convert + 4× GQA-expanded
+  upload + sync) + only ~204 ms compute → **compute-only ceiling ~5×**.
+
+### Bottlenecks that prevent beating full (in-TEE) attention
+
+The GPU attention **compute is not the bottleneck** (tensor cores; ~5× headroom).
+Both paths are gated by the **f32→f16 convert + upload / dense-rotate pipeline** —
+the same "upload tax" the original triage flagged, not the attention math:
+
+- **Prefill:** per-call **f32→f16 convert + 4× GQA-expanded K/V upload** (cubek
+  has no native GQA), a ~680 ms fixed cost that only amortizes at long context →
+  marginal at n=2048, strong at n≥8k.
+- **Decode:** the **one-time dense-`O` prefix re-cover + upload** (`create_build`,
+  ~243 ms/layer), dominating at short K; the per-step path is already a 2.9× win.
+
+Common root: the cover/operand **convert + upload + dense rotation**. Covariant
+obfuscation does **not** touch any of these (it is a static weight transform), so
+optimizing them is independent of — and should precede — the security work.
+
+## Next steps
+
+### Phase 5a — optimize both offload paths (perf; before security)
+
+The bottlenecks above are convert/upload/rotate, not compute, and are reducible.
+This is pure perf — cover and security are unchanged — so it lands and measures
+independently, and it sets the real go/no-go for each offload.
+
+- **Prefill:** swap the scalar f32→f16 convert for the SIMD/bf16-native path; add
+  a **kv-head-broadcast** read-index to cubek's K/V loader to drop the 4×
+  GQA-expanded upload. Target: lift n=2048 from 1.09× toward the ~5× compute
+  ceiling. Re-run `crates/gelo-gpu-wgpu/tests/cubek_prefill_cover.rs`.
+- **Decode:** cut the one-time `create_build` — use the **structured
+  signed-permutation `O(L·d)`** cover instead of the dense rotate (the bulk of
+  243 ms/layer), and/or build the cover **at prefill** (overlap), and/or
+  bf16/un-replicated upload. Target: break-even K well below 30. Secondary: the
+  **fused partial-stats FlashAttention-D kernel** collapses the decode
+  partial-stats dispatches (`prefix_partial_gpu`, 2.95 ms/call).
+
+### Phase 5b — verify + implement covariant obfuscation (AloePri)
 
 The general statement (plan): any correctable-through-fused-softmax cover preserves
 the bilinear forms `X·M·Xᵀ` that `WEIGHTS-PUB` reads. The **only** escape is to make
@@ -128,7 +210,7 @@ obfuscation (AloePri)**: statically transform the deployed weights `W → W'` wi
 covariant compensation so the computation is unchanged but the attacker's *public*
 `W` no longer matches the *deployed* `W'`, collapsing the per-token dictionary.
 
-Concrete tasks for the next session:
+Concrete tasks:
 1. **Read the AloePri paper / the `evals/aloepri-attacks/` material** for the exact
    covariant-obfuscation construction and what guarantees it claims.
 2. **Pin down the obfuscation math for the attention path:** does a static `W'`

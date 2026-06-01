@@ -1,9 +1,12 @@
 use anyhow::{Result, anyhow};
-use ndarray::{Array1, Array2, Array3, ArrayView2, ArrayView3};
+use ndarray::{Array1, Array2, Array3, ArrayView2, ArrayView3, Axis};
 
 use gelo_protocol::profile;
 use gelo_protocol::tee_matmul_bf16;
-use gelo_protocol::{ForwardSessionShape, TrustedExecutor, WeightHandle, WeightKind};
+use gelo_protocol::{
+    ForwardSessionShape, TrustedExecutor, WeightHandle, WeightKind, attention_partial,
+    merge_attention_partials,
+};
 
 use super::attention::{
     causal_gqa_attention, causal_gqa_attention_cached, causal_gqa_attention_permuted,
@@ -11,7 +14,7 @@ use super::attention::{
     causal_gqa_attention_with_offload,
 };
 use super::config::{AttentionClass, DecoderConfig};
-use super::kv_cache::KvCache;
+use super::kv_cache::{DecodeCover, KvCache};
 use super::rms_norm::{apply_qk_norm, rms_norm};
 use super::rope::RopeTables;
 use super::swiglu::swiglu;
@@ -405,6 +408,102 @@ fn stack_cache(
     (k_st, v_st)
 }
 
+/// Permuted-cover tail-in-TEE decode path (perm-attn-gpu-offload). When on,
+/// the resident decode attention runs under the full feature-rotation +
+/// permutation + σ cover (session-fixed, no per-block re-permute), with the
+/// newest tokens held in-TEE (partial-stats prefix attend on GPU + in-TEE
+/// tail + online merge). Implies the resident path; requires `Global`.
+fn gpu_resident_cover_enabled() -> bool {
+    static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *EN.get_or_init(|| {
+        std::env::var("GELO_GPU_RESIDENT_COVER")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
+/// σ for the cover's K/q Hidden-No-More noise. Default 0.0 (exact —
+/// greedy-parity); set `GELO_RESIDENT_SIGMA=0.01` for the secure config.
+fn resident_cover_sigma() -> f32 {
+    static S: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *S.get_or_init(|| {
+        std::env::var("GELO_RESIDENT_SIGMA")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0)
+    })
+}
+
+/// A `d×d` orthogonal matrix via modified Gram-Schmidt on a Gaussian —
+/// the feature-rotation cover operand (`O_qk`/`O_v`). Deterministic in
+/// `rng`, so a fixed per-layer seed re-derives the same cover each step
+/// (session-fixed) without storing the matrices.
+fn sample_orthogonal<R: rand::Rng>(d: usize, rng: &mut R) -> Array2<f32> {
+    use rand_distr::{Distribution, StandardNormal};
+    let mut a = Array2::<f32>::from_shape_fn((d, d), |_| StandardNormal.sample(rng));
+    for j in 0..d {
+        for i in 0..j {
+            let ci = a.column(i).to_owned();
+            let proj = ci.dot(&a.column(j));
+            let cj = a.column(j).to_owned();
+            let mut cjm = a.column_mut(j);
+            for k in 0..d {
+                cjm[k] = cj[k] - proj * ci[k];
+            }
+        }
+        let norm = a.column(j).dot(&a.column(j)).sqrt();
+        a.column_mut(j).mapv_inplace(|x| x / norm.max(1e-12));
+    }
+    a
+}
+
+/// Per-head right-multiply `out[h] = x[h] · o` for `x (H, n, d)`,
+/// `o (d, d)` — applies a shared feature rotation to every stacked head.
+fn rotate_heads(x: ArrayView3<'_, f32>, o: ArrayView2<'_, f32>) -> Array3<f32> {
+    use ndarray::parallel::prelude::*;
+    let (h, n, d) = x.dim();
+    let mut out = Array3::<f32>::zeros((h, n, d));
+    out.axis_iter_mut(Axis(0))
+        .into_par_iter()
+        .enumerate()
+        .for_each(|(hi, mut row)| {
+            row.assign(&x.index_axis(Axis(0), hi).dot(&o));
+        });
+    out
+}
+
+/// Stack the in-TEE active tail `[prefix_len..len)` of each sequence's
+/// cache into the GQA-expanded per-q-head shape `(B·nqh, n_tail, d)`
+/// (plaintext — the tail never reaches the GPU).
+fn stack_tail_expanded(
+    views: &[(ArrayView2<'_, f32>, ArrayView2<'_, f32>)],
+    prefix_len: usize,
+    b: usize,
+    nqh: usize,
+    nkvh: usize,
+    d: usize,
+) -> (Array3<f32>, Array3<f32>) {
+    let group = nqh / nkvh;
+    let total = views[0].0.nrows();
+    let n_tail = total.saturating_sub(prefix_len);
+    let mut k = Array3::<f32>::zeros((b * nqh, n_tail, d));
+    let mut v = Array3::<f32>::zeros((b * nqh, n_tail, d));
+    for bi in 0..b {
+        let (kb, vb) = views[bi];
+        for qh in 0..nqh {
+            let kvh = qh / group;
+            let idx = bi * nqh + qh;
+            for j in 0..n_tail {
+                for c in 0..d {
+                    k[(idx, j, c)] = kb[(prefix_len + j, kvh * d + c)];
+                    v[(idx, j, c)] = vb[(prefix_len + j, kvh * d + c)];
+                }
+            }
+        }
+    }
+    (k, v)
+}
+
 fn decoder_block_cached_batched(
     cfg: &DecoderConfig,
     layer: &DecoderLayerWeights,
@@ -545,9 +644,143 @@ fn decoder_block_cached_batched(
     // Gated (default off → the in-TEE path below is unchanged); SWA layers
     // always stay in-TEE. NO cover/tail-in-TEE yet (those need the σ-vs-N
     // spike) — this measures the resident-attention decode-wall lever only.
-    let use_gpu_resident =
-        gpu_resident_attn_enabled() && matches!(layer_class, AttentionClass::Global);
-    if use_gpu_resident {
+    let use_gpu_cover =
+        gpu_resident_cover_enabled() && matches!(layer_class, AttentionClass::Global);
+    let use_gpu_resident = !use_gpu_cover
+        && gpu_resident_attn_enabled()
+        && matches!(layer_class, AttentionClass::Global);
+    if use_gpu_cover {
+        // Permuted-cover tail-in-TEE decode (perm-attn-gpu-offload, full
+        // wire). Session-fixed cover (perm_kv + σ on K + O_qk on Q/K + O_v
+        // on V, re-derived from a per-layer seed); frozen prefix on the GPU,
+        // newest tokens in-TEE (partial-stats prefix attend + in-TEE tail +
+        // online merge → closes the write-location channel; no per-step GPU
+        // write, no per-block re-permute).
+        use rand::seq::SliceRandom;
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha20Rng;
+        use rand_distr::{Distribution, StandardNormal};
+        let (nqh, nkvh, dh) = (
+            cfg.num_attention_heads,
+            cfg.num_key_value_heads,
+            cfg.head_dim_value(),
+        );
+        let scale = 1.0_f32 / (dh as f32).sqrt();
+        let sigma = resident_cover_sigma();
+        profile::time("tee:attn_resident_cover", || -> Result<()> {
+            const SALT: u64 = 0xC0FFEE_5EED;
+            let q_st = stack_heads(q.view(), batch_size, nqh, dh); // (B·nqh,1,dh) plaintext
+
+            // Create the covered session once; O is sampled here and CACHED
+            // (re-deriving the Gram-Schmidt O every step is pure waste).
+            if kv_cache.gpu_session(layer_idx as usize).is_none() {
+                // One-time covered-prefix build + upload (the session-fixed
+                // "re-permute" cost, paid once per layer; amortized over K).
+                profile::time("cover:create_build+upload", || -> Result<()> {
+                    let mut crng = ChaCha20Rng::seed_from_u64(SALT ^ layer_idx as u64);
+                    let o_qk = sample_orthogonal(dh, &mut crng);
+                    let o_v = sample_orthogonal(dh, &mut crng);
+                    let kv_views: Vec<(ArrayView2<'_, f32>, ArrayView2<'_, f32>)> = (0
+                        ..batch_size)
+                        .map(|b| kv_cache.view_b(layer_idx as usize, b))
+                        .collect::<Result<Vec<_>>>()?;
+                    let prefix_len = kv_views[0].0.nrows();
+                    let (k_st, v_st) = stack_cache(&kv_views, batch_size, nkvh, dh);
+                    // perm (row axis) + σ on K — in-TEE, per (B·nkvh) head.
+                    let mut perm: Vec<usize> = (0..prefix_len).collect();
+                    perm.shuffle(&mut crng);
+                    let bh = batch_size * nkvh;
+                    let mut kp = Array3::<f32>::zeros((bh, prefix_len, dh));
+                    let mut vp = Array3::<f32>::zeros((bh, prefix_len, dh));
+                    for h in 0..bh {
+                        for (i, &src) in perm.iter().enumerate() {
+                            for c in 0..dh {
+                                let z: f32 = StandardNormal.sample(&mut crng);
+                                kp[(h, i, c)] = k_st[(h, src, c)] + sigma * z;
+                                vp[(h, i, c)] = v_st[(h, src, c)];
+                            }
+                        }
+                    }
+                    // Feature rotation: K·O_qk, V·O_v (shared O across heads →
+                    // GQA-broadcast-consistent).
+                    let k_cov = rotate_heads(kp.view(), o_qk.view());
+                    let v_cov = rotate_heads(vp.view(), o_v.view());
+                    let cap = kv_cache.capacity();
+                    let id = exec.resident_kv_create(k_cov.view(), v_cov.view(), cap)?;
+                    kv_cache.set_gpu_session(layer_idx as usize, id);
+                    kv_cache.set_gpu_cover(
+                        layer_idx as usize,
+                        DecodeCover { prefix_len, o_qk, o_v },
+                    );
+                    Ok(())
+                })?;
+            }
+            let id = kv_cache.gpu_session(layer_idx as usize).unwrap();
+            // Cached cover (clone the O matrices — ~128 KB, cheap — to release
+            // the kv_cache borrow across the exec/view_b calls below).
+            let (o_qk, o_v, prefix_len) = {
+                let c = kv_cache.gpu_cover(layer_idx as usize).unwrap();
+                (c.o_qk.clone(), c.o_v.clone(), c.prefix_len)
+            };
+
+            // Prefix partial on GPU: q covered by O_qk (+σ), uncover acc by O_vᵀ.
+            let q_cov = profile::time("cover:q_cover_tee", || {
+                let mut qn = q_st.clone();
+                if sigma > 0.0 {
+                    let mut qrng = ChaCha20Rng::seed_from_u64(
+                        SALT ^ (layer_idx as u64) ^ ((prefix_len as u64) << 20)
+                            ^ q_pos_offsets[0] as u64,
+                    );
+                    for e in qn.iter_mut() {
+                        let z: f32 = StandardNormal.sample(&mut qrng);
+                        *e += sigma * z;
+                    }
+                }
+                rotate_heads(qn.view(), o_qk.view())
+            });
+            let (acc_a_cov, m_a, l_a) = profile::time("cover:prefix_partial_gpu", || {
+                exec.resident_kv_attend_partial(id, q_cov.view(), scale)
+            })?;
+            let acc_a = profile::time("cover:acc_uncover_tee", || {
+                rotate_heads(acc_a_cov.view(), o_v.t())
+            });
+
+            // In-TEE active tail [prefix_len..len): plaintext partial + merge.
+            let kv_views: Vec<(ArrayView2<'_, f32>, ArrayView2<'_, f32>)> = (0..batch_size)
+                .map(|b| kv_cache.view_b(layer_idx as usize, b))
+                .collect::<Result<Vec<_>>>()?;
+            let n_tail = kv_views[0].0.nrows().saturating_sub(prefix_len);
+            let ctx_st = if n_tail == 0 {
+                // Create step: prefix only → normalise acc_a by l_a.
+                let mut out = acc_a;
+                for h in 0..out.shape()[0] {
+                    let l = l_a[(h, 0, 0)];
+                    let inv = if l > 0.0 { 1.0 / l } else { 0.0 };
+                    out.index_axis_mut(Axis(0), h).mapv_inplace(|x| x * inv);
+                }
+                out
+            } else {
+                let (tk, tv) = profile::time("cover:tail_build_tee", || {
+                    stack_tail_expanded(&kv_views, prefix_len, batch_size, nqh, nkvh, dh)
+                });
+                let (acc_b, m_b, l_b) = profile::time("cover:tail_partial_tee", || {
+                    attention_partial(q_st.view(), tk.view(), tv.view(), scale)
+                });
+                profile::time("cover:merge_tee", || {
+                    merge_attention_partials(
+                        acc_a.view(),
+                        m_a.view(),
+                        l_a.view(),
+                        acc_b.view(),
+                        m_b.view(),
+                        l_b.view(),
+                    )
+                })
+            };
+            ctx = unstack_heads(ctx_st.view(), batch_size, nqh, dh);
+            Ok(())
+        })?;
+    } else if use_gpu_resident {
         let (nqh, nkvh, dh) = (
             cfg.num_attention_heads,
             cfg.num_key_value_heads,

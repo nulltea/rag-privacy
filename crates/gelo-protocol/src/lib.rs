@@ -37,6 +37,7 @@ pub mod snapshot;
 pub mod substrate;
 
 pub use attention::PermAttnConfig;
+pub use attention::{attention_partial, merge_attention_partials};
 pub use dct4::Dct4Mask;
 pub use hd3::Hd3Mask;
 pub use mask::{

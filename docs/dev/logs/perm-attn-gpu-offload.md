@@ -1093,6 +1093,92 @@ tokens are still recovered, just not isolated.
 fallback shape if obfuscation proves unviable *and* the bag-of-tokens residual
 is judged unacceptable.
 
+## Offload perf-upside — per-op breakdowns (2026-06-01)
+
+These measure the **performance** of the offloaded attention with its cover
+applied end-to-end, *decoupled from the security verdict*: covariant weight
+obfuscation (Phase 5b) is a static weight transform that does not change these
+per-step costs, so this is "what the offload buys once it is secured." All on
+RTX 5090 / Vulkan, Qwen3-4B (Hq=32, Hkv=8, d=128), B=8.
+
+### Decode — permuted-cover, secure (full wire)
+
+`perm_kv` + σ on K + `O_qk` on Q/K + `O_v` on V + **tail-in-TEE** (frozen-prefix
+partial-stats on GPU + in-TEE tail + online merge), session-fixed (no per-block
+re-permute). Wired end-to-end behind `GELO_GPU_RESIDENT_COVER`; greedy-parity
+**byte-identical** at σ=0. Bench: n=2048, K=32 decode steps, σ=0.01. Decode
+attention bucket `tee:attn_resident_cover` = 13.8 s (vs in-TEE 14.6 s,
+bare-resident 8.7 s).
+
+| op | where | total ms | × executed | per-call | count meaning |
+|---|---|--:|--:|--:|---|
+| `create_build+upload` | TEE+GPU | 8 765 | **36** | 243.5 ms | once per layer (first decode step) — the session-fixed prefix re-cover |
+| `prefix_partial_gpu` | **GPU** | 3 399 | **1 152** | 2.95 ms | every layer × step (36×32) — partial-stats attend over the frozen prefix |
+| `q_cover_tee` | TEE | 384 | **1 152** | 0.33 ms | every layer × step — `q·O_qk` + σ |
+| `acc_uncover_tee` | TEE | 210 | **1 152** | 0.18 ms | every layer × step — `acc·O_vᵀ` |
+| `tail_partial_tee` | TEE | 589 | **1 116** | 0.53 ms | 36×31 — skips the create step (tail empty) — in-TEE tail attend |
+| `tail_build_tee` | TEE | 436 | **1 116** | 0.39 ms | 36×31 — GQA-expand the tail (scalar) |
+| `merge_tee` | TEE | 18 | **1 116** | 0.02 ms | 36×31 — online merge |
+| **total** (`tee:attn_resident_cover`) | | **13 832** | **1 152** | 12.0 ms | per-(layer,step) closure |
+
+**Finding — the overhead is a one-time cost that amortizes, not a per-step
+tax.** `create_build+upload` is **63% of the wall but 3% of the executions**
+(36 / 1 152): the heavy dense-`O` rotation + permute + upload of the whole
+2048-row prefix, paid once per layer. The **recurring per-step** cost (all 36
+layers) is only ≈157 ms (`5 036 ms / 32`) vs in-TEE ≈455 ms (`14 574 / 32`) —
+**~2.9× faster per step** (tail-in-TEE: a fixed-size resident-prefix partial
+attend + a tiny in-TEE tail, no per-step GPU write, no growing attend).
+Amortization model `bucket(K) ≈ 8 765 + 157·K` vs in-TEE `455·K`:
+
+| K | in-TEE | covered | ratio |
+|---:|--:|--:|--:|
+| 32 | 14.6 s | 13.8 s | 1.06× (≈break-even) |
+| 256 | 116 s | 49 s | 2.4× |
+| →∞ | — | — | 2.9× |
+
+**Break-even at K≈30; a win for realistic generation lengths.** The one-time
+`create_build` is itself reducible (the structured signed-permutation `O(L·d)`
+`O` instead of the dense rotate; building the cover at prefill; bf16/un-
+replicated upload), which lowers break-even further. (Earlier un-cached runs
+read 19.6 s because `O` was re-derived via scalar Gram-Schmidt every step — an
+implementation artifact, now cached.) Wire: `forward.rs` cover branch +
+`DecodeCover` (`kv_cache.rs`) + `TrustedExecutor::resident_kv_attend_partial`.
+
+### Prefill — feature-rotation + cubek-attention (tensor-core)
+
+`O_qk`/`O_v` (σ=0) + `cubek-attention` (`BlackboxAccelerated` / tensor cores),
+public causal mask, GQA-expanded K/V. Per-op is per **layer** (prefill is
+one-shot; each op runs once per layer per prefill, ×36 layers for the full
+prefill — no per-step). Bench measures one layer's worth at B=8;
+`crates/gelo-gpu-wgpu/tests/cubek_prefill_cover.rs`, parity at the fp16 floor.
+
+| op | where | n=2048 ms | n=8192 ms | × executed | |
+|---|---|--:|--:|--:|---|
+| in-TEE baseline (`causal_gqa_attention`) | TEE | 1 075 | 21 684 | 1 / layer | the bucket being replaced |
+| — | | | | | |
+| rotation + GQA-expand | TEE | 81.6 | 524 | 1 / layer | `O_qk`/`O_v` apply + 8→32 head expand |
+| `cubek` fused attend | **GPU** | 884 | 3 947 | 1 / layer | tiled softmax·V (tensor cores) |
+| `O_vᵀ` correction | TEE | 22.9 | 140 | 1 / layer | un-rotate the output |
+| **cubek + cover total** | | **989** | **4 612** | 1 / layer | |
+| **ratio (in-TEE / cubek+cover)** | | **1.09×** | **4.70×** | | |
+
+**Finding — cover is cheap; the win is context-length-dependent.** The
+feature-rotation cover is only **10–14%** of the offloaded path (the
+worst-case clawback I'd feared does *not* materialize). The cubek attend is
+**fixed-overhead-bound at n=2048** (~680 ms fixed = scalar f16 convert +
+GQA-expanded upload + sync; only ~204 ms compute) → just 1.09×; at **n=8192**
+it is compute-bound → **4.70×**, growing with n (in-TEE is O(n²) on a
+bandwidth-starved CPU). The **compute-only ceiling is ~5× even at n=2048** —
+the n=2048 gap is the unoptimized convert + the 4× GQA-expanded upload (cubek
+has no native GQA), both reducible (SIMD/bf16 convert; kv-head-broadcast).
+
+**Joint takeaway.** Both offloads are gated by *cost shape*, not the cover:
+decode by a one-time prefix re-cover (amortizes → ~2.9× per step), prefill by
+per-call upload/convert at small n (→ strong only at long context, or after
+the convert/GQA-upload optimizations). The cover (rotation/permutation) is
+cheap in both; covariant obfuscation, being a static weight transform, leaves
+all of these numbers unchanged.
+
 ## Acceptance gate (v1)
 
 Layered — failing any tier reopens the TwinShield-Xue fallback:

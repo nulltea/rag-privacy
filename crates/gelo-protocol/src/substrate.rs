@@ -1222,6 +1222,20 @@ pub trait TrustedExecutor {
         Err(anyhow!("resident_kv_attend: unsupported"))
     }
 
+    /// Partial-stats attend over the resident prefix — returns the
+    /// unnormalised online-softmax state `(acc, m, l)` for the TEE-side
+    /// tail-in-TEE merge (decode permuted-cover path). Default unsupported;
+    /// `InProcessTrustedExecutor` delegates to the engine's
+    /// `kv_attend_partial`.
+    fn resident_kv_attend_partial(
+        &mut self,
+        _id: KvSessionId,
+        _q: ArrayView3<f32>,
+        _scale: f32,
+    ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
+        Err(anyhow!("resident_kv_attend_partial: unsupported"))
+    }
+
     /// Free a resident session (end of generation).
     fn resident_kv_drop(&mut self, _id: KvSessionId) -> Result<()> {
         Ok(())

@@ -29,7 +29,19 @@
 //! attention call site.
 
 use anyhow::{Result, anyhow};
-use ndarray::{Array3, ArrayView2, s};
+use ndarray::{Array2, Array3, ArrayView2, s};
+
+/// Session-fixed cover operands for the permuted-cover tail-in-TEE decode
+/// path (perm-attn-gpu-offload). Sampled **once** when the covered resident
+/// session is built and reused every step (no per-step re-derivation).
+pub struct DecodeCover {
+    /// Frozen-prefix length; the tail `[prefix_len..len)` stays in-TEE.
+    pub prefix_len: usize,
+    /// Shared feature rotation on Q/K (cancels in the score).
+    pub o_qk: Array2<f32>,
+    /// Shared feature rotation on V (undone by `·O_vᵀ` on the output).
+    pub o_v: Array2<f32>,
+}
 
 /// Backing storage for one layer's K/V.
 enum LayerKvStore {
@@ -142,6 +154,11 @@ pub struct KvCache {
     /// matches the `KvCache` (fresh `None`s per generation → no stale
     /// session reuse). Only used when the GPU-resident decode path is on.
     gpu_sessions: Vec<Option<u64>>,
+    /// Per-layer session-fixed cover for the permuted-cover tail-in-TEE
+    /// decode path (perm-attn-gpu-offload). `Some` once the covered resident
+    /// session is built; holds the frozen-prefix length + the (cached) O
+    /// rotations. `None` on the bare/in-TEE paths.
+    gpu_cover: Vec<Option<DecodeCover>>,
 }
 
 impl KvCache {
@@ -174,6 +191,7 @@ impl KvCache {
             kv_dim,
             batch_size,
             gpu_sessions: vec![None; num_layers],
+            gpu_cover: (0..num_layers).map(|_| None).collect(),
         }
     }
 
@@ -220,6 +238,7 @@ impl KvCache {
             kv_dim,
             batch_size,
             gpu_sessions: vec![None; num_layers],
+            gpu_cover: (0..num_layers).map(|_| None).collect(),
         }
     }
 
@@ -244,6 +263,18 @@ impl KvCache {
     /// Record the GPU-resident session id created for layer `li`.
     pub fn set_gpu_session(&mut self, li: usize, id: u64) {
         self.gpu_sessions[li] = Some(id);
+    }
+
+    /// Session-fixed cover for layer `li`'s permuted-cover tail-in-TEE
+    /// session, or `None` if not yet built this generation.
+    pub fn gpu_cover(&self, li: usize) -> Option<&DecodeCover> {
+        self.gpu_cover[li].as_ref()
+    }
+
+    /// Record the cover (prefix length + cached O rotations) when layer
+    /// `li`'s covered session is created.
+    pub fn set_gpu_cover(&mut self, li: usize, cover: DecodeCover) {
+        self.gpu_cover[li] = Some(cover);
     }
 
     /// All live GPU-resident session ids (for end-of-generation cleanup).
