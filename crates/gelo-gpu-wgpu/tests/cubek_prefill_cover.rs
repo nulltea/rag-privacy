@@ -286,11 +286,17 @@ fn run_prefill_cell(n: usize) {
     let t_all = Instant::now();
 
     // Step 1–3: rotate (in-TEE) + fold + GQA-expand into [B*Hq, n, d].
+    // Itemised: the destination alloc/zero (the GQA-expanded footprint —
+    // 3 × bh·n·d f32) vs each operand's rotation. Q rotates Hq folded
+    // heads; K/V each rotate Hkv source heads broadcast into Hq folded rows
+    // (the 4× GQA-expand the un-replicated-upload lever, P2, removes).
     let t_rot = Instant::now();
     let bh = B * HQ;
+    let t_alloc = Instant::now();
     let mut q_rot = Array3::<f32>::zeros((bh, n, D));
     let mut k_rot = Array3::<f32>::zeros((bh, n, D));
     let mut v_rot = Array3::<f32>::zeros((bh, n, D));
+    let alloc_ms = t_alloc.elapsed().as_secs_f64() * 1e3;
     // Parallelise the rotation over folded heads.
     let rotate_into = |dst: &mut Array3<f32>, src_heads: usize, src: &[Array2<f32>], o: &[Array2<f32>]| {
         dst.axis_iter_mut(Axis(0))
@@ -308,9 +314,15 @@ fn run_prefill_cell(n: usize) {
                 row.assign(&slab.dot(&o[kvh]));
             });
     };
+    let t_rq = Instant::now();
     rotate_into(&mut q_rot, HQ, &qs, &o_qk);
+    let rot_q_ms = t_rq.elapsed().as_secs_f64() * 1e3;
+    let t_rk = Instant::now();
     rotate_into(&mut k_rot, HKV, &ks, &o_qk);
+    let rot_k_ms = t_rk.elapsed().as_secs_f64() * 1e3;
+    let t_rv = Instant::now();
     rotate_into(&mut v_rot, HKV, &vs, &o_v);
+    let rot_v_ms = t_rv.elapsed().as_secs_f64() * 1e3;
     let rot_ms = t_rot.elapsed().as_secs_f64() * 1e3;
 
     // Step 4: cubek GPU attend (causal).
@@ -340,7 +352,11 @@ fn run_prefill_cell(n: usize) {
     println!("  ratio (in-TEE / cubek+cover):                  {ratio:9.3}x");
     println!("  cover breakdown:");
     println!("    rotation + GQA-expand (TEE): {rot_ms:9.3} ms");
-    println!("    cubek GPU attend:            {gpu_ms:9.3} ms");
+    println!("      ├ alloc/zero dst (3×):     {alloc_ms:9.3} ms");
+    println!("      ├ rotate Q (Hq heads):     {rot_q_ms:9.3} ms");
+    println!("      ├ rotate K (Hkv→Hq):       {rot_k_ms:9.3} ms");
+    println!("      └ rotate V (Hkv→Hq):       {rot_v_ms:9.3} ms");
+    println!("    cubek GPU attend:            {gpu_ms:9.3} ms  (CUBEK_PROFILE=1 → per-stage on stderr)");
     println!("    O_vᵀ correction (TEE):       {corr_ms:9.3} ms");
     let overhead = rot_ms + corr_ms;
     println!(

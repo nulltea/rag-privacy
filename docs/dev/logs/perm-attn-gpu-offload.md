@@ -1106,9 +1106,23 @@ RTX 5090 / Vulkan, Qwen3-4B (Hq=32, Hkv=8, d=128), B=8.
 `perm_kv` + σ on K + `O_qk` on Q/K + `O_v` on V + **tail-in-TEE** (frozen-prefix
 partial-stats on GPU + in-TEE tail + online merge), session-fixed (no per-block
 re-permute). Wired end-to-end behind `GELO_GPU_RESIDENT_COVER`; greedy-parity
-**byte-identical** at σ=0. Bench: n=2048, K=32 decode steps, σ=0.01. Decode
-attention bucket `tee:attn_resident_cover` = 13.8 s (vs in-TEE 14.6 s,
-bare-resident 8.7 s).
+**byte-identical** at σ=0. Bench: n=2048, K=32 decode steps, σ=0.01.
+
+**Offloaded decode vs full in-TEE attention (B=8, n=2048).** The in-TEE
+baseline is `tee:attn_cached_inplace_many` = **14 574 ms** (= 12.65 ms per
+(layer,step) → 455 ms/step over 36 layers; chronicle §9). The offload replaces
+that single CPU bucket:
+
+| metric (B=8, n=2048) | full in-TEE | offload (permuted-cover) | ratio |
+|---|--:|--:|--:|
+| attn bucket @ K=32 | **14 574 ms** | 13 832 ms | **1.05×** (≈break-even) |
+| recurring per-step (36 layers) | **455 ms** | 157 ms | **2.9×** |
+| one-time prefix re-cover (×36, amortized) | — | 8 765 ms | — |
+
+The per-step path is a clean ~2.9× win; the K=32 *bucket* is only break-even
+because the one-time `create_build` (63% of the bucket) hasn't yet amortized —
+it crosses over at K≈30 (amortization table below). Per-op decomposition of the
+offload bucket:
 
 | op | where | total ms | × executed | per-call | count meaning |
 |---|---|--:|--:|--:|---|
@@ -1152,32 +1166,131 @@ one-shot; each op runs once per layer per prefill, ×36 layers for the full
 prefill — no per-step). Bench measures one layer's worth at B=8;
 `crates/gelo-gpu-wgpu/tests/cubek_prefill_cover.rs`, parity at the fp16 floor.
 
-| op | where | n=2048 ms | n=8192 ms | × executed | |
+**Offloaded prefill vs full in-TEE attention (per layer, B=8).** In-TEE is
+`causal_gqa_attention` (the bucket the offload replaces); both are measured in
+the same bench. The offload **barely wins at the production shape (n=2048) and
+wins clearly only at long context** — the n=2048 1.07× is *not* a headline win,
+it is essentially break-even (see the prep breakdown for why):
+
+| context (per layer) | full in-TEE | offload (rot+cubek+`O_vᵀ`) | ratio |
+|---|--:|--:|--:|
+| **n=2048** | **1 089 ms** | 1 021 ms | **1.07×** (≈break-even) |
+| **n=8192** | **21 946 ms** | 4 653 ms | **4.72×** |
+
+(Full Qwen3-4B prefill = ×36 layers; the real in-TEE prefill-attention bucket is
+`tee:attn_inplace_many` ≈ **43 774 ms**, n=2048, chronicle §3.2 — the target the
+offload would replace.) The offload total decomposes as:
+
+| offload component | where | n=2048 ms | n=8192 ms | × / layer | |
 |---|---|--:|--:|--:|---|
-| in-TEE baseline (`causal_gqa_attention`) | TEE | 1 075 | 21 684 | 1 / layer | the bucket being replaced |
-| — | | | | | |
-| rotation + GQA-expand | TEE | 81.6 | 524 | 1 / layer | `O_qk`/`O_v` apply + 8→32 head expand |
-| `cubek` fused attend | **GPU** | 884 | 3 947 | 1 / layer | tiled softmax·V (tensor cores) |
-| `O_vᵀ` correction | TEE | 22.9 | 140 | 1 / layer | un-rotate the output |
-| **cubek + cover total** | | **989** | **4 612** | 1 / layer | |
-| **ratio (in-TEE / cubek+cover)** | | **1.09×** | **4.70×** | | |
+| rotation + GQA-expand | TEE | 80 | 526 | 1 | `O_qk`/`O_v` apply + 8→32 head expand |
+| `cubek` attend (prep+compute) | **GPU** | 918 | 3 986 | 1 | convert+upload+attend+readback (decomposed below) |
+| `O_vᵀ` correction | TEE | 23 | 141 | 1 | un-rotate the output |
+| **offload total** | | **1 021** | **4 653** | 1 | vs in-TEE 1 089 / 21 946 |
 
-**Finding — cover is cheap; the win is context-length-dependent.** The
-feature-rotation cover is only **10–14%** of the offloaded path (the
-worst-case clawback I'd feared does *not* materialize). The cubek attend is
-**fixed-overhead-bound at n=2048** (~680 ms fixed = scalar f16 convert +
-GQA-expanded upload + sync; only ~204 ms compute) → just 1.09×; at **n=8192**
-it is compute-bound → **4.70×**, growing with n (in-TEE is O(n²) on a
-bandwidth-starved CPU). The **compute-only ceiling is ~5× even at n=2048** —
-the n=2048 gap is the unoptimized convert + the 4× GQA-expanded upload (cubek
-has no native GQA), both reducible (SIMD/bf16 convert; kv-head-broadcast).
+**Preparation breakdown — the `cubek attend` bucket decomposed (measured
+2026-06-01, `CUBEK_PROFILE=1`, steady-state after JIT warm-up).** A per-stage
+device-sync instrumentation inside `cubek_attention_folded` splits the
+previously-opaque bucket. The result **corrects the earlier inferred
+"~680 ms fixed + ~204 ms compute, ceiling ~5×"**: the actual tensor-core
+compute is far smaller and the path is convert/transfer-bound at *both* sizes.
 
-**Joint takeaway.** Both offloads are gated by *cost shape*, not the cover:
-decode by a one-time prefix re-cover (amortizes → ~2.9× per step), prefill by
-per-call upload/convert at small n (→ strong only at long context, or after
-the convert/GQA-upload optimizations). The cover (rotation/permutation) is
-cheap in both; covariant obfuscation, being a static weight transform, leaves
-all of these numbers unchanged.
+The `× / layer` column counts how often each stage runs **per layer** (one
+cubek call per layer); the full Qwen3-4B prefill runs **×36 layers**, so the
+per-prefill count is the listed value ×36. The ms columns are per single call.
+
+| cubek stage | where | × / layer | n=2048 ms | n=8192 ms | note |
+|---|---|--:|--:|--:|---|
+| f32→f16 convert-in (Q+K+V) | host CPU | 3 (Q,K,V) | **396** | **1 566** | scalar `f16::from_f32` loop, ~2 ns/elem (Q,K,V each ~131 / ~520) |
+| upload DMA (host→GPU) | PCIe | 3 (Q,K,V) | **267** | **1 045** | K/V uploaded **4× GQA-expanded** (cubek has no native GQA) |
+| **attend (tiled softmax·V)** | **GPU** | 1 | **72** | **628** | the only true compute — tensor cores |
+| readback (GPU→host) | PCIe | 1 | 6 | 18 | output only (`[B·Hq, n, d]`) |
+| f16→f32 convert-out | host CPU | 1 | **158** | **627** | scalar output convert |
+
+**Finding — compute is ~7% of the path; the bottleneck is the scalar
+convert + GQA-expanded upload, at every context length.** At n=2048 the GPU
+attend is only **72 ms of the 1 021 ms end-to-end** — the host-side f16
+converts (in 396 + out 158 = **554 ms scalar**) plus the **267 ms 4×-expanded
+upload** are the cost. At n=8192 the same holds (compute 628 ms of 4 653 ms =
+13%): the **4.72× win there is in-TEE being O(n²)-brutal, not the GPU being
+saturated**. The cover itself (rotation 80 ms + `O_vᵀ` 23 ms = **10%**) is
+cheap, as before.
+
+**What this does *not* mean (ceiling ≠ achievable win).** The compute-only
+ratios — 1 089/72 ≈ 15× (n=2048), 21 946/628 ≈ 35× (n=8192) — are *ceilings*
+that assume **all** prep → 0. They are **unreachable**: the upload is
+irreducible (the operands must reach the GPU; un-replication shrinks it ~½–¼
+but not to zero), and the in-TEE rotation + `O_vᵀ` cover stay. The honest
+reducible floor at n=2048, with the converts fused/SIMD'd to ~0 and K/V
+un-replicated, is
+
+```
+  rotation ~50–80  +  upload ~130 (un-repl, at the measured 1.5 GB/s)
+  +  compute 72  +  readback/O_vᵀ ~30   ≈  290–310 ms   →  ~3.4× vs in-TEE
+```
+
+i.e. **a projected ~3× at n=2048** (not 15×), and **~10–15× at n=8192**. Even
+that is contingent on two unknowns: (a) that fusing f16 into the rotation truly
+zeroes the convert, and (b) the upload bandwidth — **267 ms for ~400 MB is
+1.5 GB/s, ~8× under PCIe5**; if that is a real DMA limit, upload dominates the
+floor and caps the win near ~3×; if it is a staging/non-pinned-copy artifact,
+the floor drops further (~5–6×). So the offload remains break-even-to-modest at
+the production shape until those land — the win is real but projected, not
+measured. The prep levers (Phase 5a):
+- **SIMD f32→f16 — ✅ LANDED (2026-06-01).** `cubek_attention_folded` now uses
+  half's `convert_from_f32_slice` (F16C) for both convert-in and convert-out,
+  matching the engine's K/V upload path (`lib.rs:550`) — replacing the scalar
+  `to_f16_bytes`/`from_bits` loops. This is the lever behind the real-engine
+  1.88× below.
+- **un-replicated K/V + on-device GQA broadcast** (mirror `resident_kv_expanded`)
+  — cuts the K/V convert (≈260 ms) and DMA 4×, since cubek receives
+  `[B·Hq, n, d]` host-expanded today. **Next (O2).**
+
+**Joint takeaway.** Both offloads are gated by the **convert / upload /
+dense-rotate prep pipeline**, not the GPU compute and not the cover: decode by
+a one-time prefix re-cover (amortizes → ~2.9× per step), prefill by the scalar
+f16 convert + 4× GQA-expanded upload that dwarfs a 72 ms attend at every
+context length (the per-stage table above). The GPU compute has ~15× (n=2048)
+to ~35× (n=8192) of headroom; Phase 5a's job is to stop wasting it on
+host-side prep. The cover (rotation/permutation) is cheap in both; covariant
+obfuscation, being a static weight transform, leaves all of these numbers
+unchanged.
+
+### Prefill offload — real-engine wire-up (Phase 6 perf wire, 2026-06-01)
+
+The prefill offload is now wired into the **production forward path**
+(`decoder_block_batched`), not just the synthetic bench — gated behind
+`GELO_GPU_PREFILL_OFFLOAD` (default-off; GLOBAL layers only; SWA stays in-TEE).
+Per layer the TEE samples a session-fixed shared cover (`O_qk`/`O_v`), folds +
+GQA-expands + rotates each sequence's Q/K/V, hands the rotated operands to the
+engine's new `cubek_causal_attend` (`GpuOffloadEngine`/`TrustedExecutor`
+delegate → `cubek_attention_folded`), and corrects the output with `·O_vᵀ`. The
+GPU only ever sees rotated bytes. **Correctness:** `cover_prefill_matches_in_tee`
+(f32, no GPU) pins the fold/expand/unfold + cover cancellation against the
+production `causal_gqa_attention` (max_abs < 1e-3); `cubek_folded_causal_parity`
+covers the cubek fp16 step.
+
+**Measured on the canonical microbench** (Qwen3-4B, B=8, n=2048, RTX 5090 /
+Vulkan, `CUBEK_STRATEGY=blackbox`), full 36-layer prefill attention bucket:
+
+| prefill attention bucket | in-TEE (`tee:attn_inplace_many`) | offload (`tee:attn_prefill_offload`) | ratio |
+|---|--:|--:|--:|
+| full prefill, B=8, n=2048 | **44 062 ms** | **23 490 ms** | **1.88× (−20.6 s)** |
+
+Per-op (×36 layers × 8 sequences = 288 cubek calls): `prefill_cover:cubek_gpu`
+10 407 ms (36 ms/seq, incl. SIMD convert+upload+attend+readback),
+`prefill_cover:rotate_tee` 6 913 ms (fold+expand+rotate, in-TEE),
+`prefill_cover:correct_tee` 2 576 ms (`O_vᵀ`+unfold).
+
+**Why 1.88× on the real path vs 1.07× in the synthetic bench:** the SIMD
+convert (O1) is now in (it removed the ~554 ms scalar convert the bench's 1.07×
+still paid), and per-sequence folds (Hq=32) are smaller per cubek call. This is
+**measured, not projected** — the first real win for prefill offload at the
+production shape. Still open: **O2** (un-replicated K/V — the rotate_tee 6.9 s is
+4× inflated by host GQA-expand, and cubek still uploads `[B·Hq,n,d]`) should push
+past 1.88×; and the per-sequence loop (288 calls) can batch. **Security
+unchanged:** this is a default-off *perf* wire; the rotation cover still fails
+`WEIGHTS-PUB`, so default-on stays gated on covariant obfuscation (Phase 5b).
 
 ## Acceptance gate (v1)
 
@@ -1397,13 +1510,17 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
    dictionary. Then re-run the Phase-5 spike against the obfuscated
    deployment. Open: obfuscation correctness/overhead + composition with the
    fused kernel. If it does not pan out, **prefill stays in-TEE**.
-8. **Phase 6 — prefill-attention offload** (gated on Phase 5b clearing):
-   integrate `cubek-attention` into the engine (`fused_attention_batched`),
-   feed rotation-covered (`O_qk`/`O_v`, σ=0) + GQA-expanded prompt K/V,
-   public triangular mask, `Unit`/`Blackbox` autotune; correct `·O_vᵀ`
-   in-TEE on readback; the resident decode cache is built separately under
-   the permutation cover at the handoff. Bench vs the 43.7 s in-TEE
-   `tee:attn_inplace_many` prefill bucket.
+8. **Phase 6 — prefill-attention offload.** **🟡 PERF WIRE LANDED, default-on
+   still ⛔ gated on Phase 5b.** The perf wire is in the production forward
+   path (`decoder_block_batched`, `GELO_GPU_PREFILL_OFFLOAD`, default-off):
+   per-layer shared cover (`O_qk`/`O_v`, σ=0) → fold+GQA-expand+rotate →
+   `cubek_causal_attend` (engine/executor delegate to `cubek_attention_folded`)
+   → `·O_vᵀ`. SIMD convert (O1) folded in. Verified: `cover_prefill_matches_in_tee`
+   (f32 floor) + `cubek_folded_causal_parity` (fp16). **Measured 1.88×**
+   (44.1 s → 23.5 s) on the real `tee:attn_inplace_many` bucket — see *Prefill
+   offload — real-engine wire-up*. Remaining perf: O2 (un-replicated K/V),
+   batch the per-sequence loop. **Default-on remains blocked** — the rotation
+   cover fails `WEIGHTS-PUB`; flipping requires covariant obfuscation (Phase 5b).
 9. **Acceptance + flip** — the 4-tier gate, then default-on behind the
    c5 AloePri condition (mirrors R3).
 10. **Fast-follows** — kv-head-broadcast in cubek's K/V loader (recover the

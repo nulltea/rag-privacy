@@ -804,6 +804,22 @@ impl GpuOffloadEngine for WgpuVulkanEngine {
         Ok(())
     }
 
+    fn cubek_causal_attend(
+        &self,
+        q: ArrayView3<'_, f32>,
+        k: ArrayView3<'_, f32>,
+        v: ArrayView3<'_, f32>,
+        scale: f32,
+    ) -> Result<Array3<f32>> {
+        if !self.fp16 {
+            return Err(anyhow!("cubek_causal_attend requires the fp16 engine"));
+        }
+        // cubek runs an independent client on the default device (same
+        // adapter as this engine). The caller passes rotation-covered,
+        // GQA-expanded folded operands; we only see rotated bytes.
+        Ok(cubek_attention_folded(q, k, v, scale, true))
+    }
+
     fn register_weight(&mut self, handle: WeightHandle, weight: ArrayView2<'_, f32>) -> Result<()> {
         let mut guard = self.weights.lock().unwrap();
         match &mut *guard {
@@ -1195,17 +1211,50 @@ pub fn cubek_attention_folded(
     let f16_dtype = StorageType::Scalar(ElemType::Float(FloatKind::F16));
     let global_dtypes = AttentionGlobalTypes::from_single_dtype(f16_dtype);
 
-    let to_f16_bytes = |arr: ArrayView3<'_, f32>| -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(arr.len() * 2);
-        for &val in arr.iter() {
-            bytes.extend_from_slice(&f16::from_f32(val).to_le_bytes());
+    // Per-stage preparation breakdown (perm-attn-gpu-offload Phase 5a). The
+    // cubek attend bucket lumps convert + upload + compute + readback into
+    // one number; `CUBEK_PROFILE=1` decomposes it with device sync barriers
+    // between stages (the barriers serialise otherwise-overlapped work, so
+    // they perturb the wall slightly but cleanly attribute each stage). Off
+    // by default → no extra syncs, identical to the un-instrumented path.
+    let profile = std::env::var("CUBEK_PROFILE").as_deref() == Ok("1");
+    let sync_barrier = |reason: &str| {
+        if profile {
+            client.flush();
+            future::block_on(client.sync()).unwrap_or_else(|e| {
+                panic!("cubek_attention_folded sync barrier ({reason}) failed: {e:?}")
+            });
         }
-        bytes
     };
 
-    let q_bytes = to_f16_bytes(q);
-    let k_bytes = to_f16_bytes(k);
-    let v_bytes = to_f16_bytes(v);
+    // ── Stage 1: f32 → f16 host convert via half's SIMD
+    //    `convert_from_f32_slice` (F16C `vcvtps2ph`, runtime-detected) — the
+    //    same path the engine's K/V upload uses (`array3_to_tensor_f16`),
+    //    ~10× the scalar `f16::from_f32` loop it replaces (Phase-5a O1). Timed
+    //    per operand so the GQA-expanded K/V convert cost stays explicit.
+    let to_f16 = |arr: ArrayView3<'_, f32>| -> Vec<f16> {
+        let std = arr.as_standard_layout();
+        let src = std.as_slice().expect("standard-layout slice is contiguous");
+        let mut dst = vec![f16::ZERO; src.len()];
+        dst.convert_from_f32_slice(src);
+        dst
+    };
+    // f16 is `repr(transparent)` over `u16`; on this LE host its in-memory
+    // bytes are already the LE encoding cubek's uploader expects.
+    let as_bytes = |h: &[f16]| -> &[u8] {
+        unsafe { std::slice::from_raw_parts(h.as_ptr() as *const u8, std::mem::size_of_val(h)) }
+    };
+
+    let t = std::time::Instant::now();
+    let q_h = to_f16(q);
+    let cvt_q = t.elapsed();
+    let t = std::time::Instant::now();
+    let k_h = to_f16(k);
+    let cvt_k = t.elapsed();
+    let t = std::time::Instant::now();
+    let v_h = to_f16(v);
+    let cvt_v = t.elapsed();
+    let (q_bytes, k_bytes, v_bytes) = (as_bytes(&q_h), as_bytes(&k_h), as_bytes(&v_h));
 
     // cubek shape: [batch, num_heads, seq, head_dim] with num_heads = 1.
     let q_shape = vec![bh, 1, n_q, d];
@@ -1213,9 +1262,12 @@ pub fn cubek_attention_folded(
     let out_shape = vec![bh, 1, n_q, d];
     let elem_size = 2;
 
-    let q_alloc = client.create_tensor_from_slice(&q_bytes, &q_shape, elem_size);
-    let k_alloc = client.create_tensor_from_slice(&k_bytes, &kv_shape, elem_size);
-    let v_alloc = client.create_tensor_from_slice(&v_bytes, &kv_shape, elem_size);
+    // ── Stage 2: host → device upload (DMA). Under the profile barrier the
+    //    elapsed time is the real transfer; otherwise the alloc just enqueues.
+    let t = std::time::Instant::now();
+    let q_alloc = client.create_tensor_from_slice(q_bytes, &q_shape, elem_size);
+    let k_alloc = client.create_tensor_from_slice(k_bytes, &kv_shape, elem_size);
+    let v_alloc = client.create_tensor_from_slice(v_bytes, &kv_shape, elem_size);
 
     let q_tensor: TensorHandle<Rt> =
         TensorHandle::new(q_alloc.handle, q_shape, q_alloc.strides, f16_dtype);
@@ -1225,6 +1277,8 @@ pub fn cubek_attention_folded(
         TensorHandle::new(v_alloc.handle, kv_shape, v_alloc.strides, f16_dtype);
     let out_tensor: TensorHandle<Rt> =
         TensorHandle::empty(&client, out_shape, f16_dtype);
+    sync_barrier("upload");
+    let upload_ms = t.elapsed();
 
     let options = AttentionOptions {
         causal,
@@ -1254,6 +1308,10 @@ pub fn cubek_attention_folded(
         _ => Strategy::Unit(BlueprintStrategy::Inferred(())),
     };
 
+    // ── Stage 3: GPU attend (tiled online-softmax · V). The profile barrier
+    //    isolates pure compute; without it this just enqueues and the cost
+    //    surfaces in the readback sync below.
+    let t = std::time::Instant::now();
     launch::<Rt>(
         strategy,
         &client,
@@ -1266,12 +1324,64 @@ pub fn cubek_attention_folded(
         options,
     )
     .expect("cubek_attention_folded launch failed");
+    sync_barrier("compute");
+    let compute_ms = t.elapsed();
 
+    // ── Stage 4: device → host readback (includes the implicit sync if the
+    //    profile barriers are off, in which case it absorbs upload+compute).
+    let t = std::time::Instant::now();
     let out_bytes = client.read_one(out_tensor.handle);
-    let mut out = Array3::<f32>::zeros((bh, n_q, d));
-    for (dst, chunk) in out.iter_mut().zip(out_bytes.chunks_exact(2)) {
-        let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
-        *dst = f16::from_bits(bits).to_f32();
+    let readback_ms = t.elapsed();
+
+    // ── Stage 5: f16 → f32 host convert of the output via SIMD
+    //    `convert_to_f32_slice` (Phase-5a O1; was a scalar `from_bits` loop).
+    let t = std::time::Instant::now();
+    let n_out = bh * n_q * d;
+    // Reinterpret the LE f16 readback bytes as `&[f16]` (no copy), then
+    // SIMD-widen into the f32 output buffer. GPU readback buffers are
+    // runtime-allocated and ≥2-byte aligned; assert it in debug.
+    debug_assert_eq!(
+        out_bytes.as_ptr() as usize % std::mem::align_of::<f16>(),
+        0,
+        "cubek readback buffer is not f16-aligned"
+    );
+    debug_assert_eq!(out_bytes.len(), n_out * 2, "cubek readback size mismatch");
+    let out_h: &[f16] =
+        unsafe { std::slice::from_raw_parts(out_bytes.as_ptr() as *const f16, n_out) };
+    let mut out_vec = vec![0.0_f32; n_out];
+    out_h.convert_to_f32_slice(&mut out_vec);
+    let out = Array3::from_shape_vec((bh, n_q, d), out_vec)
+        .expect("cubek out shape matches buffer");
+    let cvt_out = t.elapsed();
+
+    if profile {
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1e3;
+        let q_el = bh * n_q * d;
+        let kv_el = bh * n_kv * d;
+        eprintln!(
+            "[cubek-prep] bh={bh} n_q={n_q} n_kv={n_kv} d={d}  \
+             (Q {q_el} el, K/V {kv_el} el each)"
+        );
+        eprintln!(
+            "  convert  Q {:7.2} ms  K {:7.2} ms  V {:7.2} ms  | total {:7.2} ms",
+            ms(cvt_q),
+            ms(cvt_k),
+            ms(cvt_v),
+            ms(cvt_q + cvt_k + cvt_v)
+        );
+        eprintln!("  upload (DMA, synced)        {:7.2} ms", ms(upload_ms));
+        eprintln!("  compute (GPU attend)        {:7.2} ms", ms(compute_ms));
+        eprintln!("  readback                    {:7.2} ms", ms(readback_ms));
+        eprintln!("  convert-out (f16→f32)       {:7.2} ms", ms(cvt_out));
+        let prep = cvt_q + cvt_k + cvt_v + upload_ms;
+        eprintln!(
+            "  ── prep (convert+upload) {:7.2} ms  vs compute {:7.2} ms  \
+             (prep is {:.0}% of {:.2} ms)",
+            ms(prep),
+            ms(compute_ms),
+            100.0 * ms(prep) / ms(prep + compute_ms + readback_ms + cvt_out),
+            ms(prep + compute_ms + readback_ms + cvt_out)
+        );
     }
     out
 }

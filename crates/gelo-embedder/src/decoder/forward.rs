@@ -356,6 +356,71 @@ fn gpu_resident_attn_enabled() -> bool {
     })
 }
 
+/// Prefill-attention GPU offload (perm-attn-gpu-offload Phase 6): route
+/// GLOBAL-layer prefill self-attention through the fused `cubek` kernel under
+/// the feature-rotation cover (`O_qk`/`O_v`, σ=0, public causal mask), instead
+/// of the in-TEE `causal_gqa_attention` B-loop. Default off → production
+/// prefill stays in-TEE; SWA layers always stay in-TEE. Security note: the
+/// rotation cover does NOT clear the `WEIGHTS-PUB` bar (token-norm dictionary)
+/// — this flag is a PERF wire, gated default-off until covariant obfuscation
+/// (AloePri, Phase 5b) lands.
+fn gpu_prefill_offload_enabled() -> bool {
+    static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *EN.get_or_init(|| {
+        std::env::var("GELO_GPU_PREFILL_OFFLOAD")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
+/// `(n, H·d)` → `(H, n, d)` — fold a per-sequence projection into stacked
+/// per-head shape (the prefill offload layout; one folded head per attention
+/// problem).
+fn fold_heads_2d(x: ArrayView2<'_, f32>, h: usize, d: usize) -> Array3<f32> {
+    let n = x.nrows();
+    let mut out = Array3::<f32>::zeros((h, n, d));
+    for hi in 0..h {
+        for j in 0..n {
+            for c in 0..d {
+                out[(hi, j, c)] = x[(j, hi * d + c)];
+            }
+        }
+    }
+    out
+}
+
+/// `(n, Hkv·d)` → `(Hq, n, d)` with GQA broadcast (q-head `qh` reads kv-head
+/// `qh / (Hq/Hkv)`). Host-side expand for the MVP cubek path (Phase-5a O2 moves
+/// this on-device).
+fn fold_expand_kv_2d(x: ArrayView2<'_, f32>, hq: usize, hkv: usize, d: usize) -> Array3<f32> {
+    let n = x.nrows();
+    let group = hq / hkv;
+    let mut out = Array3::<f32>::zeros((hq, n, d));
+    for qh in 0..hq {
+        let kvh = qh / group;
+        for j in 0..n {
+            for c in 0..d {
+                out[(qh, j, c)] = x[(j, kvh * d + c)];
+            }
+        }
+    }
+    out
+}
+
+/// `(H, n, d)` → `(n, H·d)`, inverse of [`fold_heads_2d`].
+fn unfold_heads_2d(x: ArrayView3<'_, f32>, h: usize, d: usize) -> Array2<f32> {
+    let n = x.shape()[1];
+    let mut out = Array2::<f32>::zeros((n, h * d));
+    for hi in 0..h {
+        for j in 0..n {
+            for c in 0..d {
+                out[(j, hi * d + c)] = x[(hi, j, c)];
+            }
+        }
+    }
+    out
+}
+
 /// `(B, H·d)` → `(B·H, 1, d)` (b-major), the stacked per-head shape the
 /// resident session expects.
 fn stack_heads(x: ArrayView2<'_, f32>, b: usize, h: usize, d: usize) -> Array3<f32> {
@@ -1563,27 +1628,87 @@ fn decoder_block_batched(
     // the kernel-routing reasoning.
     let q_dim = cfg.num_attention_heads * cfg.head_dim_value();
     let mut ctx = Array2::<f32>::zeros((batch_size * n_max, q_dim));
-    profile::time("tee:attn_inplace_many", || {
-        for b in 0..batch_size {
-            let valid_n = seq_lens[b];
-            if valid_n == 0 {
-                continue;
+
+    // Phase-6 prefill offload (perm-attn-gpu-offload): route GLOBAL-layer
+    // prefill self-attention through the fused `cubek` kernel under the
+    // feature-rotation cover, instead of the in-TEE B-loop. Gated default-off
+    // (production unchanged); the rotation cover is session-fixed per layer
+    // and exactly corrected in-TEE by `O_vᵀ`, so output matches in-TEE at the
+    // fp16 floor. PERF wire only — the cover does not clear `WEIGHTS-PUB`.
+    let layer_class = cfg.effective_attention_class(layer_idx as usize);
+    let use_gpu_prefill =
+        gpu_prefill_offload_enabled() && matches!(layer_class, AttentionClass::Global);
+    if use_gpu_prefill {
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha20Rng;
+        const PREFILL_SALT: u64 = 0xC0FFEE_BEEF;
+        let (nqh, nkvh, dh) = (
+            cfg.num_attention_heads,
+            cfg.num_key_value_heads,
+            cfg.head_dim_value(),
+        );
+        let scale = 1.0_f32 / (dh as f32).sqrt();
+        profile::time("tee:attn_prefill_offload", || -> Result<()> {
+            // Session-fixed shared cover per layer (re-derived from a per-layer
+            // seed; shared O across heads → GQA-broadcast-consistent).
+            let mut crng = ChaCha20Rng::seed_from_u64(PREFILL_SALT ^ layer_idx as u64);
+            let o_qk = sample_orthogonal(dh, &mut crng);
+            let o_v = sample_orthogonal(dh, &mut crng);
+            for b in 0..batch_size {
+                let valid_n = seq_lens[b];
+                if valid_n == 0 {
+                    continue;
+                }
+                let q_b = q.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
+                let k_b = k.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
+                let v_b = v.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
+                // Fold + GQA-expand + rotate (in-TEE): the GPU only ever sees
+                // `Q·O_qk`, `K·O_qk`, `V·O_v`.
+                let (q_cov, k_cov, v_cov) = profile::time("prefill_cover:rotate_tee", || {
+                    let q_f = fold_heads_2d(q_b, nqh, dh);
+                    let k_f = fold_expand_kv_2d(k_b, nqh, nkvh, dh);
+                    let v_f = fold_expand_kv_2d(v_b, nqh, nkvh, dh);
+                    (
+                        rotate_heads(q_f.view(), o_qk.view()),
+                        rotate_heads(k_f.view(), o_qk.view()),
+                        rotate_heads(v_f.view(), o_v.view()),
+                    )
+                });
+                let ctx_raw = profile::time("prefill_cover:cubek_gpu", || {
+                    exec.cubek_causal_attend(q_cov.view(), k_cov.view(), v_cov.view(), scale)
+                })?;
+                let ctx_b = profile::time("prefill_cover:correct_tee", || {
+                    let ctx_cov = rotate_heads(ctx_raw.view(), o_v.t());
+                    unfold_heads_2d(ctx_cov.view(), nqh, dh)
+                });
+                ctx.slice_mut(ndarray::s![b * n_max..b * n_max + valid_n, ..])
+                    .assign(&ctx_b);
             }
-            let q_b = q.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
-            let k_b = k.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
-            let v_b = v.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
-            let ctx_b = causal_gqa_attention(
-                q_b,
-                k_b,
-                v_b,
-                cfg.num_attention_heads,
-                cfg.num_key_value_heads,
-                cfg.head_dim_value(),
-            );
-            ctx.slice_mut(ndarray::s![b * n_max..b * n_max + valid_n, ..])
-                .assign(&ctx_b);
-        }
-    });
+            Ok(())
+        })?;
+    } else {
+        profile::time("tee:attn_inplace_many", || {
+            for b in 0..batch_size {
+                let valid_n = seq_lens[b];
+                if valid_n == 0 {
+                    continue;
+                }
+                let q_b = q.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
+                let k_b = k.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
+                let v_b = v.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
+                let ctx_b = causal_gqa_attention(
+                    q_b,
+                    k_b,
+                    v_b,
+                    cfg.num_attention_heads,
+                    cfg.num_key_value_heads,
+                    cfg.head_dim_value(),
+                );
+                ctx.slice_mut(ndarray::s![b * n_max..b * n_max + valid_n, ..])
+                    .assign(&ctx_b);
+            }
+        });
+    }
 
     let attn_out = if offload {
         exec.offload_linear(WeightHandle::new(layer_idx, WeightKind::O), ctx.view())?
@@ -1659,6 +1784,101 @@ fn decoder_block_batched(
         })
     };
     Ok(profile::time("tee:residual", || &h1 + &ffn_out))
+}
+
+#[cfg(test)]
+mod prefill_offload_tests {
+    use super::*;
+    use crate::decoder::attention::causal_gqa_attention;
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha20Rng;
+    use rand_distr::{Distribution, StandardNormal};
+
+    /// f32 CPU folded causal attention over `(H, n, d)` — a cubek stand-in
+    /// so the cover/fold/unfold path can be checked exactly in-TEE, with no
+    /// GPU and no fp16. Query row i attends keys 0..=i.
+    fn cpu_folded_causal(
+        q: ArrayView3<'_, f32>,
+        k: ArrayView3<'_, f32>,
+        v: ArrayView3<'_, f32>,
+        scale: f32,
+    ) -> Array3<f32> {
+        let (h, n, d) = q.dim();
+        let mut out = Array3::<f32>::zeros((h, n, d));
+        for hi in 0..h {
+            for i in 0..n {
+                let mut scores = vec![f32::NEG_INFINITY; i + 1];
+                let mut mx = f32::NEG_INFINITY;
+                for (j, s) in scores.iter_mut().enumerate() {
+                    let mut acc = 0.0;
+                    for c in 0..d {
+                        acc += q[(hi, i, c)] * k[(hi, j, c)];
+                    }
+                    *s = acc * scale;
+                    mx = mx.max(*s);
+                }
+                let mut sum = 0.0;
+                for s in scores.iter_mut() {
+                    *s = (*s - mx).exp();
+                    sum += *s;
+                }
+                for c in 0..d {
+                    let mut acc = 0.0;
+                    for (j, &w) in scores.iter().enumerate() {
+                        acc += w * v[(hi, j, c)];
+                    }
+                    out[(hi, i, c)] = acc / sum;
+                }
+            }
+        }
+        out
+    }
+
+    /// The prefill-offload cover path (fold → GQA-expand → rotate →
+    /// [folded causal attend] → `O_vᵀ` → unfold) must reproduce the
+    /// production in-TEE `causal_gqa_attention` at the f32 floor. This pins
+    /// the fold/expand/unfold indexing + the orthogonal cover cancellation
+    /// (the cubek fp16 step itself is covered by `cubek_folded_causal_parity`).
+    #[test]
+    fn cover_prefill_matches_in_tee() {
+        let (hq, hkv, d, n) = (8usize, 2usize, 16usize, 12usize);
+        let scale = 1.0 / (d as f32).sqrt();
+        let mut rng = ChaCha20Rng::seed_from_u64(0xA11CE);
+        let mk = |cols: usize, rng: &mut ChaCha20Rng| {
+            Array2::<f32>::from_shape_fn((n, cols), |_| {
+                let z: f32 = StandardNormal.sample(rng);
+                z * 0.1
+            })
+        };
+        let q_b = mk(hq * d, &mut rng);
+        let k_b = mk(hkv * d, &mut rng);
+        let v_b = mk(hkv * d, &mut rng);
+
+        let in_tee = causal_gqa_attention(q_b.view(), k_b.view(), v_b.view(), hq, hkv, d);
+
+        let mut crng = ChaCha20Rng::seed_from_u64(0xC0FFEE);
+        let o_qk = sample_orthogonal(d, &mut crng);
+        let o_v = sample_orthogonal(d, &mut crng);
+        let q_f = fold_heads_2d(q_b.view(), hq, d);
+        let k_f = fold_expand_kv_2d(k_b.view(), hq, hkv, d);
+        let v_f = fold_expand_kv_2d(v_b.view(), hq, hkv, d);
+        let q_cov = rotate_heads(q_f.view(), o_qk.view());
+        let k_cov = rotate_heads(k_f.view(), o_qk.view());
+        let v_cov = rotate_heads(v_f.view(), o_v.view());
+        let ctx_raw = cpu_folded_causal(q_cov.view(), k_cov.view(), v_cov.view(), scale);
+        let ctx_cov = rotate_heads(ctx_raw.view(), o_v.t());
+        let cover = unfold_heads_2d(ctx_cov.view(), hq, d);
+
+        let max_abs = in_tee
+            .iter()
+            .zip(cover.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_abs < 1e-3,
+            "cover prefill path diverged from in-TEE: max_abs={max_abs:.6}"
+        );
+    }
 }
 
 fn decoder_block(

@@ -606,6 +606,25 @@ pub trait GpuOffloadEngine: Send {
     fn kv_drop_session(&self, _id: KvSessionId) -> Result<()> {
         Ok(())
     }
+
+    /// Fused causal attention over **folded** operands for the prefill
+    /// offload (perm-attn-gpu-offload Phase 6). `q`/`k`/`v` are
+    /// `(B·Hq, n, d_head)` — each folded head is an independent causal
+    /// self-attention problem and K/V are already GQA-expanded to `Hq` by
+    /// the caller. Returns the normalised context `(B·Hq, n, d_head)`. The
+    /// caller (TEE) supplies feature-rotation-covered operands (`Q·O_qk`,
+    /// `K·O_qk`, `V·O_v`) and corrects the output with `·O_vᵀ`; the engine
+    /// only sees rotated bytes. Default unsupported; the GPU engine routes
+    /// to a tiled fused softmax (`cubek-attention`).
+    fn cubek_causal_attend(
+        &self,
+        _q: ArrayView3<f32>,
+        _k: ArrayView3<f32>,
+        _v: ArrayView3<f32>,
+        _scale: f32,
+    ) -> Result<Array3<f32>> {
+        Err(anyhow!("cubek_causal_attend: this engine has no fused-attention support"))
+    }
 }
 
 /// Opaque handle to an engine-owned resident K/V session.
@@ -1239,6 +1258,20 @@ pub trait TrustedExecutor {
     /// Free a resident session (end of generation).
     fn resident_kv_drop(&mut self, _id: KvSessionId) -> Result<()> {
         Ok(())
+    }
+
+    /// Fused causal attention over folded, rotation-covered operands —
+    /// the prefill-offload delegate (perm-attn-gpu-offload Phase 6). See
+    /// [`GpuOffloadEngine::cubek_causal_attend`]. Default unsupported;
+    /// `InProcessTrustedExecutor` delegates to the engine.
+    fn cubek_causal_attend(
+        &mut self,
+        _q: ArrayView3<f32>,
+        _k: ArrayView3<f32>,
+        _v: ArrayView3<f32>,
+        _scale: f32,
+    ) -> Result<Array3<f32>> {
+        Err(anyhow!("cubek_causal_attend: this executor has no fused-attention support"))
     }
 
     /// Cached-KV variant of [`Self::offload_attention_permuted`] for
