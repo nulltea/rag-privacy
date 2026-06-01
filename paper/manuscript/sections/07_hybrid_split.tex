@@ -1,6 +1,15 @@
 \section{Hybrid Split: TEE + Obfuscation}
 \label{sec:hybrid}
 
+% SCOPE ROLE (corrections #1 + #2): this is the PROTAGONIST family. It needs only a
+% CPU-TEE (SGX/TDX, ubiquitous) + COMMODITY untrusted GPUs --- no confidential GPU ---
+% making it the widely-deployable sweet spot between pure-TEE (\cref{sec:tee}, fast but
+% needs CC-GPU) and crypto (\cref{sec:crypto}, no special HW but 100-1000x). Cover only
+% the modern practical schemes (GELO, TwinShield, ObfuscaTune, SecureInfer, SCX, Amulet);
+% the CNN-era roots (Slalom, DarKnight, ShadowNet, SOTER) are lineage-only prose, and
+% TEESlice is cited as the analysis showing why naive (un-obfuscated) split fails.
+\dnote{this is the deep family; lead with the commodity-GPU deployability argument}
+
 \subsection{Approach}
 % Keep a small trusted core in a TEE; offload the heavy linear algebra to an
 % untrusted accelerator over OBFUSCATED activations. Combines TEE's near-plaintext

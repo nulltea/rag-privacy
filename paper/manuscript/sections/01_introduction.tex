@@ -23,12 +23,20 @@ mechanism depth on crypto/TEE inference}
 complement (not compete with) the risk-side SoK}
 
 \subsection{Scope}
-% LLM inference AND RAG, including graph-RAG (a setting Bodea excludes). Five
-% mechanism families. Semi-honest baseline (range to malicious documented in §2).
-% Confidentiality focus; integrity/verifiability noted where schemes provide it.
-\needswork{state scope precisely: pipeline (ingest->embed->store->retrieve->
-rerank->generate + graph construction/traversal); mechanism families; what is
-out of scope (side-channels, full integrity)}
+% Transformer inference AND RAG, including graph-RAG (a setting Bodea excludes).
+% Five mechanism families. Semi-honest baseline (range to malicious documented in §2).
+%
+% TWO SCOPE CORRECTIONS (decision of record):
+%  (1) PRACTICALITY: we systematize state-of-the-art, *practical* schemes --- those
+%      with good security AND low-enough overhead to deploy. Foundational/superseded
+%      works are cited for lineage only, never in the comparison tables.
+%  (2) COMMODITY HARDWARE: we prioritize schemes that need NO specialized confidential-
+%      compute hardware (no NVIDIA H100/B200 confidential GPUs). Pure-TEE-on-CC-GPU is
+%      the performance/trust BASELINE (\cref{sec:tee}); the protagonist is the HYBRID
+%      SPLIT family (CPU-TEE + commodity GPU, \cref{sec:hybrid}).
+\needswork{state the two scope corrections as a short paragraph; frame the paper as
+``confidential transformer inference on commodity GPUs''; list out-of-scope
+(side-channels, full integrity, foundational/superseded schemes)}
 
 \subsection{Contributions}
 This paper is a \emph{systematization of knowledge}. Concretely:

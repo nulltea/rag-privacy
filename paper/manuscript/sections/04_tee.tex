@@ -1,5 +1,15 @@
-\section{Trusted Execution Environments}
+\section{Trusted Execution Environments (Baseline)}
 \label{sec:tee}
+
+% SCOPE ROLE (correction #2): TEE is the BASELINE, not a protagonist family.
+% Pure-TEE inference (full model in enclave, or a confidential GPU H100/B200) gives
+% near-plaintext performance but DEMANDS specialized confidential-compute hardware and
+% full enclave trust. We keep it compact: it establishes (a) the near-plaintext
+% performance ceiling the hybrid family is measured against, and (b) the
+% hardware-availability axis (confidential-GPU-required vs commodity-GPU-OK) that
+% motivates the hybrid split (\cref{sec:hybrid}) as the deployable sweet spot.
+\dnote{keep this section SHORT --- baseline + hardware axis only; the depth goes to
+\cref{sec:hybrid}}
 
 \subsection{Approach}
 % CPU-TEE (SGX/TDX) and GPU-TEE (confidential H100/H200/B200): hardware-isolated
