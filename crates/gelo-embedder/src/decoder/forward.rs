@@ -403,6 +403,62 @@ fn unfold_heads_2d(x: ArrayView3<'_, f32>, h: usize, d: usize) -> Array2<f32> {
     out
 }
 
+/// Batched fold `(B·n, H·d)` → `(B·H, n, d)` (b-major: folded head `b*H+h`) —
+/// the single-dispatch prefill fold for uniform-length batches, so all B
+/// sequences attend in **one** `cubek` call instead of B (prefill offload
+/// loop-batching). Parallelised over the B·H folded heads.
+fn fold_heads_2d_batched(
+    x: ArrayView2<'_, f32>,
+    b: usize,
+    n: usize,
+    h: usize,
+    d: usize,
+) -> Array3<f32> {
+    use ndarray::parallel::prelude::*;
+    let mut out = Array3::<f32>::zeros((b * h, n, d));
+    out.outer_iter_mut()
+        .into_par_iter()
+        .enumerate()
+        .for_each(|(fh, mut head)| {
+            let bi = fh / h;
+            let hi = fh % h;
+            for j in 0..n {
+                for c in 0..d {
+                    head[(j, c)] = x[(bi * n + j, hi * d + c)];
+                }
+            }
+        });
+    out
+}
+
+/// Fused `O_vᵀ` correction **+ unfold**: write `ctx_raw[b·Hq+qh] · O_vᵀ`
+/// directly into `ctx[b·n + .., qh·d ..]`, skipping the intermediate
+/// `(B·Hq, n, d)` array and the separate unfold copy (prefill offload, fuse
+/// lever). Parallelised over the B sequences (disjoint row blocks); the per-head
+/// `(n,d)·(d,d)` stays a BLAS `dot`. `o_vt` is `O_vᵀ`.
+fn correct_unfold_into(
+    ctx: &mut Array2<f32>,
+    ctx_raw: ArrayView3<'_, f32>,
+    o_vt: ArrayView2<'_, f32>,
+    n: usize,
+    hq: usize,
+    d: usize,
+) {
+    use ndarray::parallel::prelude::*;
+    ctx.axis_chunks_iter_mut(Axis(0), n)
+        .into_par_iter()
+        .enumerate()
+        .for_each(|(bi, mut block)| {
+            for qh in 0..hq {
+                let head = ctx_raw.index_axis(Axis(0), bi * hq + qh); // (n, d)
+                let cov = head.dot(&o_vt); // (n, d), BLAS
+                block
+                    .slice_mut(ndarray::s![.., qh * d..(qh + 1) * d])
+                    .assign(&cov);
+            }
+        });
+}
+
 /// `(B, H·d)` → `(B·H, 1, d)` (b-major), the stacked per-head shape the
 /// resident session expects.
 fn stack_heads(x: ArrayView2<'_, f32>, b: usize, h: usize, d: usize) -> Array3<f32> {
@@ -1720,44 +1776,83 @@ fn decoder_block_batched(
             let mut crng = ChaCha20Rng::seed_from_u64(PREFILL_SALT ^ layer_idx as u64);
             let o_qk = sample_orthogonal(dh, &mut crng);
             let o_v = sample_orthogonal(dh, &mut crng);
-            for b in 0..batch_size {
-                let valid_n = seq_lens[b];
-                if valid_n == 0 {
-                    continue;
-                }
-                let q_b = q.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
-                let k_b = k.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
-                let v_b = v.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
-                // Fold + rotate (in-TEE), K/V un-replicated at Hkv (O2): the
-                // GPU only ever sees `Q·O_qk`, `K·O_qk`, `V·O_v`, and the GQA
-                // broadcast to Hq happens on-device, so K/V rotation is 4× less
-                // work and only un-replicated K/V cross the bus.
-                let group = nqh / nkvh;
+            let group = nqh / nkvh;
+            // Loop-batching: when every sequence is full length (the common
+            // case — padded prompts share `n_max`), fold all B into ONE cubek
+            // dispatch instead of B per-sequence calls (drops per-call launch +
+            // convert/upload overhead ×B). Ragged batches fall back per-seq.
+            let uniform = batch_size > 0 && seq_lens.iter().all(|&l| l == n_max);
+            if uniform {
+                // Fold + rotate all B sequences (in-TEE), K/V un-replicated at
+                // Hkv (O2); the GPU sees only `Q·O_qk`, `K·O_qk`, `V·O_v` and
+                // does the GQA broadcast on-device.
                 let (q_cov, k_cov, v_cov) = profile::time("prefill_cover:rotate_tee", || {
-                    let q_f = fold_heads_2d(q_b, nqh, dh);
-                    let k_f = fold_heads_2d(k_b, nkvh, dh);
-                    let v_f = fold_heads_2d(v_b, nkvh, dh);
+                    let q_f = fold_heads_2d_batched(q.view(), batch_size, n_max, nqh, dh);
+                    let k_f = fold_heads_2d_batched(k.view(), batch_size, n_max, nkvh, dh);
+                    let v_f = fold_heads_2d_batched(v.view(), batch_size, n_max, nkvh, dh);
                     (
                         rotate_heads(q_f.view(), o_qk.view()),
                         rotate_heads(k_f.view(), o_qk.view()),
                         rotate_heads(v_f.view(), o_v.view()),
                     )
                 });
-                let ctx_raw = profile::time("prefill_cover:cubek_gpu", || {
-                    exec.cubek_causal_attend(
-                        q_cov.view(),
-                        k_cov.view(),
-                        v_cov.view(),
-                        group,
-                        scale,
-                    )
+                // cubek dispatched **per-sequence** (slice the batched covered
+                // operands, gather into one (B·Hq,n,d) buffer for the batched
+                // correction). Counter to the usual "batch bigger" rule, a
+                // controlled warm A/B (`cubek_prefill_cover::cubek_dispatch_granularity`)
+                // measures per-seq ~1.48× faster than one bh=B·Hq dispatch — an
+                // artifact of cubek's *materialised* GQA expand (`repeat_dim`
+                // builds a ~268 MB expanded K/V for the big dispatch vs small
+                // reused per-seq ones). The principled fix (cubek kv-head
+                // read-index, no materialisation) would let the single dispatch
+                // win; until then, per-seq is the measured optimum.
+                let ctx_raw = profile::time("prefill_cover:cubek_gpu", || -> Result<Array3<f32>> {
+                    let mut ctx_raw_all = Array3::<f32>::zeros((batch_size * nqh, n_max, dh));
+                    for b in 0..batch_size {
+                        let qb = q_cov.slice(ndarray::s![b * nqh..(b + 1) * nqh, .., ..]);
+                        let kb = k_cov.slice(ndarray::s![b * nkvh..(b + 1) * nkvh, .., ..]);
+                        let vb = v_cov.slice(ndarray::s![b * nkvh..(b + 1) * nkvh, .., ..]);
+                        let cb = exec.cubek_causal_attend(qb, kb, vb, group, scale)?;
+                        ctx_raw_all
+                            .slice_mut(ndarray::s![b * nqh..(b + 1) * nqh, .., ..])
+                            .assign(&cb);
+                    }
+                    Ok(ctx_raw_all)
                 })?;
-                let ctx_b = profile::time("prefill_cover:correct_tee", || {
-                    let ctx_cov = rotate_heads(ctx_raw.view(), o_v.t());
-                    unfold_heads_2d(ctx_cov.view(), nqh, dh)
+                // Fused `O_vᵀ` correct + unfold straight into `ctx` (no
+                // intermediate (B·Hq,n,d) array, no separate unfold copy).
+                profile::time("prefill_cover:correct_tee", || {
+                    correct_unfold_into(&mut ctx, ctx_raw.view(), o_v.t(), n_max, nqh, dh);
                 });
-                ctx.slice_mut(ndarray::s![b * n_max..b * n_max + valid_n, ..])
-                    .assign(&ctx_b);
+            } else {
+                for b in 0..batch_size {
+                    let valid_n = seq_lens[b];
+                    if valid_n == 0 {
+                        continue;
+                    }
+                    let q_b = q.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
+                    let k_b = k.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
+                    let v_b = v.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
+                    let (q_cov, k_cov, v_cov) = profile::time("prefill_cover:rotate_tee", || {
+                        let q_f = fold_heads_2d(q_b, nqh, dh);
+                        let k_f = fold_heads_2d(k_b, nkvh, dh);
+                        let v_f = fold_heads_2d(v_b, nkvh, dh);
+                        (
+                            rotate_heads(q_f.view(), o_qk.view()),
+                            rotate_heads(k_f.view(), o_qk.view()),
+                            rotate_heads(v_f.view(), o_v.view()),
+                        )
+                    });
+                    let ctx_raw = profile::time("prefill_cover:cubek_gpu", || {
+                        exec.cubek_causal_attend(q_cov.view(), k_cov.view(), v_cov.view(), group, scale)
+                    })?;
+                    let ctx_b = profile::time("prefill_cover:correct_tee", || {
+                        let ctx_cov = rotate_heads(ctx_raw.view(), o_v.t());
+                        unfold_heads_2d(ctx_cov.view(), nqh, dh)
+                    });
+                    ctx.slice_mut(ndarray::s![b * n_max..b * n_max + valid_n, ..])
+                        .assign(&ctx_b);
+                }
             }
             Ok(())
         })?;
@@ -1971,6 +2066,75 @@ mod prefill_offload_tests {
         assert!(
             max_abs < 1e-3,
             "cover prefill path diverged from in-TEE: max_abs={max_abs:.6}"
+        );
+    }
+
+    /// The **batched** (loop-batched) prefill path — `fold_heads_2d_batched`
+    /// (b-major) → leading-dim GQA expand (as cubek does) → `correct_unfold_into`
+    /// — must reproduce per-sequence in-TEE `causal_gqa_attention` for every
+    /// sequence of a uniform-length batch, at the f32 floor.
+    #[test]
+    fn cover_prefill_batched_matches_in_tee() {
+        let (b, hq, hkv, d, n) = (3usize, 8usize, 2usize, 16usize, 12usize);
+        let group = hq / hkv;
+        let scale = 1.0 / (d as f32).sqrt();
+        let mut rng = ChaCha20Rng::seed_from_u64(0xB00B5);
+        let mk = |cols: usize, rng: &mut ChaCha20Rng| {
+            Array2::<f32>::from_shape_fn((b * n, cols), |_| {
+                let z: f32 = StandardNormal.sample(rng);
+                z * 0.1
+            })
+        };
+        let q = mk(hq * d, &mut rng);
+        let k = mk(hkv * d, &mut rng);
+        let v = mk(hkv * d, &mut rng);
+
+        // Reference: per-sequence in-TEE.
+        let mut in_tee = Array2::<f32>::zeros((b * n, hq * d));
+        for bi in 0..b {
+            let qb = q.slice(ndarray::s![bi * n..(bi + 1) * n, ..]);
+            let kb = k.slice(ndarray::s![bi * n..(bi + 1) * n, ..]);
+            let vb = v.slice(ndarray::s![bi * n..(bi + 1) * n, ..]);
+            in_tee
+                .slice_mut(ndarray::s![bi * n..(bi + 1) * n, ..])
+                .assign(&causal_gqa_attention(qb, kb, vb, hq, hkv, d));
+        }
+
+        // Batched cover path.
+        let mut crng = ChaCha20Rng::seed_from_u64(0xC0FFEE);
+        let o_qk = sample_orthogonal(d, &mut crng);
+        let o_v = sample_orthogonal(d, &mut crng);
+        let q_cov = rotate_heads(fold_heads_2d_batched(q.view(), b, n, hq, d).view(), o_qk.view());
+        let k_cov = rotate_heads(fold_heads_2d_batched(k.view(), b, n, hkv, d).view(), o_qk.view());
+        let v_cov = rotate_heads(fold_heads_2d_batched(v.view(), b, n, hkv, d).view(), o_v.view());
+        // GQA expand exactly as cubek's leading-dim group repeat: folded q-head
+        // b*Hq+qh reads kv head b*Hkv + qh/group.
+        let expand_b = |t: &Array3<f32>| -> Array3<f32> {
+            let mut e = Array3::<f32>::zeros((b * hq, n, d));
+            for fh in 0..b * hq {
+                let bi = fh / hq;
+                let qh = fh % hq;
+                let src = bi * hkv + qh / group;
+                for j in 0..n {
+                    for c in 0..d {
+                        e[(fh, j, c)] = t[(src, j, c)];
+                    }
+                }
+            }
+            e
+        };
+        let ctx_raw = cpu_folded_causal(q_cov.view(), expand_b(&k_cov).view(), expand_b(&v_cov).view(), scale);
+        let mut cover = Array2::<f32>::zeros((b * n, hq * d));
+        correct_unfold_into(&mut cover, ctx_raw.view(), o_v.t(), n, hq, d);
+
+        let max_abs = in_tee
+            .iter()
+            .zip(cover.iter())
+            .map(|(a, c)| (a - c).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_abs < 1e-3,
+            "batched cover prefill path diverged from in-TEE: max_abs={max_abs:.6}"
         );
     }
 }

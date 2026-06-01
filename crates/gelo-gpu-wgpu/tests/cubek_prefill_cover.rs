@@ -24,7 +24,7 @@
 //! ```
 
 use gelo_embedder::decoder::attention::causal_gqa_attention;
-use gelo_gpu_wgpu::cubek_attention_folded;
+use gelo_gpu_wgpu::{cubek_attention_folded, cubek_attention_folded_gqa};
 use ndarray::parallel::prelude::*;
 use ndarray::{Array2, Array3, ArrayView2, Axis};
 use rand::{Rng, SeedableRng};
@@ -371,4 +371,62 @@ fn prefill_attention_breakdown() {
     run_prefill_cell(2048);
     // n=8192 is heavy (in-TEE is O(n²) per head); skip if it blows up.
     run_prefill_cell(8192);
+}
+
+/// Controlled A/B: **one batched `bh=B·Hq` cubek dispatch** vs **B per-sequence
+/// `bh=Hq` dispatches**, at the production prefill shape, *warm* and averaged
+/// over many iterations in one process — the low-variance instrument the noisy
+/// full-model bench (`gelo_llm_prefill_decode_breakdown`, ±~1.6× cross-run on
+/// `cubek_gpu`) cannot provide. Settles whether prefill should fold all B into
+/// one `cubek_causal_attend` (GPU best practice) or loop per sequence. Both
+/// take un-replicated K/V (`bh=·Hkv`) + `group` (the production O2 path).
+#[test]
+#[ignore = "runs against real Vulkan/wgpu device; opt-in via `--release -- --ignored`"]
+fn cubek_dispatch_granularity() {
+    let n = 2048usize;
+    let scale = 1.0 / (D as f32).sqrt();
+    let mut rng = ChaCha20Rng::seed_from_u64(0xD15A7C6);
+    let mk = |lead: usize, rng: &mut ChaCha20Rng| {
+        Array3::<f32>::from_shape_fn((lead, n, D), |_| rng.random::<f32>() * 0.1 - 0.05)
+    };
+    // Q over all B·Hq folded heads; K/V un-replicated over B·Hkv (cubek expands
+    // to Hq on-device via `group`), b-major to match the production fold.
+    let q = mk(B * HQ, &mut rng);
+    let k = mk(B * HKV, &mut rng);
+    let v = mk(B * HKV, &mut rng);
+
+    let batched = || cubek_attention_folded_gqa(q.view(), k.view(), v.view(), GROUP, scale, true);
+    let per_seq = || {
+        for b in 0..B {
+            let qb = q.slice(ndarray::s![b * HQ..(b + 1) * HQ, .., ..]);
+            let kb = k.slice(ndarray::s![b * HKV..(b + 1) * HKV, .., ..]);
+            let vb = v.slice(ndarray::s![b * HKV..(b + 1) * HKV, .., ..]);
+            std::hint::black_box(cubek_attention_folded_gqa(qb, kb, vb, GROUP, scale, true));
+        }
+    };
+
+    // Warm (JIT compile + autotune) both shapes.
+    std::hint::black_box(batched());
+    per_seq();
+
+    const ITERS: usize = 8;
+    let t = Instant::now();
+    for _ in 0..ITERS {
+        std::hint::black_box(batched());
+    }
+    let batched_ms = t.elapsed().as_secs_f64() * 1e3 / ITERS as f64;
+
+    let t = Instant::now();
+    for _ in 0..ITERS {
+        per_seq();
+    }
+    let per_seq_ms = t.elapsed().as_secs_f64() * 1e3 / ITERS as f64;
+
+    println!("\n=== cubek dispatch granularity  B={B} Hq={HQ} Hkv={HKV} d={D} n={n} ===");
+    println!("  batched (1× bh={}):       {batched_ms:9.3} ms/iter", B * HQ);
+    println!("  per-seq ({B}× bh={HQ}):       {per_seq_ms:9.3} ms/iter");
+    println!(
+        "  ratio (per-seq / batched):  {:9.3}x  (>1 ⇒ batched wins, as best practice predicts)",
+        per_seq_ms / batched_ms
+    );
 }

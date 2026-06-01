@@ -1323,19 +1323,32 @@ Vulkan, `CUBEK_STRATEGY=blackbox`), full 36-layer prefill attention bucket:
 |---|--:|--:|
 | **in-TEE baseline** (`tee:attn_inplace_many`) | **44 062 ms** | 1.00× |
 | offload, O1 (SIMD convert) | 23 490 ms | **1.88×** |
-| offload, O1 + O2 (un-replicated K/V, on-device expand) | **16 237 ms** | **2.71×** |
+| offload, O1 + O2 (un-replicated K/V, on-device expand) | 16 237 ms | **2.71×** |
+| offload, + batched fold/correct (loop-batch + fused `O_vᵀ`) | **15 587 ms** | **2.83×** |
 
-Per-op at O1+O2 (×36 layers × 8 sequences = 288 cubek calls):
-`prefill_cover:cubek_gpu` **5 677 ms** (was 10 407 pre-O2 — un-replicated
-convert+upload + on-device expand), `prefill_cover:rotate_tee` **4 236 ms** (was
-6 913 — K/V rotated at Hkv, 4× less), `prefill_cover:correct_tee` 2 614 ms
-(`O_vᵀ`+unfold on the Hq output — now the largest TEE term, next candidate).
+**Loop-batching + fused `O_vᵀ` (2026-06-01).** For uniform-length batches (the
+common case — padded prompts share `n_max`) the in-TEE fold + rotate is done
+**once** over all B·Hq folded heads, and the `O_vᵀ` correction is **fused with
+the unfold** (written straight into `ctx`, no intermediate (B·Hq,n,d) array). The
+reliable, low-variance wins: `prefill_cover:rotate_tee` **4 236 → 3 534 ms**,
+`prefill_cover:correct_tee` **2 614 → 1 666 ms** (≈1.65 s). (`cubek_gpu` swings
+±~1.5× cross-run via autotune/thermal, so the bucket number understates this.)
 
-**Measured, not projected** — O1+O2 take the real prefill attention bucket from
-1.07× (synthetic, scalar convert) to **2.71×** at the production shape. Still
-open: the per-sequence loop (288 calls) can batch into one fold; `correct_tee`
-(`O_vᵀ`) is now the largest in-TEE term; and the upload-bandwidth probe (B3/O3)
-may unlock more. **Security unchanged:** this is a default-off *perf* wire; the
+**cubek stays per-sequence — and that is the *measured* optimum, against the
+usual "batch bigger" rule.** A controlled warm A/B
+(`cubek_prefill_cover::cubek_dispatch_granularity`, 8 iters, one process):
+**one `bh=B·Hq` dispatch 273.8 ms/iter vs B `bh=Hq` dispatches 185.1 ms/iter →
+per-seq 1.48× faster.** This inverts best practice because of cubek's
+**materialised GQA expand** (`repeat_dim` builds a ~268 MB expanded K/V for the
+big dispatch vs small reused per-seq ones). The principled fix — cubek's
+kv-head **read-index** (broadcast, no materialisation) — would let the single
+dispatch win; until then the prefill folds the TEE work batched but loops cubek
+per-sequence.
+
+**Measured, not projected** — the offloaded prefill attention bucket is now
+**2.83×** vs in-TEE at the production shape. Still open: the upload-bandwidth
+probe (O3 — `queue.write_buffer` staging, ~1.5 GB/s, likely alloc/submit-bound)
+and the cubek read-index. **Security unchanged:** default-off *perf* wire; the
 rotation cover still fails `WEIGHTS-PUB`, so default-on stays gated on covariant
 obfuscation (Phase 5b).
 
