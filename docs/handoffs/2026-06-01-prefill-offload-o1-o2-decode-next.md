@@ -12,15 +12,21 @@ archive_reason: >
   remains the live reference — hence companion, not supersedes.
 ---
 
-# Handoff — prefill offload wired + O1/O2 (2.71×); next = decode perf-opts
+# Handoff — prefill offload (2.71×) + decode O4(a)/O5 (~4×); next = O6 / AloePri
 
-**One-liner.** Phase-5a perf work. Prefill attention offload is now **wired into
-the production forward path** (`decoder_block_batched`, default-off) with O1
-(SIMD convert) + O2 (un-replicated K/V + on-device GQA expand) landed —
-**measured 2.71×** on the real prefill-attention bucket (44.1 s → 16.2 s),
-verified correct. Remaining prefill micro-levers are **deferred**. Next session:
-**decode optimizations** (cut the one-time `build_covered_prefix`, then the fused
-partial-stats kernel).
+**One-liner.** Phase-5a perf, largely done. **Prefill** attention offload wired
+into the production path (`decoder_block_batched`, default-off): O1 (SIMD
+convert) + O2 (un-replicated K/V + on-device GQA expand) → **2.71×** (44.1 →
+16.2 s). **Decode** permuted-cover: O4(a) (vectorised `build_covered_prefix`
+perm+σ) + O5 (build the cover at the prefill→decode handoff) → decode attention
+bucket **9.3 → 3.6 s (~4× vs in-TEE), recurring-only, no break-even K**. All
+committed (`a6a17ac`→`b25f0c3`), parity-verified, default-off (security gated on
+AloePri). **Two negative results recorded** (dev-log): the upload-bandwidth
+anomaly micro-levers are deferred, and the **HD₃ structured-orthogonal cover was
+implemented + reverted** (per-`d`-block FWHT loses to BLAS at d=128; needs a
+batched feature-axis FWHT — a deferred spike). **Next:** decode **O6** (fused
+partial-stats kernel) is the only remaining perf lever; otherwise the real
+default-on gate is **AloePri (Phase 5b)**.
 
 The design source of truth is **`docs/dev/logs/perm-attn-gpu-offload.md`** — read
 the *Offload perf-upside* + *Sequencing* sections first. This handoff only
@@ -65,30 +71,29 @@ Remaining prefill micro-levers, in rough EV order if revisited:
 
 These are diminishing returns on a default-off, security-blocked path. Stop here.
 
-## Next: decode optimizations (the actual next focus)
+## Decode optimizations — O4(a) + O5 DONE; O6 remaining
 
-Decode permuted-cover tail-in-TEE is already wired (`GELO_GPU_RESIDENT_COVER`,
-greedy-parity byte-identical at σ=0). State: attn bucket ≈ 13.8 s vs in-TEE
-14.6 s; **recurring per-step already ~2.9× faster** (157 vs 455 ms/step); the
-one-time **`build_covered_prefix` is 63 % of the bucket** and sets break-even at K≈30.
-Levers (dev-log *Next steps* / *Sequencing* §O4–O6):
+Decode permuted-cover tail-in-TEE wired (`GELO_GPU_RESIDENT_COVER`, σ=0 parity).
+Done this session (committed):
 
-- **O4 — cut `build_covered_prefix`** (≈250 ms/layer, the gating term). Two parts:
-  (a) **vectorize the perm+σ scalar loop** (`forward.rs` create branch — a triple
-  `for h/i/c` with a per-element `StandardNormal` sample; bulk-generate K-noise
-  via the existing parallel-ChaCha `add_gaussian_noise_3d`, do the perm as
-  `d`-length row copies, skip RNG at σ=0); (b) **structured signed-permutation
-  `O(L·d)`** cover instead of the dense `[d,d]` rotate (the swing term). Security
-  is Phase-5b's concern — the cover only needs correctable orthogonality here.
-- **O5 — build the decode cover at prefill** (overlap; moves `build_covered_prefix` off
-  the decode critical path entirely — biggest mover for the decode-wall metric).
-- **O6 — fused partial-stats kernel** — collapse the 5-dispatch
-  `prefix_partial_gpu` (≈3 ms × 1152) that the composed `attend_session_partial`
-  runs; the one genuinely new kernel (cubek/FlashAttention-D with `(m,l,acc)`
-  output). Largest effort; attacks the recurring per-step term.
+- **O4(a) ✅** — vectorised the `build_covered_prefix` perm+σ (row-gather + per-head
+  ChaCha σ-on-K, parallel over heads; was a 16.7 M-element per-element-RNG scalar
+  loop). `build_covered_prefix` 8.8 → 4.4 s.
+- **O5 ✅** — build the cover for all GLOBAL layers at the prefill→decode handoff
+  (`build_covered_prefix_all_global` in `run_prefill_batched`; idempotent lazy
+  fallback kept). Decode attn bucket **9.3 → 3.6 s (~4× vs in-TEE), no break-even
+  K**; the build (5.4 s) relocates to prefill.
+- **O4(b) signed-perm — deferred** (entropy collapse forfeits `WEIGHTS-BLIND`).
+- **HD₃ — tried + reverted** (regressed: per-`d`-block FWHT loses to BLAS at
+  d=128; needs a batched feature-axis FWHT — transpose-based, uncertain at d=128).
+  See dev-log *Structured-orthogonal cover — tried, reverted*.
 
-Start with O4(a)+O4(b) (cheap, security-neutral, measurable on the canonical
-microbench), then O5; O6 last.
+**Remaining: O6 — fused partial-stats kernel.** Collapse the 5-dispatch
+`prefix_partial_gpu` (≈3 ms × 1152, the composed `attend_session_partial`:
+matmul→max_dim→sub+exp→sum_dim→matmul + per-call `repeat_dim`) into one
+cubek/FlashAttention-D kernel emitting `(m,l,acc)`. The one genuinely new kernel;
+attacks the recurring per-step term (now the dominant decode cost after O5).
+Largest effort — grill scope first.
 
 ## And the real default-on gate (not perf): AloePri (Phase 5b)
 
