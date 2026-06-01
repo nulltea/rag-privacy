@@ -1,18 +1,19 @@
-% ABSTRACT — write last. ~200 words. SoK framing.
-% Beats:
-%   1. Setting: confidential Transformer inference (embedding/reranking/generation)
-%      + RAG outsourced to an untrusted cloud.
-%   2. State: many point solutions (crypto, TEE, obfuscation, DP, hybrid split);
-%      no systematization unifies mechanism, threat model, AND performance, and
-%      the existing RAG-privacy SoK (Bodea et al.) is risk-centric, naive-RAG,
-%      and omits a performance axis.
-%   3. What we do: systematize the field by defense mechanism, under a 6-axis
-%      threat-model taxonomy, with a performance comparison synthesized from
-%      reported numbers; spanning LLM inference AND RAG including graph-RAG.
-%   4. Artifacts: the threat-model taxonomy; a stage x mechanism gap-map; a
-%      normalized performance comparison.
-%   5. Findings: e.g. the field-wide side-channel blind spot; the under-reported
-%      vulnerability of static obfuscation (vignette); the empty gap-map cells.
-%   6. Contribution framing: complements Bodea (risk side); fills its named gaps
-%      (practical cost, advanced/graph-RAG architectures, crypto/TEE depth).
-\needswork{draft abstract last, once §8 synthesis numbers are final}
+% ABSTRACT — ~200 words. SoK framing. (Scope framing written; vignette number TODO.)
+Outsourcing Transformer inference and retrieval-augmented generation (RAG) to an
+untrusted cloud exposes prompts, documents, and proprietary weights to the service
+provider. A decade of point solutions now spans five mechanism families---secure
+computation (MPC/FHE), trusted execution environments (TEEs), static obfuscation,
+differential privacy, and hybrid TEE\,+\,obfuscation splits---but no systematization
+unifies \emph{mechanism}, \emph{threat model}, and \emph{performance}; the closest
+prior SoK is risk-centric, scoped to naive RAG, and omits a performance axis. We
+systematize confidential Transformer inference and RAG on \emph{commodity hardware}
+(no confidential GPU) along three axes: a six-dimension threat-model taxonomy, a
+stage\,$\times$\,mechanism coverage map whose empty cells are the open problems, and a
+performance comparison synthesized from reported numbers with an explicit
+non-comparability caveat. The systematization spans inference, RAG, and graph-RAG---a
+setting prior work excludes---and surfaces field-wide findings: the near-universal
+exclusion of microarchitectural side-channels from threat models, the
+under-reported invertibility of static obfuscation
+(\needswork{headline recovery figure, vignette}), and a graph-RAG frontier in which
+construction and traversal stages are barely covered by any confidentiality mechanism.
+We position the hybrid split as the deployable frontier and map what remains open.

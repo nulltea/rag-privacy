@@ -123,20 +123,21 @@ problems, even when their machinery looks similar.
     \multicolumn{7}{@{}l}{\textit{TEE / hybrid}}\\
     TwinShield   & HbC+verif. & CPU-TEE + SS   & wb   & act     & out & data+model \\
     Opal         & malicious  & TDX + GPU-TEE  & ---  & ap      & out & data+access \\
-    Petridish    & \tq        & CVM            & \tq  & \tq     & out & \tq \\
+    PipeLLM      & HbC        & GPU-TEE        & ---  & act (PCIe) & out & data+model \\
     \midrule
     \multicolumn{7}{@{}l}{\textit{Cryptographic / DP / RAG}}\\
     PermLLM      & HbC (non-coll.) & none      & wb   & shares  & out & input \\
     RemoteRAG    & HbC        & none           & ---  & query+ap & out & query (DP) \\
     Caprise      & HbC        & none           & ---  & ct+dist & out & doc content \\
-    Compass      & \tq        & \tq            & ---  & \tq     & out & \tq \\
+    Pacmann      & HbC        & none (PIR)     & ---  & ap      & out & query+access \\
+    Compass      & HbC        & TEE/client ORAM & --- & ap      & out & query+access \\
     \bottomrule
   \end{tabular}
 \end{table*}
 
-% Petridish + Compass rows remain to be grounded (their queries were not run).
-\needswork{verify the \tq{} cells (Petridish, Compass) against their papers;
-the remaining rows are grounded via the EdgeQuake-indexed source PDFs}
+\needswork{rows are grounded via the EdgeQuake-indexed source PDFs (AloePri, GELO,
+ObfuscaTune, TwinShield, Opal, PermLLM, RemoteRAG, Caprise, Pacmann, Compass);
+PipeLLM/STIP from their preprints --- re-confirm at submission}
 
 \subsection{The Attacker's Capability Budget}
 \label{sec:threat-budget}

@@ -34,9 +34,22 @@ complement (not compete with) the risk-side SoK}
 %      compute hardware (no NVIDIA H100/B200 confidential GPUs). Pure-TEE-on-CC-GPU is
 %      the performance/trust BASELINE (\cref{sec:tee}); the protagonist is the HYBRID
 %      SPLIT family (CPU-TEE + commodity GPU, \cref{sec:hybrid}).
-\needswork{state the two scope corrections as a short paragraph; frame the paper as
-``confidential transformer inference on commodity GPUs''; list out-of-scope
-(side-channels, full integrity, foundational/superseded schemes)}
+We scope the systematization to \emph{confidential Transformer inference and RAG on
+commodity hardware}, and impose two deliberate restrictions. First, \textbf{practical
+frontier}: the comparison tables hold only state-of-the-art schemes that combine
+credible security with deployable overhead; foundational or superseded work is cited
+for lineage only. Second, \textbf{commodity hardware}: we prioritize schemes that need
+no specialized confidential-compute accelerator (no NVIDIA H100/B200 confidential GPU).
+Pure-TEE inference on a confidential GPU is kept as the performance and trust
+\emph{baseline} (\cref{sec:tee}); the protagonist family is the \emph{hybrid split}
+(CPU-TEE + an untrusted commodity GPU, \cref{sec:hybrid}). The systematization spans
+Transformer inference (embedding, reranking, generation) and RAG including
+\emph{graph-RAG}---a setting the prior RAG-privacy SoK~\citep{bodea_sok} excludes. We
+treat a semi-honest cloud as the baseline adversary, documenting the range to malicious
+in \cref{sec:threat}. Explicitly \emph{out of scope}: microarchitectural
+side-channels (a field-wide exclusion we make a finding of, \cref{sec:threat}),
+full verifiable computation (lightweight composable integrity is in scope, but
+zkLLM-class proving is not), and foundational/superseded schemes.
 
 \subsection{Contributions}
 This paper is a \emph{systematization of knowledge}. Concretely:

@@ -1,6 +1,17 @@
 \section{Static Obfuscation}
 \label{sec:obfuscation}
 
+% --- scope-framing (short role-framing; bodies stay \needswork) ---
+Static obfuscation transforms the data and/or weights so the server sees only
+unintelligible values, with no---or minimal---trusted hardware: token substitution,
+learned embedding transforms, covariant (data+weight) masking, null-space projection.
+It is the cheapest family in our taxonomy (near-plaintext cost, TCB of none or light),
+which is precisely why its privacy claims deserve the most scrutiny: the obfuscation
+is \emph{fixed}, so a white-box adversary can study it offline. We make that scrutiny
+concrete in \cref{ssec:vignette}, and the published inversions in
+\cref{sec:synthesis} show several static schemes recover far more plaintext than
+their authors report.
+
 \subsection{Approach}
 % Transform data and/or weights so observers see unintelligible values, with no
 % (or minimal) trusted hardware. Token substitution, embedding transformation,
@@ -17,16 +28,19 @@
     \toprule
     Scheme & Technique & Reported privacy/accuracy \\
     \midrule
-    AloePri  & covariant (data+weight) & 0--3.5\% acc.\ loss; $<$5--15\% TTRSR (claimed) \\
-    STIP     & static permutation (3-party) & breaks for open-source weights \\
-    SGT      & learned embedding transform & \tq \\
-    DP-Forward & DP embedding perturbation & (also \cref{sec:dp}) \\
-    OSNIP    & obfuscated semantic null space & 0.96\,ms; KNN attack 0.000 \\
+    AloePri~\cite{lin_aloepri}                & covariant (data+weight)         & 0--3.5\% acc.\ loss; $<$5--15\% TTRSR (claimed) \\
+    Collab.\ Obfusc~\cite{lin_collaborative_obfusc} & dynamic covariance masks  & near-plaintext \\
+    SGT~\cite{roberts_sgt}                    & learned input-conditioned transform & $\sim$0\,ms; $-$0.4\% util \\
+    OSNIP~\cite{cao_osnip}                    & obfuscated semantic null space  & 0.96\,ms; KNN attack 0.000 \\
+    Eguard~\cite{eguard}                      & MI-loss projector vs Vec2Text   & $\sim$0; F1 94$\to$5 \\
+    ARoG~\cite{ning_arog}                     & KGQA entity$\to$machine-ID anon & no crypto cost \\
     \bottomrule
   \end{tabular}
 \end{table}
-\needswork{populate; note STIP/KV-Shield-class schemes collapse once public
-weights let an attacker solve for the secret transform}
+\needswork{note the cautionary lineage --- static-permutation/static-key schemes
+(STIP~\citep{stip}, TransLinkGuard~\citep{translinkguard}) collapse once public
+weights let an attacker solve for the secret transform; cited in prose, excluded
+from the practical comparison above}
 
 \subsection{Performance (Reported)}
 \needswork{obfuscation is the cheapest family (near-plaintext); that is its
@@ -36,8 +50,11 @@ selling point and the reason its privacy claims deserve scrutiny}
 % Published attacks substantiate "static obfuscation under-protects": the Yu-Lin
 % inversion attack on obfuscated embedding matrices, ISA, and GELO's Gram-matrix
 % leak under orthogonal mixing.
-\needswork{summarize published attacks: obfuscated-embedding inversion (Yu Lin
-et al., corpus), ISA, Gram-leak \citep{belikov_gelo}}
+\needswork{summarize published attacks substantiating ``static under-protects'':
+obfuscated-embedding inversion~\citep{lin_inversion}, Hidden-No-More on static
+permutation~\citep{hnm}, ArrowMatch/TSQP weight recovery~\citep{arrowmatch,tsqp},
+deeper-layer inversion~\citep{depth_false_privacy}, and GELO's Gram-matrix
+leak~\citep{belikov_gelo}}
 
 \subsection{Vignette: Static Obfuscation Under the Realistic Threat Model}
 \label{ssec:vignette}

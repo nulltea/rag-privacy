@@ -10,28 +10,32 @@
 % graph construction, graph traversal); columns = mechanism families (§3-§7).
 % Cells = representative schemes. EMPTY / weak cells = open problems.
 \begin{table*}[t]
-  \centering \footnotesize
-  \caption{Coverage of the inference-and-RAG pipeline by mechanism family. Cell = a
-    representative scheme (\cref{sec:crypto}--\cref{sec:hybrid}); ``---'' = no
-    practical scheme known to us (a gap). \tq{} = unverified placement.}
+  \centering \scriptsize
+  \caption{Coverage of the inference-and-RAG pipeline by mechanism family. Cell = one
+    or two representative schemes (\cref{sec:crypto}--\cref{sec:hybrid}; see those
+    tables for the full set); ``---'' = no practical scheme known to us (a gap).}
   \label{tab:gapmap}
   \begin{tabular}{@{}llllll@{}}
     \toprule
     Pipeline stage & Crypto/MPC & TEE & Obfuscation & DP & Hybrid split \\
     \midrule
-    Embed            & \tq      & TwinShield & SGT/DP-Fwd & DP-Forward & GELO/ObfTune \\
-    Store (vectors)  & Caprise/Fuchsbauer & Opal & ---     & ---        & --- \\
-    Retrieve (ANN)   & PACMANN/Compass & Opal+ORAM & ---  & RemoteRAG  & --- \\
-    Rerank           & RemoteRAG(HE) & Opal     & ---      & ---        & --- \\
-    Generate         & PermLLM/SecFormer & Petridish/SCX & AloePri/OSNIP & --- & GELO/ObfTune \\
-    Graph construct. & ---      & \tq        & ---        & ---        & --- \\
-    Graph traverse   & \tq      & Opal(KG)   & ---        & \needswork{Ning} & --- \\
+    Embed            & SecFormer/NEXUS    & H100-CC          & SGT/Eguard    & DP-Fwd/SPARSE & GELO/ObfuscaTune \\
+    Store (vectors)  & CAPRISE/SAP        & Opal             & ---           & ---           & --- \\
+    Retrieve (ANN)   & Compass/Pacmann    & Opal+ORAM        & ---           & RemoteRAG     & --- \\
+    Rerank           & p\textsuperscript{2}RAG/TRSE & Opal   & ---           & RemoteRAG(HE) & --- \\
+    Generate         & PermLLM/BumbleBee  & PipeLLM          & AloePri/OSNIP & DP-RAG(out)   & GELO/Amulet \\
+    Graph construct. & ---                & ---              & ARoG          & ---           & PrivGemo \\
+    Graph traverse   & Pacmann/XorMM      & Opal/H$_2$O$_2$RAM & ARoG        & ---           & PrivGemo \\
     \bottomrule
   \end{tabular}
 \end{table*}
-\needswork{verify cells; the empty/--- cells are the headline gap-map ---
-narrate the most striking gaps (e.g. obfuscation/DP almost absent from storage
-\& retrieval; graph-RAG stages barely covered by any mechanism)}
+\needswork{narrate the headline gaps the ``---'' cells expose: obfuscation and DP are
+almost absent from storage/retrieval/rerank; the hybrid split is absent from every
+retrieval stage (it is an inference technique); graph \emph{construction} is a near-total
+gap across all confidentiality families (only anonymization touches it). Integrity
+(verification) is orthogonal to these columns --- ZKGraph/V3DB/ZKIFV compose on top
+(\cref{sec:threat}). Note explicitly that secure GNN-inference / graph-analytics
+schemes were excluded as off-target for retrieval-style graph-RAG.}
 
 \subsection{Performance Comparison (from Reported Numbers)}
 % COMPARABILITY CAVEAT (mandatory): these numbers are self-reported across
@@ -65,6 +69,15 @@ performance axis is the dimension Bodea \cite{bodea_sok} explicitly omits}
 % Graph-RAG (LightRAG, Microsoft GraphRAG) indexes a corpus as a knowledge graph;
 % privacy work here is sparse (Ning et al. KG-QA privacy; Compass for encrypted
 % search; Opal's in-enclave KG traversal). Bodea explicitly excludes this setting.
-\needswork{how graph construction + traversal change the attack surface vs naive
-RAG; why the gap-map's graph rows are nearly empty; cite LightRAG, Ning et al.,
-Compass, Opal}
+Graph-RAG systems such as LightRAG~\citep{guo_lightrag} index a corpus as a knowledge
+graph; their retrieval surface is entity/relation ANN plus \emph{one-hop} neighborhood
+expansion and a source-chunk fan-out---not multi-hop reasoning or GNN message-passing.
+That shape determines which mechanisms apply: ANN matching is served by
+Compass/Pacmann~\citep{zhu_compass,pacmann}, the distinctive adjacency/degree leak by
+volume-hiding multi-maps (XorMM/FLASH)~\citep{xormm,flash_emm}, traversal-integrity by
+ZKGraph~\citep{zkgraph}, and output-extraction (AGEA-class) by anonymization or
+output-DP~\citep{ning_arog,tan_privgemo,tang_dprag}. Conversely, secure GNN-inference
+and graph-analytics schemes are off-target for this setting and we cite them only as
+lineage. Bodea et al.~\citep{bodea_sok} exclude graph-RAG entirely; the near-empty
+graph rows of \cref{tab:gapmap} are the resulting open frontier.
+\needswork{expand: per-stage attack-surface change vs naive RAG; the construction-stage gap}

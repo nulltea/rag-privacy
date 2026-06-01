@@ -5,40 +5,103 @@
 %   Approach · Representative schemes (table) · Performance (reported) ·
 %   Limitations / known attacks · graph-RAG applicability.
 
-\subsection{Approach}
-% MPC (secret sharing, GC), FHE, and hybrids: compute on data without exposing
-% plaintext; the gold standard for confidentiality, bottlenecked by non-linear
-% ops (Softmax, GELU) and communication. Map onto §2: TCB = none / non-colluding.
-\needswork{describe MPC/FHE/SS for inference and for private retrieval}
+% --- scope-framing (decision: short role-framing prose; bodies stay \needswork) ---
+Cryptographic schemes compute on data the server never sees in the clear: secure
+multi-party computation (MPC) and secret sharing (SS) split the computation across
+parties, while fully-homomorphic encryption (FHE) evaluates directly on ciphertext.
+They offer the strongest confidentiality in our taxonomy (\cref{sec:threat})---a
+trusted computing base of \emph{none} (FHE) or \emph{non-colluding parties}
+(MPC/SS), with no special hardware---at the cost of one-to-three orders of magnitude
+in latency or communication, concentrated in the non-linear operations (Softmax,
+GELU, LayerNorm). We separate \emph{private inference} (\cref{ssec:crypto-mpc-inf},
+\cref{ssec:crypto-fhe-inf}) from \emph{private retrieval and storage}
+(\cref{ssec:crypto-retrieval})---the RAG-side use that is closest to deployable today.
 
-\subsection{Representative Schemes}
+\subsection{Approach}
+\needswork{describe MPC/SS (linear under SS, non-linears via OT/GC or polynomial
+approximation) and FHE (CKKS/BFV depth budget); the non-linear-op bottleneck}
+
+\subsection{MPC / Secret-Sharing Inference}
+\label{ssec:crypto-mpc-inf}
 \begin{table}[t]
   \centering \footnotesize
-  \caption{Cryptographic schemes (inference + private retrieval).}
-  \label{tab:crypto}
+  \caption{MPC / secret-sharing schemes for private transformer inference.}
+  \label{tab:crypto-mpc}
   \begin{tabular}{@{}llll@{}}
     \toprule
-    Scheme & Pipeline stage & Primitive & Reported cost \\
+    Scheme & Adversary & Primitive & Reported cost \\
     \midrule
-    PermLLM     & inference          & SS + permutation & 3\,s/tok (6B, WAN) \\
-    Euston      & inference          & non-interactive  & \tq \\
-    SecFormer   & inference          & SMPC             & \tq \\
-    CipherFormer& inference          & HE (low rounds)  & \tq \\
-    CryptoMoE   & MoE inference      & balanced routing & \tq \\
-    Caprise     & storage/retrieval  & DCPE             & 2339 vec/s \\
-    Fuchsbauer  & storage            & dist.-cmp.-pres. enc & \tq \\
-    Compass     & retrieval (search) & encrypted search & \tq \\
-    PACMANN     & retrieval (ANN)    & private graph ANN & \tq \\
-    V3DB        & retrieval (verify) & ZK proofs        & \tq \\
+    PermLLM~\cite{permllm}    & HbC / 3PC & A-SS + permutation triples & 3\,s/tok (6B, WAN) \\
+    SecFormer~\cite{secformer}& HbC / MPC & 2Quad + Fourier-GELU         & 71\,s (BERT-base) \\
+    SHAFT~\cite{shaft}        & HbC / 2PC & constant-round softmax       & best WAN (BERT-base) \\
+    CryptoMoE~\cite{cryptomoe}& HbC / MPC & balanced-expert routing      & 2.8--3.5$\times$ vs dense MoE \\
+    BumbleBee~\cite{bumblebee}& HbC / 2PC & HE+ASS, segmented-poly exp   & $\sim$8\,min/tok (7B) \\
+    SIGMA~\cite{sigma}        & HbC / 2PC & GPU function secret sharing  & 45\,GB FSS key (BERT-large) \\
+    Fission~\cite{fission}    & HbC / MPC & A-SS + permutation triples   & $<$20\,s (1B) \\
     \bottomrule
   \end{tabular}
 \end{table}
-\needswork{populate costs; note which are inference vs retrieval; Compass/PACMANN
-also serve graph-RAG retrieval (see \cref{sec:synthesis})}
+\needswork{narrate the trust/perf spread: BumbleBee = most robust trust (2PC, no
+dealer) but slowest; SIGMA = best online perf but heavy FSS setup}
+
+\subsection{FHE / HE Inference}
+\label{ssec:crypto-fhe-inf}
+\begin{table}[t]
+  \centering \footnotesize
+  \caption{FHE schemes for private transformer inference (non-interactive).}
+  \label{tab:crypto-fhe}
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    Scheme & Adversary & Primitive & Reported cost \\
+    \midrule
+    Euston~\cite{euston}            & HbC / none & RNS-CKKS (NEXUS successor) & NEXUS-class \\
+    NEXUS~\cite{nexus}              & HbC / none & non-interactive RNS-CKKS   & 1.31\,s amortized (BERT, 256-batch) \\
+    CipherFormer~\cite{cipherformer}& HbC / none & low-round FHE encoder      & 7.7--11.9$\times$ vs HErBERT \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\needswork{FHE = no interaction / no dealer, but multiplicative-depth-bound and
+amortization-dependent; NEXUS/Euston push non-interactive to BERT scale}
+
+\subsection{Cryptographic Retrieval and Storage}
+\label{ssec:crypto-retrieval}
+% MPC + FHE TOGETHER here (decision: retrieval/storage is its own grouping, all
+% cryptographic). This is the RAG-side crypto that is closest to practical.
+\begin{table}[t]
+  \centering \footnotesize
+  \caption{Cryptographic schemes for private retrieval and vector storage
+    (MPC/SS and FHE/HE together). ``gt'' = graph traversal.}
+  \label{tab:crypto-retrieval}
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    Scheme & Stage & Primitive & Reported cost \\
+    \midrule
+    p\textsuperscript{2}RAG~\cite{p2rag}        & retrieve,rerank & 2-server SS              & 3--300$\times$ vs PRAG \\
+    Panther~\cite{panther}                       & retrieve        & PIR+SS+GC+HE (ANN)       & 18\,s @10M \\
+    PIR-RAG~\cite{pirrag}                         & retrieve        & classical PIR            & 16.8\,s @5K \\
+    Pacmann~\cite{pacmann}                        & retrieve,gt     & batched PIR (graph-ANN)  & 90\% quality; $-$22\% lat @100M \\
+    XorMM~\cite{xormm}                            & retrieve,gt     & volume-hiding EMM (SSE)  & 1.5--2$\times$ storage \\
+    FLASH~\cite{flash_emm}                        & retrieve,gt     & conjunctive VH-EMM       & 2--3$\times$ storage \\
+    PeGraph~\cite{pegraph}                        & store,retrieve,gt & SSE + secret sharing   & $<$1\,s/query @multi-M \\
+    GORAM~\cite{goram}                            & retrieve,gt     & 3PC sqrt-ORAM (reserve)  & billion-edge \\
+    RAGtime-PIANO~\cite{ragtime_piano}            & retrieve,e2e    & CKKS cluster + lattice PIR & 40$\times$ vs PIR-RAG \\
+    Compass~\cite{zhu_compass}                    & retrieve,gt     & encrypted HNSW + ORAM    & sub-second LAN \\
+    GraSS~\cite{grass}                            & retrieve,gt     & FHE graph-based ANN      & 13\,s @5K \\
+    TRSE~\cite{trse}                              & retrieve,rerank & 2-round SE + HE scoring  & $\sim$100s\,ms ($k'$=100) \\
+    SAP/DCPE~\cite{fuchsbauer_sap}                & store,retrieve  & distance-cmp.-preserving enc & $\sim$0\,ms (deployed) \\
+    CAPRISE~\cite{ye_caprise}                     & store,retrieve  & conditional dist.-preserving enc & 2339 vec/s \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\needswork{retrieval crypto is the practical frontier of this family; Compass/Pacmann
+serve graph-RAG ANN, XorMM/FLASH the adjacency leak (see \cref{sec:synthesis}); SAP/CAPRISE
+trade exactness for near-zero overhead (and are attackable --- \cref{sec:obfuscation})}
 
 \subsection{Performance (Reported)}
-\needswork{the headline cost reality: MPC inference is 1--2 orders of magnitude
-slower (e.g. BumbleBee ~8\,min/token, 7B); retrieval crypto is closer to practical}
+\needswork{the headline cost reality: MPC inference is 1--2 orders slower (BumbleBee
+$\sim$8\,min/token, 7B); retrieval crypto (Compass sub-second, CAPRISE 2339 vec/s) is
+far closer to practical}
 
 \subsection{Limitations and Known Attacks}
-\needswork{non-colluding assumption (MPC); non-linear-op overhead; FHE depth}
+\needswork{non-colluding assumption (MPC); non-linear-op overhead; FHE depth;
+distance-preserving encryption leaks ordering and is invertible \citep{lin_inversion}}

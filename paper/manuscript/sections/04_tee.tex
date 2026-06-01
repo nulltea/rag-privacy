@@ -11,6 +11,17 @@
 \dnote{keep this section SHORT --- baseline + hardware axis only; the depth goes to
 \cref{sec:hybrid}}
 
+% --- scope-framing (short role-framing; bodies stay \needswork) ---
+A trusted execution environment runs the computation in plaintext inside a
+hardware-isolated enclave, attested to the client over RATLS. Pure-TEE inference is
+our \emph{baseline}: it achieves near-plaintext speed and shifts trust to the silicon
+vendor, but at full scale it demands either a CPU enclave large enough for the model
+or a \emph{confidential GPU} (H100/B200 CC). That hardware requirement---not the
+performance---is what motivates the commodity-GPU hybrid split (\cref{sec:hybrid}); we
+therefore keep this section to the performance ceiling and the hardware-availability
+axis. The strongest adversary in our corpus appears here: Opal~\cite{kaviani_opal}
+assumes a \emph{malicious host} and additionally hides access patterns with ORAM.
+
 \subsection{Approach}
 % CPU-TEE (SGX/TDX) and GPU-TEE (confidential H100/H200/B200): hardware-isolated
 % enclaves, remote attestation, RATLS. Near-plaintext overhead. Map onto §2:
@@ -25,12 +36,12 @@
   \label{tab:tee}
   \begin{tabular}{@{}llll@{}}
     \toprule
-    Scheme & Pipeline stage & TEE & Reported overhead \\
+    Scheme & Pipeline stage & TEE / hardware & Reported overhead \\
     \midrule
-    TwinShield & inference        & CPU-TEE + accel & \tq \\
-    SCX        & serving (KV cache)& confidential serving & \tq \\
-    Opal       & RAG (retrieve+gen)& TDX + GPU-TEE + ORAM & \tq \\
-    Petridish  & serving           & CVM (SPD)       & \tq \\
+    H100 CC baseline~\cite{h100cc}  & embed, generate     & GPU-TEE (H100 CC)      & 4--8\% \\
+    PipeLLM~\cite{pipellm}          & generate            & GPU-TEE (PCIe-AES)     & $<$19.6\% \\
+    Opal~\cite{kaviani_opal}        & retrieve, generate, gt, e2e & TDX + B200 + ORAM & 29$\times$ lower infra vs secure baseline \\
+    H$_2$O$_2$RAM~\cite{h2o2ram}    & store, retrieve, gt & CPU-TEE (doubly-obliv) & $\sim$1000$\times$ vs prior O$_2$RAM \\
     \bottomrule
   \end{tabular}
 \end{table}
