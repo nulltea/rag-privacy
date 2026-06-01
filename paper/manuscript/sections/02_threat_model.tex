@@ -1,4 +1,4 @@
-\section{Threat Models in Confidential LLM/RAG: A Taxonomy}
+\section{Threat Models in Confidential Transformer Inference and RAG: A Taxonomy}
 \label{sec:threat}
 
 % ROLE (grill decision): this section is a TAXONOMY of the field's threat models,
@@ -6,7 +6,8 @@
 % own measurement adversary is stated in the evaluation setup (\cref{sec:eval}),
 % as one point within this space.
 
-Confidential LLM and RAG systems are not built against a single adversary.
+Confidential Transformer-inference and RAG systems are not built against a
+single adversary.
 Each scheme makes its own assumptions about who the attacker is, what it
 knows, what it can observe, and what must stay hidden---and those assumptions,
 not the mechanisms alone, decide whether a defence is adequate. This section
@@ -45,7 +46,7 @@ performance or simplicity at the price of a stronger trust assumption.
 
 \paragraph{3. Attacker knowledge.}
 \emph{Black-box} (queries only), \emph{white-box on weights} (knows the public
-model---the realistic case for open-source LLMs), or \emph{white-box plus the
+model---the realistic case for open-weight Transformer models), or \emph{white-box plus the
 obfuscation scheme} (knows the algorithm, ignorant only of an ephemeral
 per-session secret). We adopt Kerckhoffs's principle throughout: across the
 corpus the adversary knows the model and the method and is denied only the
@@ -101,7 +102,8 @@ problems, even when their machinery looks similar.
 \begin{table*}[t]
   \centering
   \footnotesize
-  \caption{Threat models across confidential LLM/RAG schemes. Axes per
+  \caption{Threat models across confidential Transformer-inference and RAG
+    schemes. Axes per
     \cref{sec:threat-axes}. \emph{Knows}: wb=white-box weights, +s=+obfuscation
     scheme. \emph{Observes}: I/O=service in/out, act=accelerator activations
     (VRAM), ap=storage access patterns, ct+dist=ciphertexts + distance structure.

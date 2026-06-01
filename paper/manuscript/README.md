@@ -1,8 +1,9 @@
-# Manuscript — SoK: Confidential LLM Inference and RAG
+# Manuscript — SoK: Confidential Transformer Inference and RAG
 
 arXiv working draft. Genre: **pure SoK**. Contribution: a taxonomy
-(threat-model + mechanism) → **gap-map + performance axis**, spanning LLM
-inference *and* RAG including **graph-RAG**. Positioned as the
+(threat-model + mechanism) → **gap-map + performance axis**, spanning
+**Transformer inference** (embedding · reranking · generation) *and* RAG
+including **graph-RAG**. Positioned as the
 mechanism/threat-model/performance complement to Bodea et al.'s risk-centric
 RAG-privacy SoK — filling its three self-named gaps (practical cost, advanced
 architectures, crypto/TEE depth).

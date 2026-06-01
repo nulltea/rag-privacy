@@ -5,7 +5,7 @@
 % Confidential LLM inference + RAG outsourced to untrusted clouds; regulated
 % domains. Standard pipelines leak at every stage: invertible embeddings,
 % plaintext queries, access patterns, assembled prompts.
-\needswork{2--3 paragraphs: why confidential LLM/RAG matters; ground the leakage
+\needswork{2--3 paragraphs: why confidential Transformer inference and RAG matter; ground the leakage
 that motivates the field (\citealp{morris2023vec2text} inversion;
 \citealp{kellaris2016leakage} access patterns; the Yu-Lin obfuscated-embedding
 inversion attack from the corpus)}
@@ -34,12 +34,13 @@ out of scope (side-channels, full integrity)}
 This paper is a \emph{systematization of knowledge}. Concretely:
 \begin{itemize}
   \item \textbf{A six-axis threat-model taxonomy} (\cref{sec:threat}) that
-        classifies confidential LLM/RAG schemes by adversary intent, trust
+        classifies confidential Transformer-inference and RAG schemes by
+        adversary intent, trust
         anchor, attacker knowledge, observation surface, side-channel scope,
         and protection goal --- and exposes a field-wide side-channel blind spot.
   \item \textbf{A mechanism-organized systematization} (\cref{sec:crypto}--%
-        \cref{sec:hybrid}) of five defense families across the full LLM/RAG
-        pipeline, including graph-RAG as a retrieval setting.
+        \cref{sec:hybrid}) of five defense families across the full
+        inference-and-RAG pipeline, including graph-RAG as a retrieval setting.
   \item \textbf{A performance comparison} synthesized from reported numbers
         (\cref{sec:synthesis}) --- the cost axis the existing RAG-privacy SoK
         \cite{bodea_sok} omits --- with an explicit non-comparability caveat.
