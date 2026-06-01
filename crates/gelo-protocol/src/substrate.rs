@@ -608,19 +608,21 @@ pub trait GpuOffloadEngine: Send {
     }
 
     /// Fused causal attention over **folded** operands for the prefill
-    /// offload (perm-attn-gpu-offload Phase 6). `q`/`k`/`v` are
-    /// `(B·Hq, n, d_head)` — each folded head is an independent causal
-    /// self-attention problem and K/V are already GQA-expanded to `Hq` by
-    /// the caller. Returns the normalised context `(B·Hq, n, d_head)`. The
-    /// caller (TEE) supplies feature-rotation-covered operands (`Q·O_qk`,
-    /// `K·O_qk`, `V·O_v`) and corrects the output with `·O_vᵀ`; the engine
-    /// only sees rotated bytes. Default unsupported; the GPU engine routes
-    /// to a tiled fused softmax (`cubek-attention`).
+    /// offload (perm-attn-gpu-offload Phase 6). `q` is `(Hq, n, d_head)`;
+    /// `k`/`v` are **un-replicated** `(Hkv, n, d_head)` and `group = Hq/Hkv`
+    /// — the engine broadcasts K/V up to `Hq` **on-device** (Phase-5a O2),
+    /// so only the un-replicated K/V cross the PCIe bus. Returns the
+    /// normalised context `(Hq, n, d_head)`. The caller (TEE) supplies
+    /// feature-rotation-covered operands (`Q·O_qk`, `K·O_qk`, `V·O_v`) and
+    /// corrects the output with `·O_vᵀ`; the engine only sees rotated bytes.
+    /// Default unsupported; the GPU engine routes to a tiled fused softmax
+    /// (`cubek-attention`).
     fn cubek_causal_attend(
         &self,
         _q: ArrayView3<f32>,
         _k: ArrayView3<f32>,
         _v: ArrayView3<f32>,
+        _group: usize,
         _scale: f32,
     ) -> Result<Array3<f32>> {
         Err(anyhow!("cubek_causal_attend: this engine has no fused-attention support"))
@@ -1261,7 +1263,8 @@ pub trait TrustedExecutor {
     }
 
     /// Fused causal attention over folded, rotation-covered operands —
-    /// the prefill-offload delegate (perm-attn-gpu-offload Phase 6). See
+    /// the prefill-offload delegate (perm-attn-gpu-offload Phase 6). `k`/`v`
+    /// are un-replicated `(Hkv, n, d)` with `group = Hq/Hkv`. See
     /// [`GpuOffloadEngine::cubek_causal_attend`]. Default unsupported;
     /// `InProcessTrustedExecutor` delegates to the engine.
     fn cubek_causal_attend(
@@ -1269,6 +1272,7 @@ pub trait TrustedExecutor {
         _q: ArrayView3<f32>,
         _k: ArrayView3<f32>,
         _v: ArrayView3<f32>,
+        _group: usize,
         _scale: f32,
     ) -> Result<Array3<f32>> {
         Err(anyhow!("cubek_causal_attend: this executor has no fused-attention support"))

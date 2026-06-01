@@ -809,6 +809,7 @@ impl GpuOffloadEngine for WgpuVulkanEngine {
         q: ArrayView3<'_, f32>,
         k: ArrayView3<'_, f32>,
         v: ArrayView3<'_, f32>,
+        group: usize,
         scale: f32,
     ) -> Result<Array3<f32>> {
         if !self.fp16 {
@@ -816,8 +817,8 @@ impl GpuOffloadEngine for WgpuVulkanEngine {
         }
         // cubek runs an independent client on the default device (same
         // adapter as this engine). The caller passes rotation-covered,
-        // GQA-expanded folded operands; we only see rotated bytes.
-        Ok(cubek_attention_folded(q, k, v, scale, true))
+        // UN-REPLICATED K/V; the GQA broadcast to Hq happens on-device.
+        Ok(cubek_attention_folded_gqa(q, k, v, group, scale, true))
     }
 
     fn register_weight(&mut self, handle: WeightHandle, weight: ArrayView2<'_, f32>) -> Result<()> {
@@ -1384,4 +1385,104 @@ pub fn cubek_attention_folded(
         );
     }
     out
+}
+
+/// GQA-aware folded causal attention (perm-attn-gpu-offload Phase-5a O2).
+/// Takes **un-replicated** K/V (`[Hkv, n_kv, d]`) plus `group = Hq/Hkv` and
+/// `q` (`[Hq, n_q, d]`); converts + uploads K/V un-replicated (4× less host
+/// convert and PCIe DMA than the GQA-expanded `cubek_attention_folded`), then
+/// broadcasts them up to `Hq` **on-device** via `repeat_dim` — mirroring the
+/// decode path's `resident_kv_expanded` — and bridges the burn tensors to
+/// cubek's cubecl `TensorHandle`s (same client/device, so the buffers are
+/// shared, no host round-trip). Returns `[Hq, n_q, d]`.
+pub fn cubek_attention_folded_gqa(
+    q: ArrayView3<'_, f32>,
+    k: ArrayView3<'_, f32>,
+    v: ArrayView3<'_, f32>,
+    group: usize,
+    scale: f32,
+    causal: bool,
+) -> Array3<f32> {
+    use cubecl::ir::{ElemType, FloatKind, StorageType};
+    use cubecl::std::tensor::TensorHandle;
+    use cubek_attention::definition::{
+        AccumulatorPrecision, AttentionGlobalTypes, AttentionOptions,
+    };
+    use cubek_attention::launch::{BlueprintStrategy, Strategy, launch};
+
+    let hq = q.shape()[0];
+    let n_q = q.shape()[1];
+    let d = q.shape()[2];
+    let hkv = k.shape()[0];
+    let n_kv = k.shape()[1];
+    assert_eq!(v.shape()[0], hkv);
+    assert_eq!(hq, hkv * group, "hq must equal hkv·group");
+    let _ = scale; // cubek derives scale = 1/sqrt(head_dim) internally.
+
+    let device = Dev::default();
+    let client = <Rt as cubecl::Runtime>::client(&device);
+    let f16_dtype = StorageType::Scalar(ElemType::Float(FloatKind::F16));
+    let global_dtypes = AttentionGlobalTypes::from_single_dtype(f16_dtype);
+
+    // Un-replicated SIMD convert + upload (array3_to_tensor_f16), then expand
+    // K/V on-device (reshape → repeat_dim → reshape), mirroring
+    // `resident_kv_expanded`. Q is already per-q-head.
+    let q_b = array3_to_tensor_f16(q, &device).reshape([hq, 1, n_q, d]);
+    let expand_kv = |t: Tensor<CubeWgpu16, 3>| -> Tensor<CubeWgpu16, 4> {
+        if group > 1 {
+            t.reshape([hkv, 1, n_kv, d])
+                .repeat_dim(1, group)
+                .reshape([hq, 1, n_kv, d])
+        } else {
+            t.reshape([hq, 1, n_kv, d])
+        }
+    };
+    let k_b = expand_kv(array3_to_tensor_f16(k, &device));
+    let v_b = expand_kv(array3_to_tensor_f16(v, &device));
+
+    // Bridge burn `Tensor<CubeWgpu16, 4>` → cubek `TensorHandle<Rt>`. The
+    // burn float primitive *is* `CubeTensor<Rt>` (burn-cubecl), whose buffer
+    // handle is valid for cubek's launch on the same client.
+    let to_handle = |t: Tensor<CubeWgpu16, 4>| -> TensorHandle<Rt> {
+        let ct = t.into_primitive().tensor();
+        TensorHandle::new(ct.handle, ct.shape.dims, ct.strides, f16_dtype)
+    };
+    let q_tensor = to_handle(q_b);
+    let k_tensor = to_handle(k_b);
+    let v_tensor = to_handle(v_b);
+    let out_tensor: TensorHandle<Rt> =
+        TensorHandle::empty(&client, vec![hq, 1, n_q, d], f16_dtype);
+
+    let options = AttentionOptions {
+        causal,
+        accumulator_precision: AccumulatorPrecision::default(),
+    };
+    let strategy = match std::env::var("CUBEK_STRATEGY").as_deref() {
+        Ok("blackbox") => {
+            Strategy::BlackboxAccelerated(BlueprintStrategy::Inferred(Default::default()))
+        }
+        _ => Strategy::Unit(BlueprintStrategy::Inferred(())),
+    };
+
+    launch::<Rt>(
+        strategy,
+        &client,
+        q_tensor,
+        k_tensor,
+        v_tensor,
+        None,
+        out_tensor.clone(),
+        &global_dtypes,
+        options,
+    )
+    .expect("cubek_attention_folded_gqa launch failed");
+
+    let out_bytes = client.read_one(out_tensor.handle);
+    let n_out = hq * n_q * d;
+    debug_assert_eq!(out_bytes.len(), n_out * 2, "cubek gqa readback size mismatch");
+    let out_h: &[f16] =
+        unsafe { std::slice::from_raw_parts(out_bytes.as_ptr() as *const f16, n_out) };
+    let mut out_vec = vec![0.0_f32; n_out];
+    out_h.convert_to_f32_slice(&mut out_vec);
+    Array3::from_shape_vec((hq, n_q, d), out_vec).expect("cubek gqa out shape matches buffer")
 }

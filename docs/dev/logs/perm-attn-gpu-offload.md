@@ -1242,9 +1242,18 @@ measured. The prep levers (Phase 5a):
   matching the engine's K/V upload path (`lib.rs:550`) — replacing the scalar
   `to_f16_bytes`/`from_bits` loops. This is the lever behind the real-engine
   1.88× below.
-- **un-replicated K/V + on-device GQA broadcast** (mirror `resident_kv_expanded`)
-  — cuts the K/V convert (≈260 ms) and DMA 4×, since cubek receives
-  `[B·Hq, n, d]` host-expanded today. **Next (O2).**
+- **un-replicated K/V + on-device GQA broadcast — ✅ LANDED (2026-06-01).**
+  `cubek_attention_folded_gqa` converts + uploads K/V un-replicated `[Hkv,n,d]`
+  and broadcasts to `Hq` **on-device** via burn `repeat_dim` (bridged to cubek's
+  cubecl `TensorHandle` — same client, no host round-trip), mirroring the decode
+  `resident_kv_expanded`. forward.rs folds + rotates K/V at `Hkv` (4× less
+  rotation). Real-engine effect below.
+
+**Note — SIMD convert (O1) delivered ~2×, not ~10×.** Re-measured post-O1
+(`CUBEK_PROFILE`, bh=256, n=2048): convert-in 396 → **192 ms**, convert-out
+158 → **99 ms** — half's F16C path is **memory/alloc-bound**, not
+arithmetic-bound (matches the earlier engine-side finding). After O1 the
+dominant prep term is the **upload (265 ms)**, which is what O2 targets.
 
 **Joint takeaway.** Both offloads are gated by the **convert / upload /
 dense-rotate prep pipeline**, not the GPU compute and not the cover: decode by
@@ -1273,24 +1282,25 @@ covers the cubek fp16 step.
 **Measured on the canonical microbench** (Qwen3-4B, B=8, n=2048, RTX 5090 /
 Vulkan, `CUBEK_STRATEGY=blackbox`), full 36-layer prefill attention bucket:
 
-| prefill attention bucket | in-TEE (`tee:attn_inplace_many`) | offload (`tee:attn_prefill_offload`) | ratio |
-|---|--:|--:|--:|
-| full prefill, B=8, n=2048 | **44 062 ms** | **23 490 ms** | **1.88× (−20.6 s)** |
+| prefill attention bucket (`tee:attn_prefill_offload`) | full prefill, B=8, n=2048 | ratio vs in-TEE |
+|---|--:|--:|
+| **in-TEE baseline** (`tee:attn_inplace_many`) | **44 062 ms** | 1.00× |
+| offload, O1 (SIMD convert) | 23 490 ms | **1.88×** |
+| offload, O1 + O2 (un-replicated K/V, on-device expand) | **16 237 ms** | **2.71×** |
 
-Per-op (×36 layers × 8 sequences = 288 cubek calls): `prefill_cover:cubek_gpu`
-10 407 ms (36 ms/seq, incl. SIMD convert+upload+attend+readback),
-`prefill_cover:rotate_tee` 6 913 ms (fold+expand+rotate, in-TEE),
-`prefill_cover:correct_tee` 2 576 ms (`O_vᵀ`+unfold).
+Per-op at O1+O2 (×36 layers × 8 sequences = 288 cubek calls):
+`prefill_cover:cubek_gpu` **5 677 ms** (was 10 407 pre-O2 — un-replicated
+convert+upload + on-device expand), `prefill_cover:rotate_tee` **4 236 ms** (was
+6 913 — K/V rotated at Hkv, 4× less), `prefill_cover:correct_tee` 2 614 ms
+(`O_vᵀ`+unfold on the Hq output — now the largest TEE term, next candidate).
 
-**Why 1.88× on the real path vs 1.07× in the synthetic bench:** the SIMD
-convert (O1) is now in (it removed the ~554 ms scalar convert the bench's 1.07×
-still paid), and per-sequence folds (Hq=32) are smaller per cubek call. This is
-**measured, not projected** — the first real win for prefill offload at the
-production shape. Still open: **O2** (un-replicated K/V — the rotate_tee 6.9 s is
-4× inflated by host GQA-expand, and cubek still uploads `[B·Hq,n,d]`) should push
-past 1.88×; and the per-sequence loop (288 calls) can batch. **Security
-unchanged:** this is a default-off *perf* wire; the rotation cover still fails
-`WEIGHTS-PUB`, so default-on stays gated on covariant obfuscation (Phase 5b).
+**Measured, not projected** — O1+O2 take the real prefill attention bucket from
+1.07× (synthetic, scalar convert) to **2.71×** at the production shape. Still
+open: the per-sequence loop (288 calls) can batch into one fold; `correct_tee`
+(`O_vᵀ`) is now the largest in-TEE term; and the upload-bandwidth probe (B3/O3)
+may unlock more. **Security unchanged:** this is a default-off *perf* wire; the
+rotation cover still fails `WEIGHTS-PUB`, so default-on stays gated on covariant
+obfuscation (Phase 5b).
 
 ## Acceptance gate (v1)
 
@@ -1514,13 +1524,16 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
    still ⛔ gated on Phase 5b.** The perf wire is in the production forward
    path (`decoder_block_batched`, `GELO_GPU_PREFILL_OFFLOAD`, default-off):
    per-layer shared cover (`O_qk`/`O_v`, σ=0) → fold+GQA-expand+rotate →
-   `cubek_causal_attend` (engine/executor delegate to `cubek_attention_folded`)
-   → `·O_vᵀ`. SIMD convert (O1) folded in. Verified: `cover_prefill_matches_in_tee`
-   (f32 floor) + `cubek_folded_causal_parity` (fp16). **Measured 1.88×**
-   (44.1 s → 23.5 s) on the real `tee:attn_inplace_many` bucket — see *Prefill
-   offload — real-engine wire-up*. Remaining perf: O2 (un-replicated K/V),
-   batch the per-sequence loop. **Default-on remains blocked** — the rotation
-   cover fails `WEIGHTS-PUB`; flipping requires covariant obfuscation (Phase 5b).
+   `cubek_causal_attend` (engine/executor delegate to
+   `cubek_attention_folded{,_gqa}`) then `·O_vᵀ`. O1 (SIMD convert) + O2
+   (un-replicated K/V, on-device GQA broadcast) folded in. Verified:
+   `cover_prefill_matches_in_tee` (f32 floor) + `cubek_folded_causal_parity`
+   (fp16). **Measured 2.71×** (44.1 s → 16.2 s) on the real
+   `tee:attn_inplace_many` bucket — see *Prefill offload — real-engine
+   wire-up*. Remaining perf: batch the per-sequence loop, the `O_vᵀ`
+   correction (now the largest TEE term), upload-bandwidth probe (O3).
+   **Default-on remains blocked** — the rotation cover fails `WEIGHTS-PUB`;
+   flipping requires covariant obfuscation (Phase 5b).
 9. **Acceptance + flip** — the 4-tier gate, then default-on behind the
    c5 AloePri condition (mirrors R3).
 10. **Fast-follows** — kv-head-broadcast in cubek's K/V loader (recover the

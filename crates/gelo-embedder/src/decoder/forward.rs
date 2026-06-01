@@ -389,24 +389,6 @@ fn fold_heads_2d(x: ArrayView2<'_, f32>, h: usize, d: usize) -> Array3<f32> {
     out
 }
 
-/// `(n, Hkv·d)` → `(Hq, n, d)` with GQA broadcast (q-head `qh` reads kv-head
-/// `qh / (Hq/Hkv)`). Host-side expand for the MVP cubek path (Phase-5a O2 moves
-/// this on-device).
-fn fold_expand_kv_2d(x: ArrayView2<'_, f32>, hq: usize, hkv: usize, d: usize) -> Array3<f32> {
-    let n = x.nrows();
-    let group = hq / hkv;
-    let mut out = Array3::<f32>::zeros((hq, n, d));
-    for qh in 0..hq {
-        let kvh = qh / group;
-        for j in 0..n {
-            for c in 0..d {
-                out[(qh, j, c)] = x[(j, kvh * d + c)];
-            }
-        }
-    }
-    out
-}
-
 /// `(H, n, d)` → `(n, H·d)`, inverse of [`fold_heads_2d`].
 fn unfold_heads_2d(x: ArrayView3<'_, f32>, h: usize, d: usize) -> Array2<f32> {
     let n = x.shape()[1];
@@ -1662,12 +1644,15 @@ fn decoder_block_batched(
                 let q_b = q.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
                 let k_b = k.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
                 let v_b = v.slice(ndarray::s![b * n_max..b * n_max + valid_n, ..]);
-                // Fold + GQA-expand + rotate (in-TEE): the GPU only ever sees
-                // `Q·O_qk`, `K·O_qk`, `V·O_v`.
+                // Fold + rotate (in-TEE), K/V un-replicated at Hkv (O2): the
+                // GPU only ever sees `Q·O_qk`, `K·O_qk`, `V·O_v`, and the GQA
+                // broadcast to Hq happens on-device, so K/V rotation is 4× less
+                // work and only un-replicated K/V cross the bus.
+                let group = nqh / nkvh;
                 let (q_cov, k_cov, v_cov) = profile::time("prefill_cover:rotate_tee", || {
                     let q_f = fold_heads_2d(q_b, nqh, dh);
-                    let k_f = fold_expand_kv_2d(k_b, nqh, nkvh, dh);
-                    let v_f = fold_expand_kv_2d(v_b, nqh, nkvh, dh);
+                    let k_f = fold_heads_2d(k_b, nkvh, dh);
+                    let v_f = fold_heads_2d(v_b, nkvh, dh);
                     (
                         rotate_heads(q_f.view(), o_qk.view()),
                         rotate_heads(k_f.view(), o_qk.view()),
@@ -1675,7 +1660,13 @@ fn decoder_block_batched(
                     )
                 });
                 let ctx_raw = profile::time("prefill_cover:cubek_gpu", || {
-                    exec.cubek_causal_attend(q_cov.view(), k_cov.view(), v_cov.view(), scale)
+                    exec.cubek_causal_attend(
+                        q_cov.view(),
+                        k_cov.view(),
+                        v_cov.view(),
+                        group,
+                        scale,
+                    )
                 })?;
                 let ctx_b = profile::time("prefill_cover:correct_tee", || {
                     let ctx_cov = rotate_heads(ctx_raw.view(), o_v.t());
@@ -1859,13 +1850,32 @@ mod prefill_offload_tests {
         let mut crng = ChaCha20Rng::seed_from_u64(0xC0FFEE);
         let o_qk = sample_orthogonal(d, &mut crng);
         let o_v = sample_orthogonal(d, &mut crng);
+        let group = hq / hkv;
+        // Production folds + rotates K/V un-replicated (Hkv); the engine
+        // broadcasts to Hq on-device. Mirror that here: fold/rotate Hkv, then
+        // CPU-expand to Hq for the cubek stand-in.
         let q_f = fold_heads_2d(q_b.view(), hq, d);
-        let k_f = fold_expand_kv_2d(k_b.view(), hq, hkv, d);
-        let v_f = fold_expand_kv_2d(v_b.view(), hq, hkv, d);
+        let k_f = fold_heads_2d(k_b.view(), hkv, d);
+        let v_f = fold_heads_2d(v_b.view(), hkv, d);
         let q_cov = rotate_heads(q_f.view(), o_qk.view());
         let k_cov = rotate_heads(k_f.view(), o_qk.view());
         let v_cov = rotate_heads(v_f.view(), o_v.view());
-        let ctx_raw = cpu_folded_causal(q_cov.view(), k_cov.view(), v_cov.view(), scale);
+        let expand3 = |t: &Array3<f32>| -> Array3<f32> {
+            let (h, nn, dd) = t.dim();
+            let mut e = Array3::<f32>::zeros((h * group, nn, dd));
+            for qh in 0..h * group {
+                let kvh = qh / group;
+                for j in 0..nn {
+                    for c in 0..dd {
+                        e[(qh, j, c)] = t[(kvh, j, c)];
+                    }
+                }
+            }
+            e
+        };
+        let k_exp = expand3(&k_cov);
+        let v_exp = expand3(&v_cov);
+        let ctx_raw = cpu_folded_causal(q_cov.view(), k_exp.view(), v_exp.view(), scale);
         let ctx_cov = rotate_heads(ctx_raw.view(), o_v.t());
         let cover = unfold_heads_2d(ctx_cov.view(), hq, d);
 
