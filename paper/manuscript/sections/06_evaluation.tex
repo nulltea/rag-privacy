@@ -6,14 +6,22 @@
 % against static obfuscation (AloePri, Sec. 5) and the TEE+GPU split (Sec. 4).
 % This table IS the paper's thesis in one place.
 
-\subsection{Experimental Setup}
-% Shared substrate: model, hardware, attack harness, metrics, datasets.
-\needswork{describe the shared evaluation substrate and metrics}
+\subsection{Comparison Basis and Setup}
+% LIKE-FOR-LIKE = same adversary (HbC, white-box weights+scheme), same goal
+% (recover input tokens), same attack suite, same base model. The OBSERVATION
+% SURFACE varies BY DESIGN: AloePri exposes obfuscated I/O+weights; the TEE-split
+% exposes obfuscated activations. The surface IS the defense, so it is the
+% independent variable -- not a confound. This is NOT "same observed bytes"; do
+% not claim "single substrate" (corrects stage-1 phrasing). Attacker budget is
+% pinned to each scheme's own claimed regime (\cref{sec:threat}).
+\needswork{state the comparison basis explicitly; then model, hardware, attack
+harness, metrics (TTRSR/CosSim/BLEU), datasets}
 
 \subsection{Head-to-Head: Attack Resistance}
 \begin{table*}[t]
   \centering
-  \caption{Attack success by defense, same substrate and threat model.
+  \caption{Attack success by defense, under the same adversary, target, and
+           attack suite (observation surface varies by architecture).
            Lower is safer. The headline contrast.}
   \label{tab:holds-vs-breaks}
   \begin{tabular}{@{}lcccc@{}}
