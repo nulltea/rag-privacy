@@ -1,15 +1,17 @@
-% ABSTRACT — write last. ~150-200 words. Mirror the contributions list in the intro.
-% Beats to hit (in order):
-%   1. Setting: outsourced confidential LLM inference + RAG to an untrusted cloud.
-%   2. Gap: prior obfuscation/TEE-split schemes (AloePri, GELO, TwinShield) report
-%      narrow evaluations; the realistic attack surface is under-reported.
-%   3. What we do: SoK by trust mechanism + a like-for-like measurement study on one
-%      substrate under a fixed semi-honest threat model.
-%   4. Headline finding: static obfuscation (AloePri) BREAKS under attack classes its
-%      authors never ran (inversion / GRAM / ISA AttnScore); a TEE+untrusted-GPU split
-%      HOLDS against the same suite at a measured overhead of \needswork{X\%}.
-%   5. Plus: first systematic re-evaluation of AloePri; Caprise at-rest storage repro.
-%   6. Framing: we sketch a unified static+dynamic design that the evidence motivates
-%      (full evaluation is future work).
-
-\needswork{draft abstract last, once the numbers in \cref{sec:eval} are final}
+% ABSTRACT — write last. ~200 words. SoK framing.
+% Beats:
+%   1. Setting: confidential LLM inference + RAG outsourced to an untrusted cloud.
+%   2. State: many point solutions (crypto, TEE, obfuscation, DP, hybrid split);
+%      no systematization unifies mechanism, threat model, AND performance, and
+%      the existing RAG-privacy SoK (Bodea et al.) is risk-centric, naive-RAG,
+%      and omits a performance axis.
+%   3. What we do: systematize the field by defense mechanism, under a 6-axis
+%      threat-model taxonomy, with a performance comparison synthesized from
+%      reported numbers; spanning LLM inference AND RAG including graph-RAG.
+%   4. Artifacts: the threat-model taxonomy; a stage x mechanism gap-map; a
+%      normalized performance comparison.
+%   5. Findings: e.g. the field-wide side-channel blind spot; the under-reported
+%      vulnerability of static obfuscation (vignette); the empty gap-map cells.
+%   6. Contribution framing: complements Bodea (risk side); fills its named gaps
+%      (practical cost, advanced/graph-RAG architectures, crypto/TEE depth).
+\needswork{draft abstract last, once §8 synthesis numbers are final}

@@ -1,0 +1,31 @@
+\section{Differential Privacy}
+\label{sec:dp}
+
+\subsection{Approach}
+% Calibrated noise with formal (epsilon, delta) / metric-DP / RDP guarantees,
+% applied to embeddings (forward pass), to queries (DistanceDP), or to training.
+% Map onto §2: TCB = none; formal but probabilistic; the epsilon-utility trade.
+\needswork{describe DP for embeddings vs queries vs training; metric-DP / RDP}
+
+\subsection{Representative Schemes}
+\begin{table}[t]
+  \centering \footnotesize
+  \caption{Differential-privacy schemes.}
+  \label{tab:dp}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Scheme & Where applied & Reported utility \\
+    \midrule
+    DP-Forward & embedding (forward pass) & $\sim$94\% on SST2; vulnerable to IMA \\
+    RemoteRAG  & query (DistanceDP) + HE rerank & 100\% recall at $\varepsilon\in[0.03,0.1]$ \\
+    SGT        & learned noisy embedding & (also \cref{sec:obfuscation}) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Performance (Reported)}
+\needswork{DP is cheap; the cost is recall/accuracy as epsilon tightens}
+
+\subsection{Limitations and Known Attacks}
+\needswork{epsilon-utility frontier; DP-Forward's IMA vulnerability; composition
+across pipeline stages (an open problem Bodea also flags)}

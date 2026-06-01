@@ -1,0 +1,43 @@
+\section{Hybrid Split: TEE + Obfuscation}
+\label{sec:hybrid}
+
+\subsection{Approach}
+% Keep a small trusted core in a TEE; offload the heavy linear algebra to an
+% untrusted accelerator over OBFUSCATED activations. Combines TEE's near-plaintext
+% speed on the bulk with obfuscation's cheapness, bounded by what the accelerator
+% can infer from mixed activations. Map onto §2: TCB = GPU-TEE (small); HbC +
+% white-box; observation surface = accelerator activations.
+\needswork{describe the split pattern (boundary layers in TEE, bulk GEMM on
+untrusted accelerator over obfuscated activations)}
+
+\subsection{Representative Schemes}
+\begin{table}[t]
+  \centering \footnotesize
+  \caption{Hybrid split (TEE + obfuscation) schemes.}
+  \label{tab:hybrid}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Scheme & Split & Reported overhead / security \\
+    \midrule
+    GELO        & per-batch invertible mixing $U=AH$; QKV(O) offloaded
+                & 20--30\%; $\sim$76\% offloaded; single-batch BSS \\
+    ObfuscaTune & $\sim$5\% params in TEE; obfuscated layers offloaded
+                & \tq \\
+    TwinShield  & CPU-TEE root + SS for linear \emph{and} non-linear
+                & \tq \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\dnote{This family is the substrate the COMPANION paper builds on (GELO
+optimizations + a unified static+dynamic design). Here we survey it only.}
+
+\subsection{Performance (Reported)}
+\needswork{the offload fraction vs overhead trade; why this family is the
+practical frontier for confidential inference}
+
+\subsection{Limitations and Known Attacks}
+% GELO names its own leakage: Gram-matrix invariants under orthogonal mixing
+% (U^T U = H^T H), mitigated by non-orthogonal A or shield vectors. Security is
+% single-batch only.
+\needswork{Gram-leak + mitigations \citep{belikov_gelo}; co-located TEE+GPU
+requirement; per-batch-only guarantee}

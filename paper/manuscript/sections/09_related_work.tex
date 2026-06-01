@@ -1,11 +1,16 @@
 \section{Related Work}
 \label{sec:related}
 
-% Most of the literature is organized in the survey (Sec. 3). This section is
-% POSITIONING only: how this paper differs from the closest prior work.
-% Beats:
-%   - vs AloePri/GELO/TwinShield: we measure like-for-like + the omitted attacks.
-%   - vs prior obfuscation evaluations: same-substrate, fixed threat model.
-%   - GraphRAG/encrypted-search (Compass \cite{zhu_compass}): DEFERRED — note it as
-%     out of scope for this paper, future work.
-\needswork{positioning paragraphs; explicitly defer Compass/GraphRAG to future work}
+% POSITIONING is the load-bearing job here (a competing SoK exists).
+% - Bodea et al. \cite{bodea_sok}: SoK of RAG privacy, RISK-centric (leakage +
+%   adversarial manipulation), SLR of 72 papers, two artifacts (risk taxonomy +
+%   process diagram), EXPLICITLY scoped to naive RAG, NO performance axis, shallow
+%   on crypto/TEE inference. We are COMPLEMENTARY: mechanism + threat-model +
+%   performance, spanning inference + RAG + graph-RAG; we fill its 3 named gaps
+%   (practical cost, advanced architectures, mechanism depth).
+% - LLM-privacy surveys (Wang et al. lifecycle view, etc.): high-level, RAG only
+%   as one stage; we go deep on the confidential-compute stack.
+% - Private-inference / private-IR threads: covered as primary material in §3-§7,
+%   not re-surveyed here.
+\needswork{2--3 paragraphs: explicit Bodea contrast (cite \cite{bodea_sok});
+other LLM-privacy surveys; state the complementarity plainly}

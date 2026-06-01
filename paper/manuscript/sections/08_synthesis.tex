@@ -1,0 +1,70 @@
+\section{Synthesis: Coverage, Gaps, and Performance}
+\label{sec:synthesis}
+
+% The payoff section. Three artifacts: (1) a stage x mechanism matrix whose empty
+% cells are the gap-map; (2) a normalized performance comparison from reported
+% numbers + a non-comparability caveat; (3) graph-RAG as a retrieval setting.
+
+\subsection{The Stage\,$\times$\,Mechanism Matrix and Gap-Map}
+% Rows = pipeline stages (ingest, embed, store, retrieve, rerank, generate, +
+% graph construction, graph traversal); columns = mechanism families (§3-§7).
+% Cells = representative schemes. EMPTY / weak cells = open problems.
+\begin{table*}[t]
+  \centering \footnotesize
+  \caption{Coverage of the LLM/RAG pipeline by mechanism family. Cell = a
+    representative scheme (\cref{sec:crypto}--\cref{sec:hybrid}); ``---'' = no
+    practical scheme known to us (a gap). \tq{} = unverified placement.}
+  \label{tab:gapmap}
+  \begin{tabular}{@{}llllll@{}}
+    \toprule
+    Pipeline stage & Crypto/MPC & TEE & Obfuscation & DP & Hybrid split \\
+    \midrule
+    Embed            & \tq      & TwinShield & SGT/DP-Fwd & DP-Forward & GELO/ObfTune \\
+    Store (vectors)  & Caprise/Fuchsbauer & Opal & ---     & ---        & --- \\
+    Retrieve (ANN)   & PACMANN/Compass & Opal+ORAM & ---  & RemoteRAG  & --- \\
+    Rerank           & RemoteRAG(HE) & Opal     & ---      & ---        & --- \\
+    Generate         & PermLLM/SecFormer & Petridish/SCX & AloePri/OSNIP & --- & GELO/ObfTune \\
+    Graph construct. & ---      & \tq        & ---        & ---        & --- \\
+    Graph traverse   & \tq      & Opal(KG)   & ---        & \needswork{Ning} & --- \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+\needswork{verify cells; the empty/--- cells are the headline gap-map ---
+narrate the most striking gaps (e.g. obfuscation/DP almost absent from storage
+\& retrieval; graph-RAG stages barely covered by any mechanism)}
+
+\subsection{Performance Comparison (from Reported Numbers)}
+% COMPARABILITY CAVEAT (mandatory): these numbers are self-reported across
+% different hardware, models, datasets, and metrics --- they are indicative, not
+% head-to-head. Normalize where possible (overhead x vs plaintext; latency;
+% comm); flag each as head-to-head vs self-reported.
+\dnote{reviewers attack cross-paper performance tables; lead with the caveat and
+mark every figure's provenance}
+\begin{table*}[t]
+  \centering \footnotesize
+  \caption{Indicative performance from \emph{reported} numbers --- NOT
+    head-to-head (different hardware/models/datasets). See caveat.}
+  \label{tab:performance}
+  \begin{tabular}{@{}lllll@{}}
+    \toprule
+    Mechanism family & Latency / overhead & Comm & Quality impact & Source basis \\
+    \midrule
+    Crypto/MPC    & 1--2 orders slower & high & none (exact) & self-reported \\
+    TEE           & single-digit \%    & low  & none         & self-reported \\
+    Obfuscation   & near-plaintext     & low  & accuracy trade & self-reported \\
+    DP            & near-plaintext     & low  & recall trade & self-reported \\
+    Hybrid split  & 20--30\% (GELO)    & med  & none (exact) & self-reported \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+\needswork{fill with specific cited figures; add the normalization method; this
+performance axis is the dimension Bodea \cite{bodea_sok} explicitly omits}
+
+\subsection{Graph-RAG as a Retrieval Setting}
+% Woven treatment (decision: short dedicated subsection, not a parallel track).
+% Graph-RAG (LightRAG, Microsoft GraphRAG) indexes a corpus as a knowledge graph;
+% privacy work here is sparse (Ning et al. KG-QA privacy; Compass for encrypted
+% search; Opal's in-enclave KG traversal). Bodea explicitly excludes this setting.
+\needswork{how graph construction + traversal change the attack surface vs naive
+RAG; why the gap-map's graph rows are nearly empty; cite LightRAG, Ning et al.,
+Compass, Opal}

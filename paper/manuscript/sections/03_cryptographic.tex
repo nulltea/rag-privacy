@@ -1,0 +1,44 @@
+\section{Cryptographic Approaches: MPC, FHE, and Secret Sharing}
+\label{sec:crypto}
+
+% Mechanism-section template (consistent across §3-§7):
+%   Approach · Representative schemes (table) · Performance (reported) ·
+%   Limitations / known attacks · graph-RAG applicability.
+
+\subsection{Approach}
+% MPC (secret sharing, GC), FHE, and hybrids: compute on data without exposing
+% plaintext; the gold standard for confidentiality, bottlenecked by non-linear
+% ops (Softmax, GELU) and communication. Map onto §2: TCB = none / non-colluding.
+\needswork{describe MPC/FHE/SS for inference and for private retrieval}
+
+\subsection{Representative Schemes}
+\begin{table}[t]
+  \centering \footnotesize
+  \caption{Cryptographic schemes (inference + private retrieval).}
+  \label{tab:crypto}
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    Scheme & Pipeline stage & Primitive & Reported cost \\
+    \midrule
+    PermLLM     & inference          & SS + permutation & 3\,s/tok (6B, WAN) \\
+    Euston      & inference          & non-interactive  & \tq \\
+    SecFormer   & inference          & SMPC             & \tq \\
+    CipherFormer& inference          & HE (low rounds)  & \tq \\
+    CryptoMoE   & MoE inference      & balanced routing & \tq \\
+    Caprise     & storage/retrieval  & DCPE             & 2339 vec/s \\
+    Fuchsbauer  & storage            & dist.-cmp.-pres. enc & \tq \\
+    Compass     & retrieval (search) & encrypted search & \tq \\
+    PACMANN     & retrieval (ANN)    & private graph ANN & \tq \\
+    V3DB        & retrieval (verify) & ZK proofs        & \tq \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\needswork{populate costs; note which are inference vs retrieval; Compass/PACMANN
+also serve graph-RAG retrieval (see \cref{sec:synthesis})}
+
+\subsection{Performance (Reported)}
+\needswork{the headline cost reality: MPC inference is 1--2 orders of magnitude
+slower (e.g. BumbleBee ~8\,min/token, 7B); retrieval crypto is closer to practical}
+
+\subsection{Limitations and Known Attacks}
+\needswork{non-colluding assumption (MPC); non-linear-op overhead; FHE depth}

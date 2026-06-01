@@ -14,9 +14,8 @@ systematises that design space. We define six axes
 (\cref{sec:threat-axes}), place a representative set of schemes on them
 (\cref{sec:threat-landscape}), treat the attacker's \emph{capability budget}
 as a cross-cutting concern (\cref{sec:threat-budget}), and surface one
-field-wide blind spot (\cref{ssec:sidechannel}). Our own measurement adversary
-is a single point in this space; we defer it to the evaluation setup
-(\cref{sec:eval}).
+field-wide blind spot (\cref{ssec:sidechannel}). The one empirical vignette in
+this SoK (\cref{ssec:vignette}) instantiates a single point in this space.
 
 \subsection{Axes}
 \label{sec:threat-axes}
@@ -65,9 +64,9 @@ designs offload mixed hidden states to untrusted VRAM, where the adversary has
 full read access. \emph{Storage access patterns}: Caprise \citep{ye_caprise},
 RemoteRAG \citep{cheng2025remoterag}, and Opal expose which records are
 touched per query. \emph{Network} metadata sits beneath all of these. The
-surface is fixed by the architecture---and, as we argue in \cref{sec:eval}, it
-is the surface, not the defender's stated intent, that an attack ultimately
-exploits.
+surface is fixed by the architecture---and, as the vignette
+(\cref{ssec:vignette}) illustrates, it is the surface, not the defender's stated
+intent, that an attack ultimately exploits.
 
 \paragraph{5. Side-channel scope.}
 Whether microarchitectural, cache, timing, power, or physical channels are in
@@ -157,7 +156,7 @@ evaluation that assumed one would therefore measure nothing interesting and
 would strawman schemes that never claimed that bar.
 
 We treat the budget as an explicit, per-scheme parameter rather than a hidden
-constant. Crucially, the ``what breaks'' result of \cref{sec:aloepri} is
+constant. Crucially, the ``what breaks'' vignette of \cref{ssec:vignette} is
 conducted \emph{strictly within AloePri's own constrained-attacker regime}: the
 attacker is white-box on weights and method, is denied the secret permutation,
 and operates under the same compute and observation horizon AloePri's own
@@ -184,33 +183,31 @@ and the TEE side-channel surveys}. A scheme that trusts a TEE while declaring
 side channels out of scope is assuming away the dominant historical failure
 mode of that very anchor.
 
-We do not close this gap: side channels are out of scope for our measurements
-as well (\cref{sec:eval}), and current confidential-computing hardware
+We do not close this gap: side channels are out of scope for this SoK as
+well, and current confidential-computing hardware
 (TDX-backed CVMs, GPUs in confidential mode) materially raises the bar against
 them \citep{kaviani_opal}. But we record it as a systematisation finding and a
 standing item for future work: the field has converged on a threat model that
 structurally excludes the attack class most likely to break its dominant trust
 anchor.
 
-\subsection{Relation to Our Measurement Adversary}
+\subsection{The Adversary Behind the Vignette}
 \label{sec:threat-ours}
 
-Our measured comparison (\cref{sec:eval}) instantiates one point in this space:
-an honest-but-curious cloud operator, white-box on the public model and the
-obfuscation method, denied only the ephemeral secret, observing the untrusted
-accelerator and the obfuscated service I/O, with side channels out of scope and
-a constrained, realistic budget; its goal is to recover the input prompt.
+The one empirical result in this SoK---the static-obfuscation vignette
+(\cref{ssec:vignette})---instantiates a single, deliberately modest point in
+this space: an honest-but-curious cloud operator, white-box on the public model
+and the obfuscation method, denied only the ephemeral secret, observing the
+obfuscated service I/O, with side channels out of scope and a constrained,
+realistic budget; its goal is to recover the input prompt.
 
-One subtlety follows directly from the observation-surface axis and shapes how
-we read the ``holds vs.\ breaks'' result. AloePri runs the entire obfuscated
-model on the server, so its adversary sees obfuscated I/O and weights; a
-TEE-split design exposes obfuscated \emph{activations} on the untrusted GPU.
-These are different observation surfaces---and that difference is not a
-confound but the \emph{independent variable}, because the surface \emph{is} the
-defence. Our comparison therefore holds the adversary, the attack goal, the
-attack suite, and the base model fixed, and lets the observation surface vary
-by architecture. ``Like-for-like'' here means \emph{same adversary, same
-target, same attacks}---not identical observed bytes. We make this scope
-explicit precisely so that a defence which holds is credited for resisting the
-same attacker that breaks another, rather than for being measured on an easier
-surface.
+One subtlety follows from the observation-surface axis and is worth stating
+because it recurs throughout the taxonomy. Two schemes can face the same
+adversary intent yet expose entirely different surfaces: a full-model
+obfuscation scheme exposes obfuscated I/O and weights, whereas a hybrid-split
+design (\cref{sec:hybrid}) exposes obfuscated \emph{activations} on an untrusted
+accelerator. The surface is not incidental---it \emph{is} the defence, and it is
+what an attack ultimately targets. A fair comparison across schemes therefore
+fixes the adversary, the goal, and the attack family while letting the surface
+vary by architecture; a head-to-head evaluation built on this principle, and the
+defense it motivates, are the subject of the companion paper.

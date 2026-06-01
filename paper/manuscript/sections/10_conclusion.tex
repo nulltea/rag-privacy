@@ -1,8 +1,18 @@
-\section{Conclusion and Future Work}
+\section{Open Problems and Conclusion}
 \label{sec:conclusion}
 
-% Restate the holds/breaks finding, bounded by the threat model. Then future work:
-%   - v2: build + measure the unified static+dynamic design (Sec. 8).
-%   - GraphRAG / encrypted semantic search (Compass).
-%   - out-of-scope threats: active adversary, microarch side-channels.
-\needswork{conclusion; tie back to the headline; list future work}
+% Drive the conclusion from the gap-map (§8) and the §2 findings. The open
+% problems ARE the empty matrix cells + the side-channel blind spot.
+% Candidate open problems to articulate:
+%   - obfuscation/DP almost absent from storage & retrieval (most cells empty);
+%   - graph-RAG privacy barely addressed by any mechanism;
+%   - no scheme defends the side-channel surface its TEE anchor depends on (§2);
+%   - cross-stage mitigation composition unstudied (Bodea concurs);
+%   - performance is self-reported and non-comparable -> need a common benchmark.
+\needswork{synthesize open problems from the gap-map + §2 findings; close with
+the SoK's framing contribution}
+
+% Forward pointer (no scooping): the companion paper instantiates one cell ---
+% a unified static+dynamic obfuscated-inference design --- motivated by §5's vignette.
+\dnote{forward-reference the companion paper as ongoing work; do not duplicate
+its method/results here (partition rule 3.5)}

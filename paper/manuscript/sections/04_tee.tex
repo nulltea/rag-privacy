@@ -1,0 +1,36 @@
+\section{Trusted Execution Environments}
+\label{sec:tee}
+
+\subsection{Approach}
+% CPU-TEE (SGX/TDX) and GPU-TEE (confidential H100/H200/B200): hardware-isolated
+% enclaves, remote attestation, RATLS. Near-plaintext overhead. Map onto §2:
+% TCB = CPU-/GPU-TEE; adversary often malicious-host (Opal); side-channels OUT
+% (the §2 finding bites hardest here).
+\needswork{describe TEE/CVM model, attestation, the trust shift to the silicon vendor}
+
+\subsection{Representative Schemes}
+\begin{table}[t]
+  \centering \footnotesize
+  \caption{TEE-based schemes.}
+  \label{tab:tee}
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    Scheme & Pipeline stage & TEE & Reported overhead \\
+    \midrule
+    TwinShield & inference        & CPU-TEE + accel & \tq \\
+    SCX        & serving (KV cache)& confidential serving & \tq \\
+    Opal       & RAG (retrieve+gen)& TDX + GPU-TEE + ORAM & \tq \\
+    Petridish  & serving           & CVM (SPD)       & \tq \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\needswork{Opal additionally hides access patterns via ORAM and assumes a
+malicious host --- the strongest adversary in the corpus (cf. \cref{tab:threat-taxonomy})}
+
+\subsection{Performance (Reported)}
+\needswork{TEE overhead is near-plaintext (single-digit \%); ORAM (Opal) adds cost}
+
+\subsection{Limitations and Known Attacks}
+% The §2 side-channel blind spot lands here: TEEs trust hardware whose documented
+% weakness is microarchitectural leakage. Vendor lock-in; attestation pitfalls.
+\needswork{tie back to \cref{ssec:sidechannel}; vendor trust; attestation correctness}

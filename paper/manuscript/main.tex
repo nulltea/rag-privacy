@@ -1,12 +1,13 @@
 % =============================================================================
-%  Confidential LLM/RAG in Practice — arXiv v1 manuscript
-%  Genre: SoK + measurement.  Headline: "what holds and what breaks."
-%  Target: arXiv long-form report (single-column) -> trim to PoPETs later.
+%  SoK: Confidential LLM Inference and RAG — arXiv manuscript
+%  Genre: PURE SoK (measurements + unified design -> deferred companion paper).
+%  Contribution: taxonomy (threat-model + mechanism) -> gap-map + performance axis.
+%  Positioning: complements Bodea et al. (risk-centric, naive-RAG); we are
+%    mechanism + threat-model + performance, spanning inference + RAG + graph-RAG.
 %  Decisions of record: quality_reports/specs/2026-05-29_confidential-llm-rag-stage1.md
+%    (PIVOT block, 2026-06-01 grill #3).
 %
-%  Toolchain (this machine has pdflatex + bibtex; NO biber/latexmk):
-%     make            # pdflatex x2 + bibtex
-%     make clean
+%  Build (pdflatex + bibtex; NO biber/latexmk):  make    |    make clean
 % =============================================================================
 \documentclass[11pt,letterpaper]{article}
 
@@ -46,15 +47,14 @@
 \fi
 
 % --- drafting scaffolding macros (remove before submission) -----------------
-% \needswork{...}  loud red marker for an open task
-% \dnote{...}      quieter inline drafting note
 \newcommand{\needswork}[1]{{\color{red}\textbf{[TODO: #1]}}}
 \newcommand{\dnote}[1]{{\color{blue!65!black}\textit{[note: #1]}}}
 \newcommand{\tq}{{\color{red}\textbf{?}}} % compact unverified-cell marker (tables)
 
 % --- title block ------------------------------------------------------------
-\title{\textbf{Confidential LLM and RAG in Practice:\\
-       What Holds and What Breaks under a Semi-Honest Cloud}}
+\title{\textbf{SoK: Confidential LLM Inference and Retrieval-Augmented
+       Generation\\
+       \large Mechanisms, Threat Models, and the Performance Frontier}}
 \author{%
   Timofey \needswork{full author list + affiliations}\\
   \texttt{timofey@chainsafe.io}}
@@ -68,15 +68,17 @@
 \end{abstract}
 
 \input{sections/01_introduction}
-\input{sections/02_threat_model}
-\input{sections/03_background_survey}
-\input{sections/04_tee_split_inference}      % what HOLDS
-\input{sections/05_static_obfuscation_aloepri} % what BREAKS
-\input{sections/06_evaluation}                % like-for-like: holds vs breaks
-\input{sections/07_at_rest_storage_caprise}   % RAG measurement (may move to appendix)
-\input{sections/08_unified_design}            % proposal; eval deferred to v2
-\input{sections/09_related_work}
-\input{sections/10_conclusion}
+\input{sections/02_threat_model}          % taxonomy: 6 axes, cross-cutting framework
+% --- mechanism-primary spine -------------------------------------------------
+\input{sections/03_cryptographic}         % MPC / FHE / secret-sharing
+\input{sections/04_tee}                   % trusted execution environments
+\input{sections/05_obfuscation}           % static obfuscation (+ the breaks vignette)
+\input{sections/06_differential_privacy}  % DP
+\input{sections/07_hybrid_split}          % TEE + obfuscation hybrids
+% --- synthesis ---------------------------------------------------------------
+\input{sections/08_synthesis}             % stage x mechanism matrix, gap-map, performance, graph-RAG
+\input{sections/09_related_work}          % Bodea positioning + prior surveys
+\input{sections/10_conclusion}            % open problems
 
 \bibliographystyle{plainnat}
 \bibliography{refs}
