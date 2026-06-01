@@ -1,5 +1,5 @@
 //! Attention-cover adversary-view capture for the persistent-attention
-//! security gates (`docs/plans/perm-attn-gpu-offload.md`).
+//! security gates (`docs/dev/logs/perm-attn-gpu-offload.md`).
 //!
 //! Runs a real Qwen3 prefill, reads the populated per-layer K/V out of the
 //! KV cache (the real activations the cover protects), applies the cover —

@@ -230,7 +230,7 @@ impl KvCache {
 
     /// Borrow layer `li`'s cache (for reading out the populated K/V after
     /// a prefill — used by the attention-cover capture in
-    /// `docs/plans/perm-attn-gpu-offload.md`).
+    /// `docs/dev/logs/perm-attn-gpu-offload.md`).
     pub fn layer(&self, li: usize) -> &LayerKvCache {
         &self.layers[li]
     }

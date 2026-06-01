@@ -209,7 +209,7 @@ impl Clone for WgpuVulkanEngine {
 }
 
 /// Device-resident f16 K/V for the gate-1 persistent-attention
-/// microbench (`docs/plans/perm-attn-gpu-offload.md`). Holds the K/V
+/// microbench (`docs/dev/logs/perm-attn-gpu-offload.md`). Holds the K/V
 /// tensors on the GPU across decode steps so the per-step path uploads
 /// only Q — isolating the resident-read cost from the per-call K/V
 /// upload+convert that dominates `fused_attention_batched`. Seed of the
@@ -261,7 +261,7 @@ impl WgpuVulkanEngine {
 }
 
 /// Device-resident **growing** K/V session for the representative
-/// decode microbench (gate 1, `docs/plans/perm-attn-gpu-offload.md`).
+/// decode microbench (gate 1, `docs/dev/logs/perm-attn-gpu-offload.md`).
 /// Models the **optimistic prefill-only-permute** case: the cover is
 /// applied once at `create_kv_session` (prefill); decode only *appends*
 /// new rows and attends over the active slice — **no per-block
@@ -492,7 +492,7 @@ fn array2_to_tensor_f16(view: ArrayView2<'_, f32>, device: &Dev) -> Tensor<CubeW
     // `vcvtps2ph` hardware path at runtime (the scalar `f16::from_f32`
     // map does NOT auto-vectorise — it's the software bit-twiddle —
     // measured ~2.7 ns/elem vs ~0.2-0.3 ns SIMD; see the upload
-    // decomposition in docs/plans/perm-attn-gpu-offload.md).
+    // decomposition in docs/dev/logs/perm-attn-gpu-offload.md).
     let std = view.as_standard_layout();
     let src = std.as_slice().expect("standard-layout slice is contiguous");
     let mut dst = vec![f16::ZERO; src.len()];

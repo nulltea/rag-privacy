@@ -16,7 +16,7 @@ public-weights threat model** — perfect token recovery. The open question for 
 next session: is feature-rotated prefill offload viable if we add **covariant
 weight obfuscation (AloePri)**?
 
-Everything design-level lives in **`docs/plans/perm-attn-gpu-offload.md`** — read it
+Everything design-level lives in **`docs/dev/logs/perm-attn-gpu-offload.md`** — read it
 first. This handoff only captures the load-bearing math, the current artifact
 state, and what to do next. Do not re-derive the plan here.
 
@@ -92,7 +92,7 @@ covariance.
 
 ## Current artifact state
 
-- **Plan** `docs/plans/perm-attn-gpu-offload.md` — fully refactored: standardized
+- **Plan** `docs/dev/logs/perm-attn-gpu-offload.md` — fully refactored: standardized
   assumptions, attack vector + causal-mask leak, cubek/cover-split, the two gate-3
   `WEIGHTS-PUB` results, and sequencing with **Phase 6 ⛔ BLOCKED** behind a new
   **Phase 5b (AloePri weight obfuscation)**.

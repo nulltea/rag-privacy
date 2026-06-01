@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate 3 under the WEIGHTS-PUB assumption — covariance-alignment attack on O_v.
 
-Threat model (see docs/plans/perm-attn-gpu-offload.md): a WEIGHTS-PUB
+Threat model (see docs/dev/logs/perm-attn-gpu-offload.md): a WEIGHTS-PUB
 adversary knows the public model, so it can estimate the *population* value
 covariance Cov(V) by running the model on public data. Because the value
 cover is V·O_v and the row permutation perm_kv does not affect a covariance

@@ -80,7 +80,7 @@ pub struct PermAttnConfig {
     /// Default `false`.  Prefill always uses the in-TEE-softmax path
     /// regardless of this flag (the F1+ attack does apply at prefill).
     pub decode_softmax_on_gpu: bool,
-    /// **Feature-axis rotation cover** (`docs/plans/perm-attn-gpu-offload.md`).
+    /// **Feature-axis rotation cover** (`docs/dev/logs/perm-attn-gpu-offload.md`).
     /// When `true`, each head's Q,K are rotated by a fresh orthogonal
     /// `O_qk` (which cancels in `Q·Kᵀ`, so scores are unchanged) and V by
     /// an independent `O_v` (corrected by `O_vᵀ` on the recovered output).

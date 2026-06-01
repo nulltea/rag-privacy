@@ -651,7 +651,7 @@ fn empirical_direction_recovery_is_bounded() {
 }
 
 /// Gate 2 (the `perm_kv` clock) — σ-vs-N permutation-recovery sweep for
-/// the persistent-K/V design (`docs/plans/perm-attn-gpu-offload.md`).
+/// the persistent-K/V design (`docs/dev/logs/perm-attn-gpu-offload.md`).
 ///
 /// Holding `perm_kv` fixed across N decode steps removes the
 /// fresh-per-call protection: an attacker who observes the permuted+noised

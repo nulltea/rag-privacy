@@ -423,7 +423,7 @@ fn r1_4_bench(c: &mut Criterion) {
         // softmax(q·kᵀ·scale)·v over the resident cache, reads back the
         // context. This is Variant 2 MINUS the per-call K/V
         // upload+convert — the gate-1 measurement from
-        // `docs/plans/perm-attn-gpu-offload.md`. The headline number is
+        // `docs/dev/logs/perm-attn-gpu-offload.md`. The headline number is
         // `gpu_resident_b8` vs `in_tee_rayon_b8`; the difference
         // `gpu_batched_b8_no_mask − gpu_resident_b8` ≈ the upload+convert
         // cost persistent K/V eliminates (decomposing the 510 ms triage).
@@ -452,7 +452,7 @@ fn r1_4_bench(c: &mut Criterion) {
         // ─── Variant 5: representative decode — per-step append + attend ─
         //
         // The optimistic **prefill-only-permute** case (gate 1 of
-        // `docs/plans/perm-attn-gpu-offload.md`): the cover is applied
+        // `docs/dev/logs/perm-attn-gpu-offload.md`): the cover is applied
         // once at session creation (prefill); each decode step only
         // *appends* the new token's K/V row to the resident cache and
         // attends over `[0..len]` — NO per-block re-permute. Prefix =

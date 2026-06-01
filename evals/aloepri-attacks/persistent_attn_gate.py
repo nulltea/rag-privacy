@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Persistent-attention security gate — attacks the attention-cover
 adversary view produced by `crates/gelo-embedder/tests/attn_cover_capture.rs`
-(see `docs/plans/perm-attn-gpu-offload.md`).
+(see `docs/dev/logs/perm-attn-gpu-offload.md`).
 
 Three measurements per captured layer (kv-heads concatenated where the
 attacker would use them — `perm_kv` is shared across heads):

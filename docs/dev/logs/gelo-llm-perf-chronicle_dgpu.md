@@ -357,7 +357,7 @@ round-trip, not the GPU backend.
 ## 10. Gate-1 persistent-K/V microbench (2026-05-29) — the upload tax is ~100% of it
 
 Per the persistent-attention plan
-([`perm-attn-gpu-offload.md`](../../plans/perm-attn-gpu-offload.md)),
+([`perm-attn-gpu-offload.md`](../../dev/logs/perm-attn-gpu-offload.md)),
 gate 1 asks: does **device-resident K/V** (upload once; per-step upload
 only Q) beat the in-TEE baseline? Added a `gpu_resident_b8` cell to
 `amulet_attention_r1_4` (engine `upload_resident_kv` / `attend_resident`,

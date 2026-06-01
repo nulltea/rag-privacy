@@ -6,7 +6,7 @@ norm/Gram dictionary. Works for BOTH offload covers (selected by capture dir):
   * permutation DECODE cover     (perm_kv)  → recovers token IDENTITY per slot
         (membership); position stays hidden by π.
 
-Mechanism (see docs/plans/perm-attn-gpu-offload.md). O_v is applied per head as a
+Mechanism (see docs/dev/logs/perm-attn-gpu-offload.md). O_v is applied per head as a
 d_head-orthogonal, so the per-head value NORM is O_v-INVARIANT and (for the decode
 cover) permutation only relabels rows:
 

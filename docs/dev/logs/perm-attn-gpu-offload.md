@@ -1,20 +1,42 @@
 ---
-type: plan
+type: dev-log
 status: current
 created: 2026-05-29
-updated: 2026-05-29
-tags: [gelo, dgpu, attention, gpu, persistent-kv, permutation, security, flash-attention]
-companion: [2026-05-22-dgpu-attention-revival]
+updated: 2026-06-01
+tags: [gelo, dgpu, attention, gpu, persistent-kv, permutation, feature-rotation, security, threat-model, aloepri, flash-attention]
+companion: [2026-05-22-dgpu-attention-revival, gelo-llm-perf-chronicle_dgpu]
 ---
 
-# Permutation-shielded GPU attention offload — frozen-prefix / active-tail persistent K/V
+# GPU attention offload for confidential LLM serving — design exploration & implementation log
 
-The design for moving the decode in-TEE attention bottleneck onto the
-dGPU (RTX 5090) without violating the F1+ threat model. Supersedes the
-"Item 1 persistent K/V" sketch in
-[`2026-05-22-dgpu-attention-revival.md`](../handoffs/2026-05-22-dgpu-attention-revival.md)
-with a concrete cache structure, decode-step mechanism, and threat
-model.
+**What this document is.** The living design-exploration and
+implementation log for moving GELO's in-TEE attention bottleneck onto the
+untrusted dGPU (RTX 5090) without breaking the threat model. It began as a
+decode implementation plan and grew to cover the whole design journey:
+the binding measurements, the standardized threat model, every cover
+explored (block-fresh-π permutation, TwinShield additive, feature
+rotation), the security gates and their *measured* outcomes, the
+fused-kernel decision, and the prefill/decode split — including the dead
+ends and why they died.
+
+**How to read it.** Organised by concern, not by file. The load-bearing
+parts are: the **threat-model assumptions** (the vocabulary everything
+else is stated against), the **gate results** (what was measured, with
+numbers and artefact paths), and the **Sequencing** section (what is ✅
+done vs ⛔ blocked vs remaining). Decisions are dated; superseded framings
+are marked rather than deleted, so the reasoning trail survives. It
+supersedes the "Item 1 persistent K/V" sketch in
+[`2026-05-22-dgpu-attention-revival.md`](../../handoffs/2026-05-22-dgpu-attention-revival.md);
+per-op performance numbers live in the companion perf chronicle
+[`gelo-llm-perf-chronicle_dgpu.md`](gelo-llm-perf-chronicle_dgpu.md).
+
+**Current status (2026-06-01).** Decode offload is wired + benched
+(perf); the Phase-5 `WEIGHTS-PUB` security spike then showed both offload
+covers leak token identity (prefill rotation: token + position; decode
+permutation: membership, order held) — so prefill is ⛔ blocked behind
+Phase 5b (covariant weight obfuscation, AloePri), and decode ships only
+if the bag-of-tokens residual is accepted. See *Sequencing* for the live
+state.
 
 ## Why this exists (the binding measurement)
 
@@ -36,6 +58,26 @@ bandwidth) is the entire 45–66× gap. The 5090's HBM and tensor cores
 never get to matter. **Naive GPU attention is non-viable; viability is
 gated entirely on persistent K/V** — keeping the cache device-resident
 so only the per-step delta moves.
+
+**Setup (holds throughout unless stated).** Model: **Qwen3-4B** — 36
+layers, 32 query heads, 8 KV heads (GQA 4:1), `head_dim` 128, hidden
+2560, vocab 151,936; activations bf16, GPU engine fp16. Hardware:
+Ryzen 9 7900X + **RTX 5090** (32 GB GDDR7, ~1.8 TB/s HBM) over PCIe,
+dual-channel DDR5 (~80–90 GB/s); fp16 wgpu **Vulkan** for development,
+**CUDA** for production (full substrate + per-op profiles in the
+companion perf chronicle [`gelo-llm-perf-chronicle_dgpu.md`](gelo-llm-perf-chronicle_dgpu.md)
+§1). Production bench shape unless stated: **B=8, n=2048, K=32** decode
+steps.
+
+> **Reading the in-TEE attention baseline (avoids an apparent
+> discrepancy).** "In-TEE attention at n_kv=2048, B=8" appears across
+> three harnesses and is *not* one figure: **~11 ms** as an isolated
+> single-attention microbench (11.35 ms in the triage above; 11.15 ms in
+> the resident microbench's in-TEE cell), and **12.65 ms** in-forward
+> per-(layer,step) in the full decode bench (`tee:attn_cached_inplace_many`,
+> 14 574 ms ÷ 1152 layer-steps; chronicle §9/§11). The spread is
+> harness/wrapper overhead, not an inconsistency; each speedup factor
+> below is computed against the cell named at its measurement.
 
 ## Threat model — standardized assumptions
 
@@ -114,10 +156,15 @@ ambiguous — see the note at the end.)
   on the **CUDA** backend (warm).
 - **Scope (prefill):** decode-only for v1 — the hybrid targets the
   decode attention bucket (34% B=8 / 52% B=1 of decode wall). Prefill
-  attention offload (~12–21% of prefill wall; the ~4 GB scores-tensor
-  materialization on dGPU) is a **fast-follow**: it shares the deferred
-  FlashAttention-D kernel (prefill tiling) but needs no session, so it
-  slots in once the kernel lands.
+  attention offload (≈43.7 s, ~21–24% of prefill wall; the ~4 GB
+  scores-tensor materialization on dGPU) is a **fast-follow**: it shares
+  the deferred FlashAttention-D kernel (prefill tiling) but needs no
+  session, so it slots in once the kernel lands.
+  **⚠ Superseded (2026-06-01):** prefill offload became a central effort,
+  not a casual fast-follow — its cover is feature-rotation (not
+  permutation), and the Phase-5 `WEIGHTS-PUB` spike found it **broken**, so
+  prefill is now ⛔ blocked behind Phase 5b (covariant weight
+  obfuscation). See *Sequencing* and the fused-kernel section.
 - **Cache structure:** frozen-prefix / active-tail hybrid (below).
 - **Kernel:** phased. The gate-1 microbench uses a minimal
   resident-buffer variant of `fused_attention_batched` (whole cache
@@ -166,7 +213,7 @@ VRAM-resident:  [ ████████ FROZEN PREFIX [0,p) █████�
                   GPU-resident, read at HBM ~1.8 TB/s      ≤ N rows, never uploaded
 ```
 
-- **Frozen prefix** — the context committed at the *start* of the current block. Uploaded once, under a single fixed `perm_kv^(b)`, with σ-noise already baked into the K rows. The GPU holds these bytes unchanged for all N steps of the block. This is the bulk (long context) and it's what gets read every step at HBM bandwidth — the 20× win over DDR5.
+- **Frozen prefix** — the context committed at the *start* of the current block. Uploaded once, under a single fixed `perm_kv^(b)`, with σ-noise already baked into the K rows. The GPU holds these bytes unchanged for all N steps of the block. This is the bulk (long context) and it's what gets read every step at HBM bandwidth — the ~24× per-step win over the in-TEE DDR5 path (measured, gate 1).
 - **Active tail** — the ≤ N tokens generated *during* this block. Small. Lives in TEE enclave memory, plaintext, never uploaded.
 
 ## A decode step (the load-bearing mechanism: online-softmax split)
@@ -204,14 +251,14 @@ What protects the context:
 Where the clock ticks — **and this is the part to grill**:
 - HNM recovers a *fixed* permutation at 99%+ given enough observations; σ=0.01 is calibrated for **fresh-per-call** π. Holding `perm_kv^(b)` fixed for N steps gives the adversary N correlated looks; the signal grows ~√N, so σ must scale ~√N to hold resistance. **The block size N _is_ the HNM observation count.** That's the σ-vs-N spike, and it caps N (≈32–64 before the noise degrades model accuracy).
 - **The hybrid does _not_ improve this** versus monolithic — same N, same clock. What it buys is purely (a) per-step cost (tail in-TEE, prefix at HBM, no per-step re-permute) and (b) the prefix/tail boundary as the NVMe-spill seam. I want to be explicit so we don't credit it with security it doesn't have.
-- **V exposure (and the feature-axis-rotation mitigation):** V carries `perm_kv` *and* a feature-axis orthogonal rotation `O_v` (matched `O_qk` on Q,K leaves the scores invariant). `O_v` is exactly correctable — the GPU returns `acc = acc_true·O_v` and the TEE applies `O_vᵀ` in the merge — so the adversary no longer reads the shuffled value vectors directly; absolute coordinates are hidden. The **accepted residual** is geometry: orthogonal transforms preserve the Gram matrix and pairwise distances `‖v_i − v_j‖`, so the value cloud's configuration leaks regardless of `O_v` / `perm_kv`. Destroying geometry needs *additive* noise on V, which is uncorrectable on this path (the `probs·V` contraction is over the token axis with softmax weights the TEE never sees — see the token-axis argument in the fallback section). For v1 this residual is gated by the c5 AloePri / σ-vs-N spike; making geometry-hiding mandatory re-ranks TwinShield to primary.
+- **V exposure (and the feature-axis-rotation mitigation):** V carries `perm_kv` *and* a feature-axis orthogonal rotation `O_v` (matched `O_qk` on Q,K leaves the scores invariant). `O_v` is exactly correctable — the GPU returns `acc = acc_true·O_v` and the TEE applies `O_vᵀ` in the merge — so the adversary no longer reads the shuffled value vectors directly; absolute coordinates are hidden. The **accepted residual** is geometry: orthogonal transforms preserve the Gram matrix and pairwise distances `‖v_i − v_j‖`, so the value cloud's configuration leaks regardless of `O_v` / `perm_kv`. **⚠ Superseded under `WEIGHTS-PUB` (2026-06-01):** this "residual" is not merely accepted — it is *exactly* the input to the token-membership dictionary attack that breaks both offload covers (the `O_v`-invariant Gram + public `W_V` → per-token identity). See *Gate-3 @ `WEIGHTS-PUB`*. This bullet's optimism reflects the earlier `WEIGHTS-BLIND` framing. Destroying geometry needs *additive* noise on V, which is uncorrectable on this path (the `probs·V` contraction is over the token axis with softmax weights the TEE never sees — see the token-axis argument in the fallback section). For v1 this residual is gated by the c5 AloePri / σ-vs-N spike; making geometry-hiding mandatory re-ranks TwinShield to primary.
 - **Two independent clocks (the cadence tension).** `perm_kv` and `O_v` defend different things and are recovered by different attacks, so they tick independently:
   - `perm_kv` hides *position* (sequence order); recovered by the HNM-class attack on attention/score statistics, **fed by query observations** (N per block), defended by σ-noise on Q,K + per-block refresh. → gate 2.
-  - `O_v` hides *content* (the value coordinates, hence token identity via vocabulary matching); recovered by **covariance / cumulant alignment** (Procrustes / ICA — JADE, anchor_ica) against the model's known activation statistics, **fed by the number of distinct token-values observed** (grows with context length). → gate 3.
+  - `O_v` hides *content* (the value coordinates, hence token identity via vocabulary matching); recovered by **covariance / cumulant alignment** (Procrustes / ICA — JADE, anchor_ica) against the model's known activation statistics, **fed by the number of distinct token-values observed** (grows with context length). → gate 3. **⚠ "hides content" is `WEIGHTS-BLIND`-only:** under `WEIGHTS-PUB`, covariance-alignment *fails to pin `O_v`* (gate-3 covariance rerun — `O_v` holds), but a *different* attack — matching the `O_v`-invariant value norm/Gram against the public-`W_V` dictionary — recovers token **membership** without ever pinning `O_v` (gate-3 @ `WEIGHTS-PUB`). So `O_v` hides coordinates, not membership.
   - The two don't help each other: `perm_kv` shuffles rows but covariance / Gram are computed over the row *set* (permutation-invariant), so `perm_kv` does **not** slow `O_v` recovery; and σ-noise is on Q,K only, so `V·O_v` is observed *noiselessly*, making `O_v` alignment *easier* than `perm_kv` recovery (and we can't noise `V·O_v` — that's the uncorrectable case). Hence `O_v` needs its own refresh cadence `M`, traded against the per-block rotation cost (gate 1).
 - One small *benefit*: the freshest N tokens (often the most sensitive, most-attended) stay in-TEE for the whole block and only ever reach the GPU permuted+noised, after a boundary fold.
 
-F1+ is preserved throughout: the GPU only ever sees permuted+noised operands, and the softmax it runs is over permuted scores (equivariant) — it never learns π. The TEE-side merge is a small plaintext correction, not a softmax-over-real-positions.
+The cover's order-hiding is preserved throughout (the `GPU-ADV` boundary holds for *order*): the GPU only ever sees permuted+noised operands, and the softmax it runs is over permuted scores (equivariant) — it never learns π. The TEE-side merge is a small plaintext correction, not a softmax-over-real-positions. (This is *order*-hiding only; *membership*-hiding fails under `WEIGHTS-PUB`, above.)
 
 ### Write-location side channel on per-step append (found 2026-05-29)
 
@@ -282,13 +329,23 @@ otherwise reads the appended permutation directly, at ~zero (favourable)
 runtime cost. Phase 3 is promoted from "gated on security" to a required
 v1 component.
 
+**Scope of what tail-in-TEE fixes (clarified 2026-06-01).** It closes the
+*write-location / order* channel — the per-step append no longer leaks
+π. It does **not** address the `WEIGHTS-PUB` *membership* leak (the
+`O_v`-invariant value-norm dictionary recovers which tokens are present
+regardless of where they were written; gate-3 @ `WEIGHTS-PUB`). The two
+are orthogonal channels: tail-in-TEE protects order, membership-hiding
+needs covariant weight obfuscation (Phase 5b).
+
 ---
 
 ## Offloaded-prefill attention: the attack vector (2026-05-29)
 
 The decode threat model above concerns a *resident* cache read one query at
 a time. **Offloading prefill** — the single largest in-TEE bucket
-(`tee:attn_inplace_many` ≈ 43.7 s, 23.6 % of prefill) — is a different
+(`tee:attn_inplace_many` ≈ 43.7 s, ~21–24 % of prefill wall — 21.2 % in
+the chronicle §3.2 baseline run, 23.6 % in the Phase-4 flag-on run; the
+absolute is stable, the share moves with the run's total) — is a different
 exposure, and it is the reason the offload path cannot use the permutation
 cover. This section defines what we are defending against; the cover that
 answers it (feature rotation) and the gate are in the fused-kernel section.
@@ -568,7 +625,7 @@ The **resident decode cache** is a *separately* permutation-covered `K,V`
 that the TEE builds from the clean prompt K/V (which it holds — it computed
 the K/V projections) at the prefill→decode boundary. That one-time
 re-cover-and-upload is the "re-permute upload" already cost-analysed in
-gate-1 / §10 (≈488 ms current pipeline → modelled ≈5 ms with the
+gate-1 / chronicle §10 (≈488 ms current pipeline → modelled ≈5 ms with the
 un-replicated + bf16-native substrate). So enabling prefill offload does
 **not** change the decode cover; it adds a rotation-covered prefill pass
 plus the existing residency upload.
@@ -592,8 +649,7 @@ conservative default) and `WEIGHTS-BLIND` (the private-fine-tune case) — to
 bracket the outcome and isolate exactly how much the public weights buy the
 attacker. It asks: **is the rotation-invariant view — optionally anchored by
 public weights — enough to reconstruct the prompt?** Reusing the gate-3
-capture harness + the container attack rig, on real Qwen3 activations
-(iterate on 1.7B, confirm on 4B):
+capture harness + the container attack rig, on real Qwen3-4B activations:
 
 1. **`WEIGHTS-PUB` reconstruction (the load-bearing attack).** With public
    `W_Q/W_K/W_V`, the exposed Grams are known bilinear forms `X·M·Xᵀ` (M
@@ -654,8 +710,14 @@ The whole prefill-offload lever is downstream of this gate.
 ## Open questions (the load-bearing gates)
 
 The kernel / backend / session-handle-API choices below these are
-comparatively mechanical; these three gates decide whether block-fresh-π
-ships or we fall to TwinShield-Xue.
+comparatively mechanical; these three gates were framed (2026-05-29) as
+deciding whether block-fresh-π ships or we fall to TwinShield-Xue. **That
+framing is partly superseded:** TwinShield is *not* a drop-in fallback for
+the offload (it can't run on a fused kernel — Elimination 2), and the
+dominant later finding is the `WEIGHTS-PUB` membership leak, which neither
+gate 1–3 originally targeted. Read gates 1–3 as the perf + `WEIGHTS-BLIND`
+security picture; the conservative-bar verdict is in the `WEIGHTS-PUB`
+gate-3 results and *Sequencing*.
 
 1. **Prefix re-permute cost (gate 1, perf).** **Per-step half: PASSED
    (2026-05-29).** The `gpu_resident_b8` microbench measures resident
@@ -767,8 +829,11 @@ The gates run in two environments, and only part runs on the dGPU box:
 ### First real-activation gate run (2026-05-29)
 
 Pipeline now wired end-to-end: `attn_cover_capture.rs` dumps the real
-Qwen3-4B adversary view (prefill-only cover: `perm_kv` + σ=0.01 on K +
-`O_qk`/`O_v`, n_kv=545, layers 0/17/35) → `persistent_attn_gate.py`
+Qwen3-4B adversary view (the **decode permutation cover in its
+session-fixed config** — `perm_kv` + σ=0.01 on K + `O_qk`/`O_v`, applied
+once at prefill with no per-block refresh; "prefill-only" here means
+*cover-applied-once*, **not** the prefill-*offload* rotation cover —
+n_kv=545, layers 0/17/35) → `persistent_attn_gate.py`
 (in the `gelo-attack` container) attacks it. Artefacts:
 `evals/aloepri-attacks/{persistent_attn_gate.py, captures/gate_results.json}`.
 
@@ -813,11 +878,15 @@ seriation |τ| avg 0.15 (per-layer 0.05–0.26, no systematic layer trend).
 norm dictionary — below); the **HNM score-structure** attack (the √N
 channel) as a second `NO-PLAINTEXT` gate-2; wider σ sweep.
 
-**Design implication (updated).** The decode permutation cover (`perm_kv` +
-`O_qk` + `O_v` + σ) looks **substantially viable under `WEIGHTS-BLIND`** —
-content and position both largely hidden. The `WEIGHTS-PUB` rerun (below)
-clears the covariance-alignment form; order-hiding (π) and the K-path (σ)
-survive regardless.
+**Design implication (`WEIGHTS-BLIND` only — see the `WEIGHTS-PUB` result
+two subsections below before drawing conclusions).** The decode permutation
+cover (`perm_kv` + `O_qk` + `O_v` + σ) looks **substantially viable under
+`WEIGHTS-BLIND`** — content and position both largely hidden. **But this
+does not survive the conservative bar:** under `WEIGHTS-PUB` the covariance
+form clears (next subsection) yet the token-dictionary attack recovers
+**membership** (perfect, *Gate-3 @ `WEIGHTS-PUB` — decode*); only
+order-hiding (π) and the K-path (σ) survive `WEIGHTS-PUB`. Read this
+paragraph as the `WEIGHTS-BLIND` snapshot, not the final word.
 
 ### Gate-3 @ `WEIGHTS-PUB` — covariance-alignment rerun (2026-06-01)
 
@@ -1041,16 +1110,18 @@ Layered — failing any tier reopens the TwinShield-Xue fallback:
    ≤ 1 per decode step, and no growth in mask-offload count (revival
    Step-5 invariants).
 
-## Sequencing (committed forward plan)
+## Sequencing — status (✅ done · ⛔ blocked · remaining)
 
-**Strategy: build the prefill-only permute cover (the simplest, fastest,
-*weakest* variant), attack it with a real `NO-PLAINTEXT` HNM bench as
-early as possible, and harden only if it fails — with TwinShield-Xue as
-the parallel-de-risked fallback.** The ordering change vs a naive
-"build-all-then-test" is to **gate the expensive kernel + decode wire-up
-on the security result**, because the adversary view is just the cover
-applied to real activations (Phase-1 output) — it does not need the
-kernel or the integration.
+This is the live progress log, not a forward commitment: each phase is
+marked with its current state and dated where measured. **Guiding
+strategy (as executed):** build the simplest/weakest cover first, attack
+it with a real `NO-PLAINTEXT` (and later `WEIGHTS-PUB`) bench as early as
+possible, and **gate the expensive kernel + wire-up on the security
+result** — the adversary view is just the cover applied to real
+activations, so it needs neither the kernel nor the integration. That
+ordering is exactly what surfaced the `WEIGHTS-PUB` break before any
+kernel was built (TwinShield-Xue remained the parallel-de-risked
+fallback throughout).
 
 ### Done
 
@@ -1156,10 +1227,10 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
    n_kv=2048, B=8, the per-call K/V cost (`no_mask − resident` ≈ 490 ms)
    splits **convert 368 ms (~75%) / DMA+sync ~122 ms (~25%)** — and the
    convert is a *scalar* f32→f16 loop (2.7 ns/elem). **Implication:** the
-   dominant upload cost is killable **without §4.E.3** via a **vectorised
+   dominant upload cost is killable **without roadmap §4.E.3** via a **vectorised
    convert** (half's F16C `convert_from_f32_slice`, ~10×) — the cheap,
    unblocked next lever; full **bf16-native** (no convert at all) needs
-   the §4.E.3 activation pipeline and is now *less urgent* since the
+   the roadmap §4.E.3 activation pipeline and is now *less urgent* since the
    vectorised convert + un-replicated (4×) capture most of the win.
 
    **Vectorised convert — done, but under-delivered (2026-05-29;
@@ -1193,7 +1264,7 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
 
    **Remaining Phase-2 sub-steps:** bf16-native upload (now priority, but
    gated on gate-2 confirming refresh is needed; full version needs
-   §4.E.3); `/code-review` of the trait change. `kv_attend` still returns
+   roadmap §4.E.3); `/code-review` of the trait change. `kv_attend` still returns
    the full normalised context (partial-stats `(m,l,acc)` is the Phase-3
    kernel); not yet wired into `TrustedExecutor`/forward (Phase 4).
 5. **Phase 3 — partial-stats attend + tail-in-TEE merge** — **MANDATORY**
@@ -1274,9 +1345,9 @@ TwinShield's R-rank in parallel (the 1B spike) so the fallback is
 
 ## References
 
-- [`2026-05-22-dgpu-attention-revival.md`](../handoffs/2026-05-22-dgpu-attention-revival.md) — the Item 1/2/3 design this concretizes; σ-vs-N table, 1A vs 1B trade
-- [`2026-05-29-dgpu-attention-offload.md`](../handoffs/2026-05-29-dgpu-attention-offload.md) — dGPU bring-up handoff; the §2 headline that set up this task
-- [`gelo-llm-perf-roadmap.md`](gelo-llm-perf-roadmap.md) §4.C.2 — the EV/engineering table for these levers
+- [`2026-05-22-dgpu-attention-revival.md`](../../handoffs/2026-05-22-dgpu-attention-revival.md) — the Item 1/2/3 design this concretizes; σ-vs-N table, 1A vs 1B trade
+- [`2026-05-29-dgpu-attention-offload.md`](../../handoffs/2026-05-29-dgpu-attention-offload.md) — dGPU bring-up handoff; the §2 headline that set up this task
+- [`gelo-llm-perf-roadmap.md`](../../plans/gelo-llm-perf-roadmap.md) §4.C.2 — the EV/engineering table for these levers
 - `docs/dev/logs/gelo-llm-perf-chronicle_dgpu.md` §8 — the per-call-readback correction (the backend-invariant bottleneck)
 - `bench-results/amulet-attn-triage-5090-2026-05-29.log` — the triage that gates viability on persistent K/V
 - `crates/gelo-protocol/src/attention.rs::permuted_attention_cached` — the existing fresh-per-call cover this extends
