@@ -1649,6 +1649,47 @@ and the cubek read-index. **Security unchanged:** default-off *perf* wire; the
 rotation cover still fails `WEIGHTS-PUB`, so default-on stays gated on covariant
 obfuscation (Phase 5b).
 
+### Three-way per-op — in-TEE vs insecure (`O_v`) vs secure (`C_v`); the defense is perf-free (2026-06-02)
+
+The `WEIGHTS-PUB` defense is **covariant value obfuscation** — the non-orthogonal,
+κ-bounded value cover `C_v` (κ=1 = the insecure orthogonal `O_v`; κ=6 = secure).
+Canonical bench (B=8, n=2048, K=32, RTX 5090 / Vulkan, `CUBEK_STRATEGY=blackbox`,
+σ=0.01). in-TEE reuses the documented numbers above; insecure `O_v` (κ=1) **and**
+secure `C_v` (κ=6) were measured back-to-back this session (2026-06-02) so the
+insecure↔secure comparison is matched-config (no cross-vintage confound).
+
+**Prefill attention (per full 36-layer prefill):**
+
+| op | in-TEE | offload insecure (`O_v`) | offload secure (`C_v`) | what it is |
+|---|--:|--:|--:|---|
+| **attention bucket** | **44 062 ms** | **15 267 ms (2.89×)** | **15 090 ms (2.92×)** | `tee:attn_inplace_many` → `tee:attn_prefill_offload` |
+| ├ `cubek_gpu` | — | 8 527 ms | 8 248 ms | GPU attend (`C_v`-independent) |
+| ├ `rotate_tee` | — | 3 574 ms | 3 571 ms | fold + `O_qk`/`C_v` rotate (CPU) |
+| └ `correct_tee` | — | 1 647 ms | 1 648 ms | `C_v⁻¹`/`O_vᵀ` correct + unfold (CPU) |
+
+**Decode attention (recurring, 36 layers × 32 steps):**
+
+| op | in-TEE | offload insecure (`O_v`) | offload secure (`C_v`) | what it is |
+|---|--:|--:|--:|---|
+| **attention bucket** | **14 574 ms** | **3 997 ms (3.6×)** | **4 042 ms (3.6×)** | `tee:attn_cached_inplace_many` → `tee:attn_resident_cover` |
+| ├ `prefix_partial_gpu` | — | 2 411 ms | 2 408 ms | GPU attend over frozen prefix (`C_v`-independent) |
+| ├ `q_cover_tee` | — | 382 ms | 392 ms | `q·O_qk` + σ (CPU) |
+| └ `acc_uncover_tee` | — | 234 ms | 237 ms | `acc·C_v⁻¹`/`O_vᵀ` (CPU) |
+
+**Reading.** Scale vs in-TEE: prefill **~2.9×**, decode **~3.6×** (documented runs
+reach ~4×; the bucket carries ±~10% cubek cross-run variance) — the offload
+removes the in-TEE attention bottleneck (44→15 s prefill; 14.6→~4 s decode).
+**Insecure vs secure — the defense is free:** matched-config, *every* bucket is
+within ~1–3%, and the only ops `C_v` touches are dead flat — `rotate_tee`
+3 574→3 571 (−0.1%), `correct_tee` 1 647→1 648 (+0.1%), `acc_uncover` 234→237
+(+1.2%). By construction `C_v` is the same dense matmul as `O_v` plus a one-time
+per-session `C_v⁻¹` inverse; the GPU attend buckets (`cubek_gpu`,
+`prefix_partial_gpu` — `C_v`-independent) match to ~0.1% (`prefix_partial`
+2 411→2 408), confirming the resident-attend bucket is low-variance and the small
+deltas are noise, not the cover. **Verdict: GPU-offloaded attention gives ~2.9×
+(prefill) / ~3.6–4× (decode) over in-TEE, and securing it with `C_v` adds no
+measurable cost.**
+
 ## Acceptance gate (v1)
 
 Layered — failing any tier reopens the TwinShield-Xue fallback:

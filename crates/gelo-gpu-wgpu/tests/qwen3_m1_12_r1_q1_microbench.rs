@@ -739,6 +739,72 @@ fn cover_greedy_parity() -> Result<()> {
     Ok(())
 }
 
+/// HumanEval **generation** half of the final accuracy gate (acceptance
+/// tier-5; dev-log *Acceptance gate*). Reads the vendored n=20 subset
+/// (`evals/humaneval-gate/prepare_subset.py` → `subset.jsonl`), generates a
+/// completion per problem through `generate_batched` (so the GPU offload
+/// engages — set the offload flags + `GELO_COVER_KAPPA` in the env), and
+/// writes `completions.jsonl` for the Python scorer (`score.py`) to truncate +
+/// `run_check` against the canonical HumanEval harness. Greedy (temp 0),
+/// max_tokens 384, matching the llama.cpp Plain reference (Qwen3-4B = 6/20).
+///
+/// Secure run (the gate):
+///   GELO_GPU_PREFILL_OFFLOAD=1 GELO_GPU_RESIDENT_COVER=1 GELO_RESIDENT_SIGMA=0.01 \
+///   GELO_COVER_KAPPA=6 GELO_BENCH_VARIANT=4b \
+///   cargo test --release -p gelo-gpu-wgpu --test qwen3_m1_12_r1_q1_microbench \
+///     humaneval_gate_generate -- --ignored --nocapture
+#[test]
+#[ignore = "final accuracy gate (heavy): loads Qwen3-4B + generates 20 HumanEval completions through the offload"]
+fn humaneval_gate_generate() -> Result<()> {
+    use std::io::Write;
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../evals/humaneval-gate");
+    let subset = std::env::var("GELO_HE_SUBSET")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| root.join("subset.jsonl"));
+    let out_path = std::env::var("GELO_HE_OUT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| root.join("completions.jsonl"));
+    let max_tokens: usize = std::env::var("GELO_HE_MAXTOK").ok().and_then(|s| s.parse().ok()).unwrap_or(384);
+
+    let variant = variant_from_env();
+    let (cfg, tokenizer, mut weights, rope) = load_pretrained(variant)?;
+    let engine = WgpuVulkanEngine::new_fp16().context("Vulkan adapter (fp16)")?;
+    let mut exec = InProcessTrustedExecutor::with_seed(engine, MaskSeed::from_bytes([42u8; 32]));
+    provision_into(&mut weights, &cfg, &mut exec)?;
+    provision_lm_head_into(&weights, &mut exec)?;
+
+    let subset_txt = std::fs::read_to_string(&subset)
+        .with_context(|| format!("reading {} — run prepare_subset.py first", subset.display()))?;
+    let mut out = std::fs::File::create(&out_path)?;
+    let gen_cfg = GenerationConfig {
+        max_tokens,
+        eos_token_ids: vec![151643, 151645], // Qwen3 <|endoftext|>, <|im_end|>
+        ..Default::default()
+    };
+
+    let kappa = std::env::var("GELO_COVER_KAPPA").unwrap_or_else(|_| "1".into());
+    let offload = std::env::var("GELO_GPU_PREFILL_OFFLOAD").unwrap_or_else(|_| "0".into());
+    eprintln!("[humaneval] subset={} offload={offload} kappa={kappa} max_tokens={max_tokens}", subset.display());
+
+    for line in subset_txt.lines().filter(|l| !l.trim().is_empty()) {
+        let v: serde_json::Value = serde_json::from_str(line)?;
+        let idx = v["idx"].as_u64().unwrap_or(0);
+        let task_id = v["task_id"].as_str().unwrap_or("").to_string();
+        let prompt = v["prompt"].as_str().unwrap_or("").to_string();
+
+        let ids = tokenizer.encode(&prompt, 2048)?;
+        let outs = generation::generate_batched(&cfg, &weights, &rope, &mut exec, &[ids], &gen_cfg)?;
+        let completion = tokenizer.decode(&outs[0].tokens, true)?;
+
+        let rec = serde_json::json!({ "idx": idx, "task_id": task_id, "completion": completion });
+        writeln!(out, "{}", serde_json::to_string(&rec)?)?;
+        eprintln!("[humaneval] {idx:>2} {task_id} → {} tok{}", outs[0].tokens.len(),
+            if outs[0].stopped_on_eos { " (eos)" } else { "" });
+    }
+    eprintln!("[humaneval] wrote {} → score with evals/humaneval-gate/score.py", out_path.display());
+    Ok(())
+}
+
 // ─── M1.12+ sweep: (B, n, mask_kind) cells ─────────────────────────
 
 /// Mask family selector for the sweep harness.
