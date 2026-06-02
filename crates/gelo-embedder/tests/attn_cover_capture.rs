@@ -329,11 +329,19 @@ fn capture_attn_cover_adversary_view() -> Result<()> {
             u
         };
         let n_true = cand.len();
-        let mut dr = ChaCha20Rng::seed_from_u64(0xD1C7_5EED_u64);
-        while cand.len() < n_true + n_distract {
-            let t = (dr.next_u32() as usize % vocab) as u32;
-            if !promptset.contains(&t) {
-                cand.push(t);
+        // GELO_CAPTURE_DICT_FULL=1 ⇒ the whole vocabulary as the candidate pool
+        // (the Stage-2 conservative bar; rejection-sampling ~all of vocab is
+        // pathological). Otherwise random distractors up to n_true + n_distract.
+        let full = std::env::var("GELO_CAPTURE_DICT_FULL").map(|v| v == "1").unwrap_or(false);
+        if full {
+            cand = (0..vocab as u32).collect();
+        } else {
+            let mut dr = ChaCha20Rng::seed_from_u64(0xD1C7_5EED_u64);
+            while cand.len() < n_true + n_distract {
+                let t = (dr.next_u32() as usize % vocab) as u32;
+                if !promptset.contains(&t) {
+                    cand.push(t);
+                }
             }
         }
         let mut emb = Array2::<f32>::zeros((cand.len(), hidden));

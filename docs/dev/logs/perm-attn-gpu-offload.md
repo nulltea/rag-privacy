@@ -1337,6 +1337,54 @@ below the greedy-argmax margin.
 Artefacts: `GELO_CAPTURE_COVER=cv` mode in `attn_cover_capture.rs`;
 `evals/aloepri-attacks/captures_cv_k{1.0…8.0}/`.
 
+### Stage-2 result — full-vocab + covariance/Procrustes: `C_v` HOLDS at κ=6 (2026-06-02)
+
+The conservative-bar confirmation at κ=6.
+
+**(a) Full-vocab norm dictionary** (151 936-token pool via `GELO_CAPTURE_DICT_FULL=1`,
+layer 0). The full vocabulary *resolves the Stage-1 top-5 caveat* — it was a
+small-pool collision artifact:
+
+| metric | 8k pool (Stage 1) | full vocab (Stage 2) |
+|---|--:|--:|
+| top-1 | 0.000 | **0.000** |
+| top-5 | 0.156 | **0.047** |
+| median true-token rank | 1118 / 8 054 | **20 203 / 151 936** (~13th pctile) |
+
+**(b) Covariance/Procrustes recoverability** (`gate3_cv_covalign.py` — the
+orthogonal `gate3_weights_anchor` generalised to a non-orthogonal map:
+whiten `v_sent`, re-colour to a population anchor's spectrum, 3rd-moment sign;
+`D = Vs·diag(√(La/Ls))·Vaᵀ`). Anchor = prompt B (`captures2`), a different
+prompt; scored by Hungarian-matched |corr| of de-covered vs clean V. Layers 0 & 35,
+n_kv=285, no-attack floor ≈ 0.37:
+
+| target | no_attack | covalign(pub) | covalign(self\*) | verdict |
+|---|--:|--:|--:|---|
+| **κ=6 (`C_v`)** | 0.370 | **0.332** | **0.359** | **HOLDS** |
+| κ=1 (orthogonal control) | 0.372 | 0.344 | 1.000 | HOLDS(pub) |
+
+The κ=1 control's **self\* = 1.000 validates the attack** (it recovers an
+orthogonal cover given matching covariance — so the negatives are real) and
+reproduces the original `O_v`-holds-under-`WEIGHTS-PUB` result. At κ=6, `C_v`
+holds against the population anchor (0.332 ≈ floor) **and at the self-anchor
+upper bound (0.359, *not* 1.000)** — *stronger* than `O_v`: a non-orthogonal
+`C_v` is not recoverable from 2nd-moment alignment even with the instance's own
+covariance, because whitening fixes only the symmetric part `C_vC_vᵀ` and leaves
+the orthogonal factor unresolved. The **per-head Gram quadratic-assignment is
+subsumed** (covariance is the centered Gram; recovering the cover from 2nd-order
+statistics is exactly what failed). Layer 35 holds; deeper layers have no
+context-free dictionary regardless.
+
+**Stage-2 verdict: `C_v` at κ=6 clears the conservative bar** — membership
+broken (full-vocab top-1=0, top-5=0.047) and the cover non-recoverable
+(covariance-alignment at the floor, validated). **Remaining before default-on:**
+the **fp16 greedy-parity check** at κ=6 on the *real* offload path (acceptance
+tier-3; `cond=6` ⇒ ~6e-3 round-trip cancellation — confirm below the
+greedy-argmax margin), then the production wire-up (`O_v`→`C_v` at the
+`rotate_heads`/`acc_uncover`/`correct_unfold_into` sites, per *Phase 5b*).
+Artefacts: `gate3_cv_covalign.py`, `GELO_CAPTURE_DICT_FULL` mode;
+`evals/aloepri-attacks/captures_cv_{k6_fullvocab,covalign_k6.0,covalign_k1.0}/`.
+
 ## Offload perf-upside — per-op breakdowns (2026-06-01)
 
 These measure the **performance** of the offloaded attention with its cover
