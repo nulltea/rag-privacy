@@ -1172,28 +1172,18 @@ table above):
 | `merge_tee` | TEE | 18 | **1 116** | 0.02 ms | 36×31 — online merge |
 | **total** (`tee:attn_resident_cover`) | | **13 832** | **1 152** | 12.0 ms | per-(layer,step) closure |
 
-**Finding — the overhead is a one-time cost that amortizes, not a per-step
-tax.** `build_covered_prefix+upload` is **63% of the wall but 3% of the executions**
-(36 / 1 152): the heavy dense-`O` rotation + permute + upload of the whole
-2048-row prefix, paid once per layer. The **recurring per-step** cost (all 36
-layers) is only ≈157 ms (`5 036 ms / 32`) vs in-TEE ≈455 ms (`14 574 / 32`) —
-**~2.9× faster per step** (tail-in-TEE: a fixed-size resident-prefix partial
-attend + a tiny in-TEE tail, no per-step GPU write, no growing attend).
-Amortization model `bucket(K) ≈ 8 765 + 157·K` vs in-TEE `455·K`:
-
-| K | in-TEE | covered | ratio |
-|---:|--:|--:|--:|
-| 32 | 14.6 s | 13.8 s | 1.06× (≈break-even) |
-| 256 | 116 s | 49 s | 2.4× |
-| →∞ | — | — | 2.9× |
-
-**Break-even at K≈30; a win for realistic generation lengths.** The one-time
-`build_covered_prefix` is itself reducible (the structured signed-permutation `O(L·d)`
-`O` instead of the dense rotate; building the cover at prefill; bf16/un-
-replicated upload), which lowers break-even further. (Earlier un-cached runs
-read 19.6 s because `O` was re-derived via scalar Gram-Schmidt every step — an
-implementation artifact, now cached.) Wire: `forward.rs` cover branch +
-`DecodeCover` (`kv_cache.rs`) + `TrustedExecutor::resident_kv_attend_partial`.
+**Pre-O4 framing (superseded by O4(a)+O5 above — kept for the reasoning
+trail).** Before optimisation the build was a one-time per-layer cost
+(`build_covered_prefix` = 63% of the K=32 bucket, 8 765 ms / 36 layers) with the
+recurring per-step cost only ≈157 ms vs in-TEE ≈455 ms (~2.9×/step) — i.e.
+`bucket(K) ≈ 8 765 + 157·K` vs `455·K`, **break-even K≈30**. That motivated O4
+(make the build cheaper) and O5 (move it off the decode path): **O4(a) halved
+the build → break-even K≈15, then O5 relocated it to prefill → recurring-only,
+no break-even** (the comparison table at the top of this subsection). The dense
+`O(d²)` rotate that remains in the build is *not* further reduced — signed-perm
+is deferred (security) and HD₃ regressed (both in the note above). Wire:
+`forward.rs` cover branch + `DecodeCover` (`kv_cache.rs`) +
+`TrustedExecutor::resident_kv_attend_partial`.
 
 ### Prefill — feature-rotation + cubek-attention (tensor-core)
 
@@ -1205,14 +1195,17 @@ prefill — no per-step). Bench measures one layer's worth at B=8;
 
 **Offloaded prefill vs full in-TEE attention (per layer, B=8).** In-TEE is
 `causal_gqa_attention` (the bucket the offload replaces); both are measured in
-the same bench. The offload **barely wins at the production shape (n=2048) and
-wins clearly only at long context** — the n=2048 1.07× is *not* a headline win,
-it is essentially break-even (see the prep breakdown for why):
+the same bench. **⚠ This is the *unoptimised* analytical baseline** (synthetic
+per-layer, scalar f16 convert, pre-O1) — kept because its prep decomposition
+below is what *motivated* O1/O2. At this baseline the offload barely wins at
+n=2048 (essentially break-even) and only clearly at long context; the
+**optimised, production result is 2.83×** at n=2048 — see *Prefill offload —
+real-engine wire-up* below. The pre-optimisation per-layer numbers:
 
-| context (per layer) | full in-TEE | offload (rot+cubek+`O_vᵀ`) | ratio |
+| context (per layer, pre-O1) | full in-TEE | offload (rot+cubek+`O_vᵀ`) | ratio |
 |---|--:|--:|--:|
-| **n=2048** | **1 089 ms** | 1 021 ms | **1.07×** (≈break-even) |
-| **n=8192** | **21 946 ms** | 4 653 ms | **4.72×** |
+| **n=2048** | **1 089 ms** | 1 021 ms | **1.07×** (≈break-even, pre-opt) |
+| **n=8192** | **21 946 ms** | 4 653 ms | **4.72×** (pre-opt) |
 
 (Full Qwen3-4B prefill = ×36 layers; the real in-TEE prefill-attention bucket is
 `tee:attn_inplace_many` ≈ **43 774 ms**, n=2048, chronicle §3.2 — the target the
@@ -1576,18 +1569,23 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
    per-layer shared cover (`O_qk`/`O_v`, σ=0) → fold+GQA-expand+rotate →
    `cubek_causal_attend` (engine/executor delegate to
    `cubek_attention_folded{,_gqa}`) then `·O_vᵀ`. O1 (SIMD convert) + O2
-   (un-replicated K/V, on-device GQA broadcast) folded in. Verified:
-   `cover_prefill_matches_in_tee` (f32 floor) + `cubek_folded_causal_parity`
-   (fp16). **Measured 2.71×** (44.1 s → 16.2 s) on the real
-   `tee:attn_inplace_many` bucket — see *Prefill offload — real-engine
-   wire-up*. Remaining perf: batch the per-sequence loop, the `O_vᵀ`
-   correction (now the largest TEE term), upload-bandwidth probe (O3).
+   (un-replicated K/V, on-device GQA broadcast) + loop-batching (one fold/rotate
+   over B·Hq) + fused `O_vᵀ`+unfold folded in. Verified:
+   `cover_prefill_matches_in_tee` / `cover_prefill_batched_matches_in_tee`
+   (f32 floor) + `cubek_folded_causal_parity` (fp16). **Measured 2.83×**
+   (44.1 s → 15.6 s) on the real `tee:attn_inplace_many` bucket — see *Prefill
+   offload — real-engine wire-up*. cubek dispatched **per-sequence** (a
+   controlled warm A/B settled it as 1.48× faster than one big dispatch — the
+   materialised-GQA-expand artifact). Remaining perf: the **cubek kv-head
+   read-index** (kills the materialised expand → lets the single dispatch win +
+   cuts `cubek_gpu`) and the upload-bandwidth lever (O3, `write_buffer` staging).
    **Default-on remains blocked** — the rotation cover fails `WEIGHTS-PUB`;
    flipping requires covariant obfuscation (Phase 5b).
 9. **Acceptance + flip** — the 4-tier gate, then default-on behind the
    c5 AloePri condition (mirrors R3).
-10. **Fast-follows** — kv-head-broadcast in cubek's K/V loader (recover the
-    4× GQA cost); NVMe `SpillProvider`.
+10. **Fast-follows** — cubek kv-head read-index (broadcast K/V in-shader,
+    recover the GQA materialisation + flip the dispatch-granularity result);
+    decode O6 fused partial-stats kernel; NVMe `SpillProvider`.
 
 ### TwinShield reuse (what a pivot costs)
 
