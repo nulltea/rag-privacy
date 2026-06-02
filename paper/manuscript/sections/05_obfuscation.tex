@@ -66,6 +66,21 @@ leak~\citep{belikov_gelo}}
 % The attack METHODOLOGY (ArrowMatch/Sequence-IMA) and the DEFENSE (hybrid
 % design) are claimed in the companion paper, NOT here. Do not include method
 % detail beyond what is needed to state the finding.
+\label{sec:threat-ours}%
+The adversary here is a single, deliberately modest point in the security space
+(\cref{sec:threat}): an honest-but-curious cloud operator, white-box on the public model
+and the obfuscation method, denied only the ephemeral secret, observing the obfuscated
+service I/O, with side channels out of scope and a constrained, realistic budget; its
+goal is to recover the input prompt. One subtlety, from the confidentiality-scope axis,
+recurs throughout the taxonomy: two schemes can face the same adversary yet expose
+entirely different residual-leakage surfaces---a full-model obfuscation scheme exposes
+obfuscated I/O and weights, whereas a hybrid-split design (\cref{sec:hybrid}) exposes
+obfuscated \emph{activations} on an untrusted accelerator. The surface is not
+incidental---it \emph{is} the defence, and it is what an attack ultimately targets. A
+fair comparison therefore fixes the adversary, the goal, and the attack family while
+letting the surface vary by architecture; the head-to-head evaluation built on this
+principle, and the defense it motivates, are the subject of the companion paper.
+
 AloePri reports $<$15\% token recovery against the attack suite it evaluates
 (ISA/IMA/NN/VMA/IA). We find that, \emph{within AloePri's own constrained-%
 attacker regime} (\cref{sec:threat-budget}), attacks it did not run recover

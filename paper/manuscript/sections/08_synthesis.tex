@@ -37,32 +37,42 @@ gap across all confidentiality families (only anonymization touches it). Integri
 (\cref{sec:threat}). Note explicitly that secure GNN-inference / graph-analytics
 schemes were excluded as off-target for retrieval-style graph-RAG.}
 
-\subsection{Performance Comparison (from Reported Numbers)}
-% COMPARABILITY CAVEAT (mandatory): these numbers are self-reported across
-% different hardware, models, datasets, and metrics --- they are indicative, not
-% head-to-head. Normalize where possible (overhead x vs plaintext; latency;
-% comm); flag each as head-to-head vs self-reported.
-\dnote{reviewers attack cross-paper performance tables; lead with the caveat and
-mark every figure's provenance}
+\subsection{Performance Comparison (by Use Case)}
+% Grouped BY USE CASE per \cref{sec:comparison} (deployment decisions are per use case),
+% normalized to \cref{tab:yardstick}. Numbers are indicative / self-reported unless marked.
+Following \cref{sec:comparison}, we compare \emph{by use case}---the unit of a deployment
+decision---rather than by family, putting the mechanisms that actually compete for a given
+stage side by side. Figures are normalized to the canonical metrics of
+\cref{tab:yardstick} and are indicative (self-reported across hardware/models/datasets)
+unless marked head-to-head; the non-comparability caveat of \cref{sec:comparison} stands.
 \begin{table*}[t]
   \centering \footnotesize
-  \caption{Indicative performance from \emph{reported} numbers --- NOT
-    head-to-head (different hardware/models/datasets). See caveat.}
+  \caption{Performance and fidelity by use case (indicative; normalized to
+    \cref{tab:yardstick}). ``$\times$'' = overhead vs.\ plaintext; ``exact'' = computes the
+    true function. Cross-paper figures are self-reported, not head-to-head.}
   \label{tab:performance}
-  \begin{tabular}{@{}lllll@{}}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}p{6.3cm}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{3.6cm}@{}}
     \toprule
-    Mechanism family & Latency / overhead & Comm & Quality impact & Source basis \\
+    Use case & Mechanisms (representative) & Overhead (normalized) & Fidelity \\
     \midrule
-    Crypto/MPC    & 1--2 orders slower & high & none (exact) & self-reported \\
-    TEE           & single-digit \%    & low  & none         & self-reported \\
-    Obfuscation   & near-plaintext     & low  & accuracy trade & self-reported \\
-    DP            & near-plaintext     & low  & recall trade & self-reported \\
-    Hybrid split  & 20--30\% (GELO)    & med  & none (exact) & self-reported \\
+    Generation & MPC (PermLLM, BumbleBee); TEE (PipeLLM); obfusc (AloePri); hybrid (GELO, SCX, Amulet)
+               & MPC 1--2 orders; TEE $<$20\%; obfusc $\sim$0; hybrid few$\times$
+               & exact (MPC/TEE/hybrid); lossy (obfusc) \\
+    Embedding  & MPC (SecFormer, SHAFT); FHE (NEXUS, CipherFormer); obfusc (SGT, OSNIP); DP (DP-Forward, SPARSE)
+               & crypto 1--2 orders; obfusc/DP $\sim$0
+               & exact (crypto); acc.\ $\Delta$ (obfusc/DP) \\
+    Reranking  & crypto (p\textsuperscript{2}RAG, TRSE); DP+HE (RemoteRAG); TEE (Opal)
+               & \tq{} (regime-dependent)
+               & exact (crypto/TEE); recall $\Delta$ (DP) \\
+    Retrieval  & crypto (Compass, Pacmann, Panther, PIR-RAG); DP (RemoteRAG); TEE (Opal); enc (CAPRISE, SAP)
+               & sub-s--10\,s @$10^6$--$10^7$; enc $\sim$0
+               & exact (PIR/ORAM); recall $\Delta$ (DP); order-leak (DCPE) \\
     \bottomrule
   \end{tabular}
 \end{table*}
-\needswork{fill with specific cited figures; add the normalization method; this
-performance axis is the dimension Bodea \cite{bodea_sok} explicitly omits}
+\needswork{fill cells with specific cited, normalized figures (\cref{tab:yardstick}); mark
+each head-to-head vs self-reported; this performance axis is the dimension Bodea
+\cite{bodea_sok} explicitly omits}
 
 \subsection{Deployment Readiness}
 \label{ssec:deployment}
@@ -74,7 +84,10 @@ a scheme is likely to be \emph{deployed}: \cref{sec:intro}'s \emph{performance},
 model appropriate to the deployment, not maximal). \cref{tab:deployment} scores the
 families on all three. The synthesis is deliberately not a ranking of families by
 security: it shows that deployment readiness comes from \emph{balancing} the three axes,
-not maximizing one.
+not maximizing one. This family-level profile is the complement of the per-use-case
+comparison (\cref{tab:performance}): the profiles say what each family is \emph{good at},
+while the use-case view says which family is the deployable choice \emph{for a given
+stage}---together they answer ``what should I deploy for my use case?''
 \begin{table*}[t]
   \centering \scriptsize
   \caption{Deployment readiness by family, on the three criteria of \cref{sec:intro}.
@@ -114,3 +127,29 @@ and graph-analytics schemes are off-target for this setting and we cite them onl
 lineage. Bodea et al.~\citep{bodea_sok} exclude graph-RAG entirely; the near-empty
 graph rows of \cref{tab:gapmap} are the resulting open frontier.
 \needswork{expand: per-stage attack-surface change vs naive RAG; the construction-stage gap}
+
+\subsection{Finding: the Field-Wide Side-Channel Blind Spot}
+\label{ssec:sidechannel}
+
+Reading down the residual-leakage axis of the taxonomy (\cref{tab:threat-taxonomy})
+yields a uniform answer: \emph{every} scheme places microarchitectural, cache, timing,
+power, and physical channels out of scope. GELO excludes ``side channels
+originating inside the TEE \dots\ and accelerator-side leakage beyond raw memory
+reads'' \citep{belikov_gelo}; Opal devotes a paragraph to enumerating the
+in-enclave side channels it does \emph{not} defend \citep{kaviani_opal}; the
+remainder simply omit them. This is a collective blind spot worth naming,
+because it falls hardest on the schemes least able to absorb it: the TEE and
+hybrid designs anchor their entire trust in hardware whose best-documented
+weakness is exactly microarchitectural and transient-execution leakage---the
+Spectre/Foreshadow-class attacks \needswork{cite Spectre, Foreshadow, PLATYPUS,
+and the TEE side-channel surveys}. A scheme that trusts a TEE while declaring
+side channels out of scope is assuming away the dominant historical failure
+mode of that very anchor.
+
+We do not close this gap: side channels are out of scope for this SoK as
+well, and current confidential-computing hardware
+(TDX-backed CVMs, GPUs in confidential mode) materially raises the bar against
+them \citep{kaviani_opal}. But we record it as a systematisation finding and a
+standing item for future work: the field has converged on a threat model that
+structurally excludes the attack class most likely to break its dominant trust
+anchor.

@@ -39,7 +39,11 @@ scheme is to be adopted in a real deployment, on three criteria---\textbf{perfor
 \textbf{threat-model fit} (an adversary model \emph{appropriate} to the deployment, not
 maximal in a purely academic sense). The aim is not to crown a winning family but to
 make this trade explicit; which schemes sit near the deployable frontier is a
-\emph{finding} of the synthesis (\cref{sec:synthesis}), not an assumption.
+\emph{finding} of the synthesis (\cref{sec:synthesis}), not an assumption. Of the
+three criteria, threat-model fit is read off the categorical taxonomy of
+\cref{sec:threat}, while performance and fidelity are quantitative---reported with
+each family (\cref{sec:crypto}--\cref{sec:hybrid}) and drawn together in
+\cref{sec:synthesis}.
 
 Two structural choices follow. First, a \emph{hardware-trust} ladder, defined with the
 trust-anchor axis of our taxonomy (\cref{sec:threat}), feeds the performance and
@@ -65,11 +69,12 @@ proving is not), and foundational/superseded schemes.
 \subsection{Contributions}
 This paper is a \emph{systematization of knowledge}. Concretely:
 \begin{itemize}
-  \item \textbf{A six-axis threat-model taxonomy} (\cref{sec:threat}) that
+  \item \textbf{A five-axis threat-model taxonomy} (\cref{sec:threat}) that
         classifies confidential Transformer-inference and RAG schemes by
-        adversary intent, trust
-        anchor, attacker knowledge, observation surface, side-channel scope,
-        and protection goal --- and exposes a field-wide side-channel blind spot.
+        adversary behavior, trust anchor, attacker knowledge, confidentiality
+        scope, and \emph{security basis} (cryptographic / DP / hardware /
+        heuristic) --- the last separating provably-secure schemes from
+        empirically-resistant ones, and exposing a field-wide side-channel blind spot.
   \item \textbf{A mechanism-organized systematization} (\cref{sec:crypto}--%
         \cref{sec:hybrid}) of five defense families across the full
         inference-and-RAG pipeline, including graph-RAG as a retrieval setting.
