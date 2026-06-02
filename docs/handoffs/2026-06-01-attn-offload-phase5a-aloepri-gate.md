@@ -114,10 +114,10 @@ if the bag-of-tokens residual is accepted.**
   `O_vᵀ`+unfold); uniform-batched fold/rotate + per-seq cubek + ragged fallback.
 - Decode (`forward.rs`/`kv_cache.rs`): `build_covered_prefix_session` +
   `build_covered_prefix_all_global` (O5 handoff build); `DecodeCover`.
-- Tests: `cover_prefill_matches_in_tee`, `cover_prefill_batched_matches_in_tee`,
-  `hd3_cover_roundtrips_and_cancels` (`forward.rs` lib tests);
-  `cubek_dispatch_granularity`, `cubek_folded_causal_parity`
-  (`tests/cubek_prefill_cover.rs`).
+- Tests: `cover_prefill_matches_in_tee`, `cover_prefill_batched_matches_in_tee`
+  (`forward.rs` lib tests); `cubek_dispatch_granularity`,
+  `cubek_folded_causal_parity` (`tests/cubek_prefill_cover.rs`). (The HD₃
+  round-trip test was removed with the reverted HD₃ cover.)
 
 ## Reproduce
 
