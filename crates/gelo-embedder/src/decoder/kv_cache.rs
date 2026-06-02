@@ -37,10 +37,14 @@ use ndarray::{Array2, Array3, ArrayView2, s};
 pub struct DecodeCover {
     /// Frozen-prefix length; the tail `[prefix_len..len)` stays in-TEE.
     pub prefix_len: usize,
-    /// Shared feature rotation on Q/K (cancels in the score).
+    /// Shared feature rotation on Q/K (cancels in the score; always orthogonal).
     pub o_qk: Array2<f32>,
-    /// Shared feature rotation on V (undone by `·O_vᵀ` on the output).
-    pub o_v: Array2<f32>,
+    /// Value cover on V — the κ-bounded invertible `C_v` (orthogonal `O_v` at
+    /// κ=1). Non-orthogonal at κ>1 to break the `WEIGHTS-PUB` value norm/Gram
+    /// dictionary; see docs/dev/logs/perm-attn-gpu-offload.md.
+    pub c_v: Array2<f32>,
+    /// `C_v⁻¹` (= `O_vᵀ` at κ=1), applied TEE-side to uncover the output.
+    pub c_v_inv: Array2<f32>,
 }
 
 /// Backing storage for one layer's K/V.

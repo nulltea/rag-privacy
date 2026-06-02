@@ -1377,13 +1377,25 @@ context-free dictionary regardless.
 
 **Stage-2 verdict: `C_v` at κ=6 clears the conservative bar** — membership
 broken (full-vocab top-1=0, top-5=0.047) and the cover non-recoverable
-(covariance-alignment at the floor, validated). **Remaining before default-on:**
-the **fp16 greedy-parity check** at κ=6 on the *real* offload path (acceptance
-tier-3; `cond=6` ⇒ ~6e-3 round-trip cancellation — confirm below the
-greedy-argmax margin), then the production wire-up (`O_v`→`C_v` at the
-`rotate_heads`/`acc_uncover`/`correct_unfold_into` sites, per *Phase 5b*).
-Artefacts: `gate3_cv_covalign.py`, `GELO_CAPTURE_DICT_FULL` mode;
+(covariance-alignment at the floor, validated). Artefacts: `gate3_cv_covalign.py`,
+`GELO_CAPTURE_DICT_FULL` mode;
 `evals/aloepri-attacks/captures_cv_{k6_fullvocab,covalign_k6.0,covalign_k1.0}/`.
+
+### Cover wired in; fp16-faithful at κ=6 (2026-06-02)
+
+The `C_v` value cover is wired into the offload behind `GELO_COVER_KAPPA` (κ=1 =
+orthogonal `O_v`; κ>1 = the non-orthogonal `C_v = U·diag(s)·Vᵀ`, log-uniform
+singular values so `det ≈ 1`), at the prefill and decode cover sites; `O_qk`
+stays orthogonal (score-cancelling). The cover round-trip through the fused fp16
+attention kernel is **fp16-floor-faithful and carries no κ-dependent accuracy
+cost**: measured rel-error **6.4e-4 (κ=1) → 1.2e-3 (κ=6) → 1.6e-3 (κ=16)** —
+sub-linear in κ, against a cubek-vs-f32 fp16 floor of 4.4e-4. **κ=6 ships.**
+
+Note the offload is fp16-on-GPU and therefore not bit-identical to the f32
+in-TEE path (a ~1e-3 floor intrinsic to the offload, independent of the cover);
+model-level acceptance uses a tolerance, not bit-exact token parity. Engineering
+and measurement detail are in the handoff
+[`2026-06-02-attn-offload-cv-cover-gate`](../../handoffs/2026-06-02-attn-offload-cv-cover-gate.md).
 
 ## Offload perf-upside — per-op breakdowns (2026-06-01)
 
@@ -1653,6 +1665,32 @@ Layered — failing any tier reopens the TwinShield-Xue fallback:
 4. **Round-trips.** No growth in TEE↔GPU round-trips beyond the design's
    ≤ 1 per decode step, and no growth in mask-offload count (revival
    Step-5 invariants).
+5. **Accuracy ablation (final heavy gate — HumanEval pass@1).** The
+   **model-level** quality gate, run **once, after full wire-in** — not a debug
+   loop. Three cells:
+   - **A — non-offloaded** (in-TEE GELO): the baseline pass@1.
+   - **B — offloaded + defense** (the `C_v` cover, production secure path):
+     accept iff `B ≥ A − ε` (no regression vs in-TEE).
+   - **C — offloaded − defense** (cover off / κ=1), run **only if B regresses**:
+     `A`-vs-`C` attributes any regression to the *offload itself*; `C`-vs-`B`
+     attributes it to the *security cover*.
+
+   **Coherence pre-gate (always first).** Before the heavy run, a quick 1–3
+   prompt check that each cell returns relevant, coherent responses — fail fast
+   here before spending the benchmark. (`cover_greedy_parity` serves this on a
+   realistic prompt.)
+
+   **Discipline.** HumanEval is expensive → use **sparingly**, never as a
+   debugging instrument. If a regression appears, localise it with
+   **microbenches + theory** (e.g. the deterministic `cv_cover_fp16_drift_sweep`,
+   the `analysis_cv_fp16_error` isolation), *then* re-run the heavy gate once to
+   confirm — do not iterate HumanEval.
+
+   *This is the proper model-level quality criterion; it supersedes "bit-exact
+   greedy-token parity" at the model level — bit-exact parity is not an
+   achievable invariant for an fp16 offload (holds on realistic prompts, not
+   pathological ones; see the handoff diagnosis). pass@1 non-regression +
+   coherence is the right bar.*
 
 ## Sequencing — status (✅ done · ⛔ blocked · remaining)
 

@@ -560,6 +560,63 @@ fn sample_orthogonal<R: rand::Rng>(d: usize, rng: &mut R) -> Array2<f32> {
     a
 }
 
+/// Cover condition-number κ for the value cover `C_v` (`GELO_COVER_KAPPA`,
+/// default 1.0 = orthogonal `O_v`, the legacy cover). κ>1 enables the
+/// non-orthogonal `C_v` that breaks the `WEIGHTS-PUB` value norm/Gram
+/// dictionary (Stage-1/2 gate: min κ≈5, recommended κ≈6).
+fn cover_kappa() -> f32 {
+    std::env::var("GELO_COVER_KAPPA")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0)
+}
+
+/// Value-cover operands `(C_v, C_v⁻¹)`. At `kappa ≤ 1` this is the orthogonal
+/// `O_v` (inverse = transpose) — the legacy cover, with a byte-identical rng
+/// draw. At `kappa > 1` it is the κ-bounded non-orthogonal cover
+/// `C_v = U·diag(s)·Vᵀ` (`cond = kappa`, singular values pinned so the
+/// geometric mean ≈ 1 → magnitude-neutral), with exact inverse
+/// `C_v⁻¹ = V·diag(1/s)·Uᵀ`. Non-orthogonal ⇒ distorts the per-head value
+/// norm/Gram (breaks the public-weight dictionary) while staying exactly
+/// correctable. See docs/dev/logs/perm-attn-gpu-offload.md
+/// (*Adapting covariant obfuscation to the offload*).
+fn sample_value_cover<R: rand::Rng>(d: usize, kappa: f32, rng: &mut R) -> (Array2<f32>, Array2<f32>) {
+    if kappa <= 1.0 {
+        let o = sample_orthogonal(d, rng);
+        let oi = o.t().to_owned();
+        return (o, oi);
+    }
+    let u = sample_orthogonal(d, rng);
+    let vt = sample_orthogonal(d, rng); // right factor (acts as Vᵀ)
+    let hi = kappa.sqrt();
+    let lo = 1.0 / hi;
+    let (lhi, llo) = (hi.ln(), lo.ln());
+    let mut s = vec![1.0f32; d];
+    s[0] = hi;
+    if d > 1 {
+        s[d - 1] = lo;
+    }
+    // Log-uniform singular values ⇒ geometric mean exactly 1 (magnitude-neutral,
+    // det(C_v)≈1) so κ is a clean conditioning dial with no volume drift. (A
+    // *linear*-uniform draw biases the geometric mean >1 — det-drift — which is
+    // cosmetically wrong though immaterial to the fp16 error; diagnosed
+    // 2026-06-02, see the C_v fp16-drift sweep.)
+    for sj in s.iter_mut().take(d.saturating_sub(1)).skip(1) {
+        let t: f32 = rng.random();
+        *sj = (llo + t * (lhi - llo)).exp();
+    }
+    // C = (U·diag(s))·Vᵀ ;  C⁻¹ = (V·diag(1/s))·Uᵀ
+    let mut us = u.clone();
+    let mut vi = vt.t().to_owned(); // V = (Vᵀ)ᵀ
+    for j in 0..d {
+        for i in 0..d {
+            us[(i, j)] *= s[j];
+            vi[(i, j)] /= s[j];
+        }
+    }
+    (us.dot(&vt), vi.dot(&u.t()))
+}
+
 /// Per-head right-multiply `out[h] = x[h] · o` for `x (H, n, d)`,
 /// `o (d, d)` — applies a shared feature rotation to every stacked head.
 fn rotate_heads(x: ArrayView3<'_, f32>, o: ArrayView2<'_, f32>) -> Array3<f32> {
@@ -631,7 +688,7 @@ fn build_covered_prefix_session(
     const SALT: u64 = 0xC0FFEE_5EED;
     let mut crng = ChaCha20Rng::seed_from_u64(SALT ^ layer_idx as u64);
     let o_qk = sample_orthogonal(dh, &mut crng);
-    let o_v = sample_orthogonal(dh, &mut crng);
+    let (c_v, c_v_inv) = sample_value_cover(dh, cover_kappa(), &mut crng);
     let kv_views: Vec<(ArrayView2<'_, f32>, ArrayView2<'_, f32>)> = (0..batch_size)
         .map(|b| kv_cache.view_b(layer_idx, b))
         .collect::<Result<Vec<_>>>()?;
@@ -670,11 +727,11 @@ fn build_covered_prefix_session(
     // Feature rotation: K·O_qk, V·O_v (shared O across heads →
     // GQA-broadcast-consistent).
     let k_cov = rotate_heads(kp.view(), o_qk.view());
-    let v_cov = rotate_heads(vp.view(), o_v.view());
+    let v_cov = rotate_heads(vp.view(), c_v.view());
     let cap = kv_cache.capacity();
     let id = exec.resident_kv_create(k_cov.view(), v_cov.view(), cap)?;
     kv_cache.set_gpu_session(layer_idx, id);
-    kv_cache.set_gpu_cover(layer_idx, DecodeCover { prefix_len, o_qk, o_v });
+    kv_cache.set_gpu_cover(layer_idx, DecodeCover { prefix_len, o_qk, c_v, c_v_inv });
     Ok(())
 }
 
@@ -896,9 +953,9 @@ fn decoder_block_cached_batched(
             let id = kv_cache.gpu_session(layer_idx as usize).unwrap();
             // Cached cover (clone the O matrices — ~128 KB, cheap — to release
             // the kv_cache borrow across the exec/view_b calls below).
-            let (o_qk, o_v, prefix_len) = {
+            let (o_qk, c_v_inv, prefix_len) = {
                 let c = kv_cache.gpu_cover(layer_idx as usize).unwrap();
-                (c.o_qk.clone(), c.o_v.clone(), c.prefix_len)
+                (c.o_qk.clone(), c.c_v_inv.clone(), c.prefix_len)
             };
 
             // Prefix partial on GPU: q covered by O_qk (+σ), uncover acc by O_vᵀ.
@@ -920,7 +977,7 @@ fn decoder_block_cached_batched(
                 exec.resident_kv_attend_partial(id, q_cov.view(), scale)
             })?;
             let acc_a = profile::time("cover:acc_uncover_tee", || {
-                rotate_heads(acc_a_cov.view(), o_v.t())
+                rotate_heads(acc_a_cov.view(), c_v_inv.view())
             });
 
             // In-TEE active tail [prefix_len..len): plaintext partial + merge.
@@ -1775,7 +1832,7 @@ fn decoder_block_batched(
             // seed; shared O across heads → GQA-broadcast-consistent).
             let mut crng = ChaCha20Rng::seed_from_u64(PREFILL_SALT ^ layer_idx as u64);
             let o_qk = sample_orthogonal(dh, &mut crng);
-            let o_v = sample_orthogonal(dh, &mut crng);
+            let (c_v, c_v_inv) = sample_value_cover(dh, cover_kappa(), &mut crng);
             let group = nqh / nkvh;
             // Loop-batching: when every sequence is full length (the common
             // case — padded prompts share `n_max`), fold all B into ONE cubek
@@ -1793,7 +1850,7 @@ fn decoder_block_batched(
                     (
                         rotate_heads(q_f.view(), o_qk.view()),
                         rotate_heads(k_f.view(), o_qk.view()),
-                        rotate_heads(v_f.view(), o_v.view()),
+                        rotate_heads(v_f.view(), c_v.view()),
                     )
                 });
                 // cubek dispatched **per-sequence** (slice the batched covered
@@ -1822,7 +1879,7 @@ fn decoder_block_batched(
                 // Fused `O_vᵀ` correct + unfold straight into `ctx` (no
                 // intermediate (B·Hq,n,d) array, no separate unfold copy).
                 profile::time("prefill_cover:correct_tee", || {
-                    correct_unfold_into(&mut ctx, ctx_raw.view(), o_v.t(), n_max, nqh, dh);
+                    correct_unfold_into(&mut ctx, ctx_raw.view(), c_v_inv.view(), n_max, nqh, dh);
                 });
             } else {
                 for b in 0..batch_size {
@@ -1840,14 +1897,14 @@ fn decoder_block_batched(
                         (
                             rotate_heads(q_f.view(), o_qk.view()),
                             rotate_heads(k_f.view(), o_qk.view()),
-                            rotate_heads(v_f.view(), o_v.view()),
+                            rotate_heads(v_f.view(), c_v.view()),
                         )
                     });
                     let ctx_raw = profile::time("prefill_cover:cubek_gpu", || {
                         exec.cubek_causal_attend(q_cov.view(), k_cov.view(), v_cov.view(), group, scale)
                     })?;
                     let ctx_b = profile::time("prefill_cover:correct_tee", || {
-                        let ctx_cov = rotate_heads(ctx_raw.view(), o_v.t());
+                        let ctx_cov = rotate_heads(ctx_raw.view(), c_v_inv.view());
                         unfold_heads_2d(ctx_cov.view(), nqh, dh)
                     });
                     ctx.slice_mut(ndarray::s![b * n_max..b * n_max + valid_n, ..])

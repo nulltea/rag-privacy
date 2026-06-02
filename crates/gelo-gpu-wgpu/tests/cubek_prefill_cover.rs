@@ -168,6 +168,135 @@ fn fold_expand(
     (q, k, v)
 }
 
+/// κ-bounded invertible value cover `C_v = U·diag(s)·Vᵀ` (cond=κ, log-uniform
+/// `s` ⇒ geometric mean 1) and its exact inverse. Mirrors forward.rs
+/// `sample_value_cover`. κ=1 ⇒ orthogonal.
+fn sample_cv<R: Rng>(d: usize, kappa: f32, rng: &mut R) -> (Array2<f32>, Array2<f32>) {
+    if kappa <= 1.0 {
+        let o = sample_orthogonal(d, rng);
+        let oi = o.t().to_owned();
+        return (o, oi);
+    }
+    let u = sample_orthogonal(d, rng);
+    let vt = sample_orthogonal(d, rng);
+    let (hi, lo) = (kappa.sqrt(), 1.0 / kappa.sqrt());
+    let (lhi, llo) = (hi.ln(), lo.ln());
+    let mut s = vec![1.0f32; d];
+    s[0] = hi;
+    s[d - 1] = lo;
+    for sj in s.iter_mut().take(d - 1).skip(1) {
+        *sj = (llo + rng.random::<f32>() * (lhi - llo)).exp(); // log-uniform
+    }
+    let mut us = u.clone();
+    let mut vi = vt.t().to_owned();
+    for j in 0..d {
+        for i in 0..d {
+            us[(i, j)] *= s[j];
+            vi[(i, j)] /= s[j];
+        }
+    }
+    (us.dot(&vt), vi.dot(&u.t()))
+}
+
+fn rel_max(a: &Array3<f32>, ref_: &Array3<f32>) -> f32 {
+    let num = a
+        .iter()
+        .zip(ref_.iter())
+        .map(|(x, r)| (x - r).abs())
+        .fold(0.0_f32, f32::max);
+    let den = ref_.iter().map(|r| r.abs()).fold(0.0_f32, f32::max);
+    num / den.max(1e-12)
+}
+
+/// DETERMINISTIC same-process κ-sweep: does the `C_v` value cover degrade the
+/// cubek fp16 round-trip as κ grows? Compares covered→cubek→corrected against
+/// (i) uncovered cubek (isolates cover-induced fp16 error) and (ii) the CPU
+/// f32 causal reference (absolute faithfulness), at several operand scales.
+/// One process ⇒ autotune cached ⇒ clean κ comparison (no cross-process /
+/// autoregressive confound).
+#[test]
+#[ignore = "real Vulkan device; the C_v fp16-drift diagnosis loop"]
+fn cv_cover_fp16_drift_sweep() {
+    let (b, hq, hkv, n, d) = (2usize, 4usize, 1usize, 256usize, D);
+    let group = hq / hkv;
+    let bh = b * hq;
+    let scale = 1.0 / (d as f32).sqrt();
+
+    // Sweep operand scale: 0.05 (the legacy synthetic), and realistic O(1)
+    // (post-qk-norm Q/K rows are ~unit-RMS; V is unnormalised).
+    for amp in [0.05_f32, 1.0_f32] {
+        let mut rng = ChaCha20Rng::seed_from_u64(0x9A917E);
+        let mk = |rng: &mut ChaCha20Rng| {
+            Array3::from_shape_fn((bh, n, d), |_| (rng.random::<f32>() - 0.5) * 2.0 * amp)
+        };
+        let q = mk(&mut rng);
+        let k = mk(&mut rng);
+        let v = mk(&mut rng);
+
+        let uncov = cubek_attention_folded(q.view(), k.view(), v.view(), scale, true);
+        let cpu = ref_causal_folded(&q, &k, &v, scale);
+        let cubek_vs_cpu = rel_max(&uncov, &cpu);
+        println!(
+            "\n=== amp={amp}  (cubek vs CPU baseline rel_max={cubek_vs_cpu:.2e}) ==="
+        );
+        println!(
+            "{:>6} {:>16} {:>16} {:>10}",
+            "kappa", "cover_vs_uncov", "cover_vs_cpu", "cond"
+        );
+
+        for kappa in [1.0_f32, 2.0, 3.0, 4.0, 6.0, 8.0, 16.0] {
+            let mut orng = ChaCha20Rng::seed_from_u64(0xC0FFEE);
+            let o_qk: Vec<Array2<f32>> =
+                (0..hkv).map(|_| sample_orthogonal(d, &mut orng)).collect();
+            let cv: Vec<(Array2<f32>, Array2<f32>)> =
+                (0..hkv).map(|_| sample_cv(d, kappa, &mut orng)).collect();
+
+            let mut q_rot = Array3::<f32>::zeros((bh, n, d));
+            let mut k_rot = Array3::<f32>::zeros((bh, n, d));
+            let mut v_rot = Array3::<f32>::zeros((bh, n, d));
+            for fh in 0..bh {
+                let kvh = (fh % hq) / group;
+                q_rot
+                    .index_axis_mut(Axis(0), fh)
+                    .assign(&q.index_axis(Axis(0), fh).dot(&o_qk[kvh]));
+                k_rot
+                    .index_axis_mut(Axis(0), fh)
+                    .assign(&k.index_axis(Axis(0), fh).dot(&o_qk[kvh]));
+                v_rot
+                    .index_axis_mut(Axis(0), fh)
+                    .assign(&v.index_axis(Axis(0), fh).dot(&cv[kvh].0));
+            }
+            let ctx_raw =
+                cubek_attention_folded(q_rot.view(), k_rot.view(), v_rot.view(), scale, true);
+            let mut ctx = Array3::<f32>::zeros((bh, n, d));
+            for fh in 0..bh {
+                let kvh = (fh % hq) / group;
+                ctx.index_axis_mut(Axis(0), fh)
+                    .assign(&ctx_raw.index_axis(Axis(0), fh).dot(&cv[kvh].1));
+            }
+            let cover_drift = rel_max(&ctx, &uncov);
+            println!(
+                "{:>6} {:>16.2e} {:>16.2e} {:>10.1}",
+                kappa,
+                cover_drift,
+                rel_max(&ctx, &cpu),
+                kappa
+            );
+            // Regression lock: the C_v cover round-trip through fp16 must stay
+            // near the fp16 floor and grow sub-linearly in κ (NOT ∝cond). This
+            // is the exoneration of C_v as a source of accuracy drift
+            // (diagnosed 2026-06-02). κ≤8 is the production-relevant band.
+            if kappa <= 8.0 {
+                assert!(
+                    cover_drift < 5e-3,
+                    "C_v cover fp16 drift regressed at κ={kappa}, amp={amp}: \
+                     rel_max={cover_drift:.2e} (expected < 5e-3 ≈ fp16 floor)"
+                );
+            }
+        }
+    }
+}
+
 // ─── Deliverable 2: parity ──────────────────────────────────────────────
 
 #[test]

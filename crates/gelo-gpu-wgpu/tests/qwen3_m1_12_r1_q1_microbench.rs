@@ -695,6 +695,50 @@ fn gelo_llm_prefill_decode_breakdown() -> Result<()> {
     Ok(())
 }
 
+/// INFORMATIONAL coherence smoke-check for the offloaded-attention cover —
+/// **NOT a parity gate** (diagnosed 2026-06-02; see dev-log *C_v fp16-drift
+/// diagnosis*). Free-running greedy token streams are NOT a valid parity
+/// instrument here: the offload is fp16-on-GPU (never bit-exact to f32 in-TEE),
+/// cubek autotune makes it non-deterministic *across processes*, and greedy
+/// autoregression amplifies any ~1e-3 fp16 deviation into divergent / degenerate
+/// output on cliff-adjacent prompts — independent of κ. So token-equality across
+/// runs/configs cannot attribute a difference to the cover.
+///
+/// The real C_v faithfulness gate is the DETERMINISTIC, same-process
+/// `cubek_prefill_cover::cv_cover_fp16_drift_sweep` (cover round-trip rel-error
+/// vs κ, asserted < 5e-3). This test only prints tokens for an eyeball coherence
+/// check on a *realistic* prompt; treat divergence as expected, not a failure.
+#[test]
+#[ignore = "C_v greedy-parity gate: loads Qwen3-4B, Vulkan; run 3× with env (in-TEE / κ=1 / κ=6)"]
+fn cover_greedy_parity() -> Result<()> {
+    let variant = variant_from_env();
+    let (cfg, tokenizer, mut weights, rope) = load_pretrained(variant)?;
+    let engine = WgpuVulkanEngine::new_fp16().context("Vulkan adapter (fp16)")?;
+    let mut exec =
+        InProcessTrustedExecutor::with_seed(engine, MaskSeed::from_bytes([42u8; 32]));
+    provision_into(&mut weights, &cfg, &mut exec)?;
+    provision_lm_head_into(&weights, &mut exec)?;
+
+    let n_prompt = prompt_size_from_env();
+    let max_tokens = max_tokens_from_env();
+    let batch_size = batch_size_from_env().max(2);
+    let prompt = build_prompt_ids(&tokenizer, n_prompt)?;
+    let prompts: Vec<Vec<u32>> = (0..batch_size).map(|_| prompt.clone()).collect();
+
+    let (_prefill, decode) = run_prefill_decode_batched(
+        "parity", &cfg, &weights, &rope, &mut exec, &prompts, max_tokens, true,
+    )?;
+
+    eprintln!(
+        "PARITY_TOKENS kappa={} prefill_offload={} resident_cover={} B={batch_size} n={n_prompt} K={max_tokens} :: {:?}",
+        std::env::var("GELO_COVER_KAPPA").unwrap_or_else(|_| "1".into()),
+        std::env::var("GELO_GPU_PREFILL_OFFLOAD").unwrap_or_else(|_| "0".into()),
+        std::env::var("GELO_GPU_RESIDENT_COVER").unwrap_or_else(|_| "0".into()),
+        decode.tokens,
+    );
+    Ok(())
+}
+
 // ─── M1.12+ sweep: (B, n, mask_kind) cells ─────────────────────────
 
 /// Mask family selector for the sweep harness.

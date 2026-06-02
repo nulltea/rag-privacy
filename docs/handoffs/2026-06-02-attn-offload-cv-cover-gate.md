@@ -149,6 +149,104 @@ per-session-fresh ⇒ accumulation-safe.
   confirming no cross-session recovery — accumulation is defeated by construction
   (finding 2), this would measure it.
 
+## Gate status + tier-3 diagnosis (2026-06-02) — `C_v` ships at κ=6
+
+**Stage 1 (norm dictionary) — PASS.** `cv` capture mode in `attn_cover_capture.rs`
+(κ-bounded SVD value cover). Real Qwen3-4B layer 0, `gate3_prefill_dict.py` norm
+attack: κ=1 (orthogonal control) top-1=1.000 (reproduces the `O_v` leak), falling
+monotonically to top-1≤0.02 at **κ≈5**, =0.000 at κ=6.
+
+**Stage 2 (conservative bar) — PASS.** Full-vocab (151 936): κ=6 top-1=0.000,
+top-5=0.047 (the 8k-pool top-5 plateau was a collision artifact). Covariance/
+Procrustes recoverability (`gate3_cv_covalign.py`, layers 0/35): covalign(pub)
+0.332 ≈ no-attack 0.370, self\*=0.359 — `C_v` holds *more* strongly than `O_v`
+(non-orthogonal ⇒ not recoverable from 2nd moments; κ=1 control self\*=1.000
+validates the attack).
+
+**Wire-up.** `O_v`→`C_v` at the cover sites (prefill `rotate_heads` +
+`correct_unfold_into`; decode `build_covered_prefix_session` + `acc_uncover_tee`)
+behind `GELO_COVER_KAPPA` (default 1.0 = orthogonal `O_v`, byte-identical rng
+draw). `O_qk` stays orthogonal. `sample_value_cover` uses **log-uniform** `s`
+(det≈1; the first linear-uniform draw had a benign det-drift — cosmetic).
+
+**Tier-3 (fp16 parity) — diagnosed; `C_v` exonerated.** Free-running greedy
+generation through the offload collapsed into degenerate loops (`99491…`),
+**non-monotonically in κ** (κ=3 collapsed, κ=5/6 coherent) and **non-deterministic
+across processes** — initially mistaken for "κ=6 fails." A `/diagnose` pass with a
+**deterministic, same-process** loop (`cv_cover_fp16_drift_sweep` in
+`cubek_prefill_cover.rs` — real cubek fp16, autotune cached) measured the cover
+round-trip rel-error:
+
+| κ | cover-vs-uncov | cover-vs-CPU |
+|--:|--:|--:|
+| 1 | 6.4e-4 | 5.2e-4 |
+| 6 | 1.2e-3 | 1.2e-3 |
+| 16 | 1.6e-3 | 1.5e-3 |
+
+(fp16 floor: cubek-vs-CPU 4.4e-4.) **Sub-linear in κ, fp16-floor-level — `C_v`
+adds no κ-dependent accuracy cost.** A CPU/numpy isolation
+(`analysis_cv_fp16_error.py`) agreed (2e-4→4e-4 over κ=1→8).
+
+**Root cause of the collapse — not a code bug, not the cover (CONFIRMED 2026-06-02):**
+1. The offload is **fp16-on-GPU, never bit-exact to f32 in-TEE** (~1e-3 deviation
+   present at **κ=1** / the pre-existing orthogonal cover).
+2. The stress prompt (n=64, repetitive) has near-tied next-token logits.
+3. Free-running greedy amplifies the ~1e-3 deviation autoregressively → degenerate
+   attractor on the cliff prompt; which side it lands on is set by cubek
+   **autotune** (per-process kernel choice), not κ → non-monotonic, non-deterministic.
+
+**Confirming runs (`cover_greedy_parity`, B=2, σ=0):**
+- **Realistic prompt (n=24): in-TEE == κ=1 == κ=6, byte-for-byte identical.** The
+  offload at κ=6 reproduces the in-TEE greedy tokens exactly → no accuracy issue
+  on normal input; κ is not the problem.
+- **Stress prompt (n=64): in-TEE is DETERMINISTIC across processes** (run A == run
+  B). ⇒ the nondeterminism is **specific to the cubek offload** (fp16 + autotune),
+  *not* a general GPU property (corrects an earlier wrong prediction that in-TEE
+  would also vary). It only *manifests* as token divergence on margin-adjacent
+  prompts; realistic prompts are bit-identical.
+
+**Architectural finding.** Bit-identical greedy parity on **all** prompts is not
+an achievable invariant for an fp16-GPU attention offload — it holds where the
+logit margin exceeds the ~1e-3 floor (realistic prompts: confirmed identical;
+pathological cliff prompts: can flip). The false alarm was the **acceptance
+instrument** (bit-exact free-running token match on a cliff prompt across
+non-deterministic offload processes), not the cover. Pre-existing, independent of
+`C_v`. Optional hardening for the pathological-input edge (separable from
+security): **pin cubek autotune** (determinism) + **f32 accumulation in the value
+contraction** (tighten the ~1e-3).
+
+**Fixes applied:** (1) faithfulness gate = the deterministic
+`cv_cover_fp16_drift_sweep` (asserts cover rel-error < 5e-3 for κ≤8); (2)
+log-uniform `s`; (3) `cover_greedy_parity` demoted to an informational coherence
+smoke-check (doc updated), never a gate.
+
+**Open / separate (NOT from this work):** the offload's *intrinsic* ~1e-3 fp16
+divergence + cubek autotune nondeterminism can flip greedy tokens **only on
+margin-adjacent (pathological/repetitive) prompts** — realistic prompts are
+bit-identical (confirmed above). To eliminate the edge case, the levers are
+**pin cubek autotune** (determinism) and **f32 accumulation in the value
+contraction** (tighten the ~1e-3) — a distinct, non-security task. **Residual
+check:** realistic parity was confirmed at n=24; re-confirm at production length
+(n=2048) when convenient (expected fine — real-text logit margins are wide).
+
+## Final accuracy gate (HumanEval) — defined; to run after full default-on wiring
+
+The acceptance methodology (dev-log *Acceptance gate (v1)*, tier 5): a HumanEval
+pass@1 **ablation** — A=in-TEE (baseline), B=offloaded+`C_v` (accept iff
+`B ≥ A−ε`), C=offloaded−cover (only if B regresses, to attribute offload vs
+cover). Always **coherence-pre-gated** (1–3 prompts; `cover_greedy_parity`
+covers this on a realistic prompt) and used **sparingly** — debug any regression
+with microbenches + theory (`cv_cover_fp16_drift_sweep`, `analysis_cv_fp16_error`),
+not by re-running HumanEval.
+
+**Harness requirement (not yet built).** `python/aloepri-llm/evals/tasks/humaneval.py`
+(50-problem subset, pass@1, subprocess-scored) drives an inference **endpoint**
+via `evals/runner.complete(Endpoint, …)` — it does **not** drive the Rust GELO
+offload. To run the gate on the Rust path, either (a) expose Rust GELO
+`generate_batched` (with the offload flags) as an OpenAI-style endpoint the
+existing runner can hit, or (b) add a thin Rust HumanEval runner. Gate runs
+**after** the offload is wired default-on, not before.
+
 ## Deferred — scale
 
 - **NVMe `SpillProvider`** for beyond-VRAM context (n_kv ≳ 16–32k). Designed-in
