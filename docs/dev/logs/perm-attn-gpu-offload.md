@@ -30,15 +30,18 @@ supersedes the "Item 1 persistent K/V" sketch in
 per-op performance numbers live in the companion perf chronicle
 [`gelo-llm-perf-chronicle_dgpu.md`](gelo-llm-perf-chronicle_dgpu.md).
 
-**Current status (2026-06-01).** Decode offload is wired + benched
-(perf); the Phase-5 `WEIGHTS-PUB` security spike then showed both offload
-covers leak token identity (prefill rotation: token + position; decode
-permutation: membership, order held) — so prefill is ⛔ blocked behind
-Phase 5b (covariant obfuscation; **re-scoped 2026-06-02** from static AloePri
-*weight* obfuscation to a per-session non-orthogonal *activation-space* value
-cover `C_v` — see *Adapting covariant obfuscation to the offload*), and decode
-ships only if the bag-of-tokens residual is accepted. See *Sequencing* for the
-live state.
+**Current status (2026-06-02).** Both offload paths are wired + benched (perf:
+~2.9× prefill / ~3.6–4× decode vs in-TEE). The `WEIGHTS-PUB` membership leak is
+closed by the **`C_v` value cover** (per-session non-orthogonal activation-space
+cover; re-scoped 2026-06-02 from static AloePri *weight* obfuscation — see
+*Adapting covariant obfuscation to the offload*), which **passes the Stage-1/2
+security gates and is perf-free**. **Default-on is still ⛔ blocked — now on TWO
+independent issues:** (1) security — `C_v` clears it, but decode also concedes a
+bag-of-tokens residual that must be accepted; and (2) **correctness — the cubek
+fp16-storage kernel NaNs on real Qwen3-4B activations** (HumanEval gate 0/20),
+needing a **BF16 cubek kernel** (handoff `2026-06-02-bf16-attention-kernel-fix`).
+Issue (2) is independent of the cover (`C_v` exonerated). See *Sequencing* and
+*Cover wired in* for the live state.
 
 ## Why this exists (the binding measurement)
 
@@ -1381,20 +1384,29 @@ broken (full-vocab top-1=0, top-5=0.047) and the cover non-recoverable
 `GELO_CAPTURE_DICT_FULL` mode;
 `evals/aloepri-attacks/captures_cv_{k6_fullvocab,covalign_k6.0,covalign_k1.0}/`.
 
-### Cover wired in; fp16-faithful at κ=6 (2026-06-02)
+### Cover wired in; cover faithful, but the offload kernel has an fp16 bug (2026-06-02)
 
 The `C_v` value cover is wired into the offload behind `GELO_COVER_KAPPA` (κ=1 =
 orthogonal `O_v`; κ>1 = the non-orthogonal `C_v = U·diag(s)·Vᵀ`, log-uniform
 singular values so `det ≈ 1`), at the prefill and decode cover sites; `O_qk`
-stays orthogonal (score-cancelling). The cover round-trip through the fused fp16
-attention kernel is **fp16-floor-faithful and carries no κ-dependent accuracy
-cost**: measured rel-error **6.4e-4 (κ=1) → 1.2e-3 (κ=6) → 1.6e-3 (κ=16)** —
-sub-linear in κ, against a cubek-vs-f32 fp16 floor of 4.4e-4. **κ=6 ships.**
+stays orthogonal (score-cancelling). **The cover itself is faithful and
+perf-free**: the cover round-trip through the fused kernel measures rel-error
+**6.4e-4 (κ=1) → 1.2e-3 (κ=6) → 1.6e-3 (κ=16)** — sub-linear in κ, at the
+cubek-vs-f32 fp16 floor (4.4e-4) — on benign/random operands.
 
-Note the offload is fp16-on-GPU and therefore not bit-identical to the f32
-in-TEE path (a ~1e-3 floor intrinsic to the offload, independent of the cover);
-model-level acceptance uses a tolerance, not bit-exact token parity. Engineering
-and measurement detail are in the handoff
+**⚠ Default-on is NOT cleared — a separate offload-kernel bug blocks it
+(diagnosed 2026-06-02).** The HumanEval accuracy gate run at κ=6 returned
+**0/20**: the offloaded prefill attention emits NaN/Inf on *real* Qwen3-4B
+activations because cubek stores intermediate tiles in **fp16**, whose range
+(max 65 504) overflows on the model's large activations (qk-norm×γ Q/K,
+un-normalized V). It is **independent of the cover** (fails identically at κ=1)
+and **independent of batch** (the kernel is per-sequence) — `C_v` is exonerated;
+in-TEE (f32) is unaffected. The fix is a **BF16 cubek storage path**
+(cubek's accumulator is already f32; only storage range fails). **Until that
+lands, both offload paths stay default-off on correctness, not only on the
+`WEIGHTS-PUB` security gate.** Root-cause + fix plan in the handoff
+[`2026-06-02-bf16-attention-kernel-fix`](../../handoffs/2026-06-02-bf16-attention-kernel-fix.md);
+`C_v`/gate background in
 [`2026-06-02-attn-offload-cv-cover-gate`](../../handoffs/2026-06-02-attn-offload-cv-cover-gate.md).
 
 ## Offload perf-upside — per-op breakdowns (2026-06-01)
@@ -1688,7 +1700,9 @@ per-session `C_v⁻¹` inverse; the GPU attend buckets (`cubek_gpu`,
 2 411→2 408), confirming the resident-attend bucket is low-variance and the small
 deltas are noise, not the cover. **Verdict: GPU-offloaded attention gives ~2.9×
 (prefill) / ~3.6–4× (decode) over in-TEE, and securing it with `C_v` adds no
-measurable cost.**
+measurable cost.** *(This is the perf ceiling of the path; it is not yet
+shippable — the prefill offload has an fp16-storage NaN bug on real activations,
+blocking default-on until the BF16 kernel lands; see* Cover wired in *above.)*
 
 ## Acceptance gate (v1)
 
@@ -1729,9 +1743,15 @@ Layered — failing any tier reopens the TwinShield-Xue fallback:
 
    *This is the proper model-level quality criterion; it supersedes "bit-exact
    greedy-token parity" at the model level — bit-exact parity is not an
-   achievable invariant for an fp16 offload (holds on realistic prompts, not
-   pathological ones; see the handoff diagnosis). pass@1 non-regression +
-   coherence is the right bar.*
+   achievable invariant for an fp16 offload. pass@1 non-regression + coherence
+   is the right bar.*
+
+   **First run (2026-06-02) — FAILED, exposed the offload fp16 bug.** Cell B
+   (offload+`C_v`, κ=6) scored **0/20**: degenerate output from the
+   fp16-storage NaN (see *Cover wired in*). Cell C (κ=1) fails identically →
+   attributed to the **offload kernel**, not the cover. The gate did its job —
+   it caught a correctness bug every lighter check passed. Re-run after the BF16
+   kernel fix lands.
 
 ## Sequencing — status (✅ done · ⛔ blocked · remaining)
 
@@ -1947,8 +1967,9 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
    bite. If no κ both breaks the dictionary and holds parity, escalate to
    `Ĥ_qk`; if that also fails, **prefill stays in-TEE**.
 8. **Phase 6 — prefill-attention offload.** **🟡 PERF WIRE LANDED, default-on
-   still ⛔ gated on Phase 5b.** The perf wire is in the production forward
-   path (`decoder_block_batched`, `GELO_GPU_PREFILL_OFFLOAD`, default-off):
+   ⛔ gated on (a) `C_v` security [done] and (b) the BF16-kernel correctness fix
+   [pending — cubek fp16 NaN, HumanEval 0/20].** The perf wire is in the production
+   forward path (`decoder_block_batched`, `GELO_GPU_PREFILL_OFFLOAD`, default-off):
    per-layer shared cover (`O_qk`/`O_v`, σ=0) → fold+GQA-expand+rotate →
    `cubek_causal_attend` (engine/executor delegate to
    `cubek_attention_folded{,_gqa}`) then `·O_vᵀ`. O1 (SIMD convert) + O2
@@ -1962,8 +1983,11 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
    materialised-GQA-expand artifact). Remaining perf: the **cubek kv-head
    read-index** (kills the materialised expand → lets the single dispatch win +
    cuts `cubek_gpu`) and the upload-bandwidth lever (O3, `write_buffer` staging).
-   **Default-on remains blocked** — the rotation cover fails `WEIGHTS-PUB`;
-   flipping requires covariant obfuscation (Phase 5b).
+   **Default-on remains blocked on TWO independent issues:** (1) security —
+   the cover's `WEIGHTS-PUB` membership leak, closed by the `C_v` value cover
+   (Stage-1/2 PASS); and (2) **correctness — the cubek fp16-storage NaN bug**
+   on real activations (HumanEval gate 0/20, 2026-06-02), which needs the BF16
+   cubek kernel and is independent of the cover. Both must clear before flip.
 9. **Acceptance + flip** — the 4-tier gate, then default-on behind the
    c5 AloePri condition (mirrors R3).
 10. **Fast-follows** — cubek kv-head read-index (broadcast K/V in-shader,

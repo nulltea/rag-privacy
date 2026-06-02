@@ -1913,6 +1913,16 @@ fn decoder_block_batched(
             }
             Ok(())
         })?;
+        if std::env::var("GELO_DEBUG_OFFLOAD").is_ok() {
+            let nfin = |a: &Array2<f32>| a.iter().filter(|x| !x.is_finite()).count();
+            let m = ctx.iter().fold(0f32, |a, &x| a.max(x.abs()));
+            let nf = ctx.iter().filter(|x| !x.is_finite()).count();
+            eprintln!(
+                "[DEBUG-off] L{layer_idx} b={batch_size} n_max={n_max} \
+                 q_nf={} k_nf={} v_nf={} | ctx_max={m:.2e} ctx_nonfinite={nf}",
+                nfin(&q), nfin(&k), nfin(&v)
+            );
+        }
     } else {
         profile::time("tee:attn_inplace_many", || {
             for b in 0..batch_size {

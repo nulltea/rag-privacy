@@ -297,6 +297,35 @@ fn cv_cover_fp16_drift_sweep() {
     }
 }
 
+/// DIAGNOSIS LOOP (2026-06-02): does `cubek_attention_folded_gqa` (the on-device
+/// GQA-broadcast variant the prefill offload calls per-sequence) produce NaN at
+/// certain sequence lengths? The offload degenerated to `!!!!` on a b=1/n=23
+/// prompt (NaN in L0 ctx); the kernel never sees batch size, so it must be
+/// n-dependent. Sweep n at the Qwen3-4B per-seq shape (Hq=32, Hkv=8, d=128,
+/// group=4), random unit-scale operands, causal — report NaN count.
+#[test]
+#[ignore = "real Vulkan device; cubek GQA NaN-vs-n diagnosis"]
+fn cubek_gqa_nan_sweep() {
+    let (hq, hkv, d) = (32usize, 8usize, D);
+    let group = hq / hkv;
+    let scale = 1.0 / (d as f32).sqrt();
+    let n = 24usize;
+    println!("n={n}  {:>6} {:>10} {:>12}", "amp", "nan/inf", "max_abs");
+    for amp in [0.5f32, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0] {
+        let mut rng = ChaCha20Rng::seed_from_u64(0x5EED);
+        let mk = |rng: &mut ChaCha20Rng, h: usize| {
+            Array3::from_shape_fn((h, n, d), |_| (rng.random::<f32>() - 0.5) * 2.0 * amp)
+        };
+        let q = mk(&mut rng, hq);
+        let k = mk(&mut rng, hkv);
+        let v = mk(&mut rng, hkv);
+        let out = cubek_attention_folded_gqa(q.view(), k.view(), v.view(), group, scale, true);
+        let nf = out.iter().filter(|x| !x.is_finite()).count();
+        let mx = out.iter().filter(|x| x.is_finite()).fold(0f32, |a, &x| a.max(x.abs()));
+        println!("    {amp:>6.1} {nf:>10} {mx:>12.3e}{}", if nf > 0 { "   <-- NaN/Inf" } else { "" });
+    }
+}
+
 // ─── Deliverable 2: parity ──────────────────────────────────────────────
 
 #[test]
