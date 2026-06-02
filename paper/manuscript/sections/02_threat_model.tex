@@ -44,6 +44,21 @@ trusted device); and \emph{multi-party non-collusion} (the assumption
 underlying MPC schemes such as PermLLM \citep{permllm}). A larger TCB buys
 performance or simplicity at the price of a stronger trust assumption.
 
+These anchors collapse onto a three-level \emph{hardware-trust} ladder that we use to
+organize the systematization and its scope (\cref{sec:intro}):
+\begin{description}
+  \item[Tier 1.] \emph{No trusted hardware}---confidentiality rests on cryptography or
+        statistics alone (MPC/FHE, static obfuscation, DP); trust anchor \emph{none}.
+  \item[Tier 2.] \emph{CPU-TEE only}---a commodity CPU enclave (Intel SGX/TDX, AMD
+        SEV-SNP) is trusted; any GPU used for acceleration is \emph{untrusted}.
+  \item[Tier 3.] \emph{Confidential accelerator}---a confidential GPU (NVIDIA H100/B200
+        CC) or other accelerator-TEE is trusted end-to-end.
+\end{description}
+The Tier-2$\to$Tier-3 jump is the sharpest trust escalation on this axis---trusting the
+accelerator silicon end-to-end---so a scheme's tier is the single most consequential
+entry in its row. The hybrid split's defining move (\cref{sec:hybrid}) is to deliver
+Tier-3-class GPU performance while remaining at Tier~2.
+
 \paragraph{3. Attacker knowledge.}
 \emph{Black-box} (queries only), \emph{white-box on weights} (knows the public
 model---the realistic case for open-weight Transformer models), or \emph{white-box plus the
@@ -157,6 +172,15 @@ batches \citep{belikov_gelo}. A worst-case adversary with unbounded compute and
 unlimited adaptive observation defeats almost every obfuscation scheme here; an
 evaluation that assumed one would therefore measure nothing interesting and
 would strawman schemes that never claimed that bar.
+
+This is why \emph{threat-model fit}---not threat-model maximality---is one of the three
+deployment-readiness criteria of \cref{sec:intro}. A scheme that defends an adversary
+stronger than a deployment faces (an unbounded, fully-adaptive attacker, or
+microarchitectural side-channels most operators accept or mitigate out-of-band) pays for
+that protection in performance and may price itself out of use; a scheme that defends
+too weak an adversary fails to protect. The deployable point is the one whose adversary
+is \emph{calibrated} to the deployment---an argument that right-sizes security rather
+than relaxing it, and that we apply when scoring families in \cref{sec:synthesis}.
 
 We treat the budget as an explicit, per-scheme parameter rather than a hidden
 constant. Crucially, the ``what breaks'' vignette of \cref{ssec:vignette} is

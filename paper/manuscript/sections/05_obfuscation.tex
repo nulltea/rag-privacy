@@ -10,7 +10,10 @@ which is precisely why its privacy claims deserve the most scrutiny: the obfusca
 is \emph{fixed}, so a white-box adversary can study it offline. We make that scrutiny
 concrete in \cref{ssec:vignette}, and the published inversions in
 \cref{sec:synthesis} show several static schemes recover far more plaintext than
-their authors report.
+their authors report. On the deployment-readiness criteria of \cref{sec:intro},
+obfuscation leads on performance and fidelity, but \emph{threat-model fit} is its weak
+axis: because the transform is fixed, a white-box adversary can study it offline, so its
+real protection is often weaker than reported (\cref{sec:synthesis}).
 
 \subsection{Approach}
 % Transform data and/or weights so observers see unintelligible values, with no

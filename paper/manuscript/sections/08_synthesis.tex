@@ -64,6 +64,39 @@ mark every figure's provenance}
 \needswork{fill with specific cited figures; add the normalization method; this
 performance axis is the dimension Bodea \cite{bodea_sok} explicitly omits}
 
+\subsection{Deployment Readiness}
+\label{ssec:deployment}
+% The organizing payoff: score each family on the 3 deployment-readiness criteria
+% (perf, fidelity, threat-fit). Qualitative now; per-scheme specifics \needswork.
+The performance numbers above are one of three criteria that together determine whether
+a scheme is likely to be \emph{deployed}: \cref{sec:intro}'s \emph{performance},
+\emph{fidelity} (impact on output quality), and \emph{threat-model fit} (an adversary
+model appropriate to the deployment, not maximal). \cref{tab:deployment} scores the
+families on all three. The synthesis is deliberately not a ranking of families by
+security: it shows that deployment readiness comes from \emph{balancing} the three axes,
+not maximizing one.
+\begin{table*}[t]
+  \centering \scriptsize
+  \caption{Deployment readiness by family, on the three criteria of \cref{sec:intro}.
+    Ratings are qualitative (H/M/L) and indicative, not head-to-head; see
+    \cref{tab:performance} for the underlying performance basis.}
+  \label{tab:deployment}
+  \begin{tabular}{@{}lllll@{}}
+    \toprule
+    Mechanism family & Performance & Fidelity & Threat-model fit & Deploy.\ readiness \\
+    \midrule
+    Cryptographic (MPC/FHE) & L infer./M retr. & H (exact) & H (often exceeds need) & L--M \\
+    TEE (Tier 3)            & H (near-plain.)  & H (exact) & M (HW-trust; side-ch.) & M (HW-gated) \\
+    Static obfuscation      & H (near-plain.)  & H (small loss) & L (fixed; several broken) & M \\
+    Differential privacy    & H                & M (recall at small $\varepsilon$) & M (formal, prob.) & M \\
+    Hybrid split            & M--H (few$\times$) & H (exact) & M--H (Tier-2; per-batch) & H \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+\needswork{justify each cell from the cited numbers; the headline reading: hybrid split
+and (on cost alone) obfuscation lead, but obfuscation's threat-fit is its liability;
+exact-but-slow cryptography and hardware-gated Tier-3 TEE trail on the binding axis}
+
 \subsection{Graph-RAG as a Retrieval Setting}
 % Woven treatment (decision: short dedicated subsection, not a parallel track).
 % Graph-RAG (LightRAG, Microsoft GraphRAG) indexes a corpus as a knowledge graph;

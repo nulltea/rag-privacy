@@ -9,7 +9,9 @@ Like obfuscation its cost is near-zero compute; unlike obfuscation it buys a pro
 bound, paid for in utility as $\varepsilon$ tightens. The output-side variant
 (DP-RAG/DP-KSA) is notable for composing orthogonally with any retrieval mechanism,
 making it a generic defense against the corpus-extraction attacks of
-\cref{sec:synthesis}.
+\cref{sec:synthesis}. On the deployment-readiness criteria of \cref{sec:intro}, DP scores
+well on performance and offers a formal threat model, trading \emph{fidelity}
+(recall/accuracy) as $\varepsilon$ tightens (\cref{sec:synthesis}).
 
 \subsection{Approach}
 % Calibrated noise with formal (epsilon, delta) / metric-DP / RDP guarantees,

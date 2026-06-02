@@ -16,6 +16,10 @@ in latency or communication, concentrated in the non-linear operations (Softmax,
 GELU, LayerNorm). We separate \emph{private inference} (\cref{ssec:crypto-mpc-inf},
 \cref{ssec:crypto-fhe-inf}) from \emph{private retrieval and storage}
 (\cref{ssec:crypto-retrieval})---the RAG-side use that is closest to deployable today.
+On the deployment-readiness criteria of \cref{sec:intro}, cryptography scores highest on
+threat-model fit and fidelity (exact computation under a TCB of none or non-collusion)
+but lowest on performance for inference; its retrieval variants fare materially better
+(\cref{sec:synthesis}).
 
 \subsection{Approach}
 \needswork{describe MPC/SS (linear under SS, non-linears via OT/GC or polynomial

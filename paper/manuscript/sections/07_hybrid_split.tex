@@ -1,9 +1,9 @@
 \section{Hybrid Split: TEE + Obfuscation}
 \label{sec:hybrid}
 
-% SCOPE ROLE (corrections #1 + #2): this is the PROTAGONIST family. It needs only a
+% SCOPE ROLE: highest deployment-readiness family (a §8 finding, NOT assumed). Needs only a
 % CPU-TEE (SGX/TDX, ubiquitous) + COMMODITY untrusted GPUs --- no confidential GPU ---
-% making it the widely-deployable sweet spot between pure-TEE (\cref{sec:tee}, fast but
+% making it deployable on commodity GPUs, between pure-TEE (\cref{sec:tee}, fast but
 % needs CC-GPU) and crypto (\cref{sec:crypto}, no special HW but 100-1000x). Cover only
 % the modern practical schemes (GELO, TwinShield, ObfuscaTune, SecureInfer, SCX, Amulet);
 % the CNN-era roots (Slalom, DarKnight, ShadowNet, SOTER) are lineage-only prose, and
@@ -11,11 +11,13 @@
 \dnote{this is the deep family; lead with the commodity-GPU deployability argument}
 
 % --- scope-framing (short role-framing; bodies stay \needswork) ---
-The hybrid split is the protagonist of this systematization. It keeps a small trusted
-core in a CPU-TEE (SGX/TDX, ubiquitous) and offloads the heavy linear algebra to an
-\emph{untrusted commodity GPU} over obfuscated activations---no confidential GPU
-required. That makes it the widely-deployable sweet spot between pure-TEE
-(\cref{sec:tee}: near-plaintext, but needs a confidential GPU at scale) and
+Among the surveyed families, the hybrid split offers the most balanced
+deployment-readiness profile (\cref{sec:intro})---a ranking we substantiate in
+\cref{sec:synthesis}, not assume here. It keeps a small trusted core in a CPU-TEE
+(SGX/TDX, ubiquitous) and offloads the heavy linear algebra to an \emph{untrusted
+commodity GPU} over obfuscated activations---no confidential GPU required---combining
+near-baseline performance with exact fidelity at Tier-2 trust. It thus sits between
+pure-TEE (\cref{sec:tee}: near-plaintext, but needs a confidential GPU at scale) and
 cryptography (\cref{sec:crypto}: no special hardware, but $100$--$1000\times$). We
 cover the modern practical schemes below; the CNN-era roots (Slalom, DarKnight,
 ShadowNet, SOTER) are lineage only, and TEESlice is cited as the analysis showing why

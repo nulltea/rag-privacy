@@ -1,19 +1,26 @@
-% ABSTRACT — ~200 words. SoK framing. (Scope framing written; vignette number TODO.)
+% ABSTRACT — ~220 words. SoK framing: deployment-readiness lens. (vignette number TODO.)
 Outsourcing Transformer inference and retrieval-augmented generation (RAG) to an
 untrusted cloud exposes prompts, documents, and proprietary weights to the service
 provider. A decade of point solutions now spans five mechanism families---secure
 computation (MPC/FHE), trusted execution environments (TEEs), static obfuscation,
 differential privacy, and hybrid TEE\,+\,obfuscation splits---but no systematization
-unifies \emph{mechanism}, \emph{threat model}, and \emph{performance}; the closest
+unifies \emph{mechanism}, \emph{threat model}, and \emph{deployment cost}; the closest
 prior SoK is risk-centric, scoped to naive RAG, and omits a performance axis. We
-systematize confidential Transformer inference and RAG on \emph{commodity hardware}
-(no confidential GPU) along three axes: a six-dimension threat-model taxonomy, a
-stage\,$\times$\,mechanism coverage map whose empty cells are the open problems, and a
-performance comparison synthesized from reported numbers with an explicit
-non-comparability caveat. The systematization spans inference, RAG, and graph-RAG---a
-setting prior work excludes---and surfaces field-wide findings: the near-universal
-exclusion of microarchitectural side-channels from threat models, the
-under-reported invertibility of static obfuscation
-(\needswork{headline recovery figure, vignette}), and a graph-RAG frontier in which
-construction and traversal stages are barely covered by any confidentiality mechanism.
-We position the hybrid split as the deployable frontier and map what remains open.
+organize the field by \emph{deployment readiness}---the likelihood a scheme is adopted
+in practice---assessed on three criteria: \emph{performance} (overhead and latency),
+\emph{fidelity} (impact on output quality), and \emph{threat-model fit} (an adversary
+model \emph{appropriate} to the deployment rather than maximal). A hardware-trust axis
+of three tiers (no trusted hardware; a commodity CPU-TEE; a confidential accelerator)
+feeds this assessment; confidential-accelerator deployments are treated as a
+performance baseline and deferred to work that systematizes that hardware. Our
+artifacts are a six-dimension threat-model taxonomy, a stage\,$\times$\,mechanism
+coverage map whose empty cells are open problems, a performance comparison from
+reported numbers (with a non-comparability caveat), and a deployment-readiness
+synthesis across families---spanning inference, RAG, and graph-RAG, a setting prior
+work excludes. Findings include the near-universal exclusion of microarchitectural
+side-channels from threat models, the under-reported invertibility of static
+obfuscation (\needswork{headline recovery figure, vignette}), nearly empty graph-RAG
+coverage, and that deployment readiness comes not from maximizing any single axis but
+from balancing all three---hybrid splits and obfuscation lead on the
+performance-to-threat ratio, while exact-but-slow cryptography and hardware-gated TEEs
+trail.

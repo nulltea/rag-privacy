@@ -26,30 +26,41 @@ complement (not compete with) the risk-side SoK}
 % Transformer inference AND RAG, including graph-RAG (a setting Bodea excludes).
 % Five mechanism families. Semi-honest baseline (range to malicious documented in §2).
 %
-% TWO SCOPE CORRECTIONS (decision of record):
-%  (1) PRACTICALITY: we systematize state-of-the-art, *practical* schemes --- those
-%      with good security AND low-enough overhead to deploy. Foundational/superseded
-%      works are cited for lineage only, never in the comparison tables.
-%  (2) COMMODITY HARDWARE: we prioritize schemes that need NO specialized confidential-
-%      compute hardware (no NVIDIA H100/B200 confidential GPUs). Pure-TEE-on-CC-GPU is
-%      the performance/trust BASELINE (\cref{sec:tee}); the protagonist is the HYBRID
-%      SPLIT family (CPU-TEE + commodity GPU, \cref{sec:hybrid}).
-We scope the systematization to \emph{confidential Transformer inference and RAG on
-commodity hardware}, and impose two deliberate restrictions. First, \textbf{practical
-frontier}: the comparison tables hold only state-of-the-art schemes that combine
-credible security with deployable overhead; foundational or superseded work is cited
-for lineage only. Second, \textbf{commodity hardware}: we prioritize schemes that need
-no specialized confidential-compute accelerator (no NVIDIA H100/B200 confidential GPU).
-Pure-TEE inference on a confidential GPU is kept as the performance and trust
-\emph{baseline} (\cref{sec:tee}); the protagonist family is the \emph{hybrid split}
-(CPU-TEE + an untrusted commodity GPU, \cref{sec:hybrid}). The systematization spans
-Transformer inference (embedding, reranking, generation) and RAG including
-\emph{graph-RAG}---a setting the prior RAG-privacy SoK~\citep{bodea_sok} excludes. We
-treat a semi-honest cloud as the baseline adversary, documenting the range to malicious
-in \cref{sec:threat}. Explicitly \emph{out of scope}: microarchitectural
-side-channels (a field-wide exclusion we make a finding of, \cref{sec:threat}),
-full verifiable computation (lightweight composable integrity is in scope, but
-zkLLM-class proving is not), and foundational/superseded schemes.
+% ORGANIZING GOAL = DEPLOYMENT READINESS (decision of record 2026-06-02): assess the
+% whole field by likelihood of real-world adoption on 3 criteria -- (1) performance,
+% (2) fidelity (output quality), (3) threat-model FIT (appropriate, not maximal). We do
+% NOT champion one family; hybrid-split/obfuscation lead as a FINDING (good perf-to-threat
+% ratio), established in §8, not assumed here. Hardware-trust TIERS (Tier1 none / Tier2
+% CPU-TEE / Tier3 confidential accelerator) feed criteria 1+3; Tier3 = baseline, deferred
+% to accel_tee_sok. PRACTICAL-FRONTIER restriction = a consequence of the lens.
+Our organizing goal is \emph{deployment readiness}: we assess the field by how likely a
+scheme is to be adopted in a real deployment, on three criteria---\textbf{performance}
+(overhead and latency), \textbf{fidelity} (impact on output accuracy and quality), and
+\textbf{threat-model fit} (an adversary model \emph{appropriate} to the deployment, not
+maximal in a purely academic sense). The aim is not to crown a winning family but to
+make this trade explicit; which schemes sit near the deployable frontier is a
+\emph{finding} of the synthesis (\cref{sec:synthesis}), not an assumption.
+
+Two structural choices follow. First, a \emph{hardware-trust} ladder, defined with the
+trust-anchor axis of our taxonomy (\cref{sec:threat}), feeds the performance and
+threat-fit criteria: Tier~1 (no trusted hardware), Tier~2 (CPU-TEE only, commodity GPU
+untrusted), and Tier~3 (a confidential accelerator trusted end-to-end). We focus on
+Tiers~1 and~2, where confidentiality is an open \emph{design} problem, and keep
+\textbf{Tier~3} as a performance baseline (\cref{sec:tee}): once a confidential
+accelerator is trusted end-to-end, confidentiality largely reduces to hardware
+availability, enclave construction, and attestation---a narrower, hardware-specific
+space systematized in its own right~\citep{accel_tee_sok}. Second, the
+\textbf{practical-frontier} restriction follows directly from the deployment lens:
+comparison tables hold only state-of-the-art schemes with deployable overhead, and
+foundational or superseded work is cited for lineage only.
+
+The systematization spans Transformer inference (embedding, reranking, generation) and
+RAG including \emph{graph-RAG}---a setting the prior RAG-privacy SoK~\citep{bodea_sok}
+excludes. We treat a semi-honest cloud as the baseline adversary, documenting the range
+to malicious in \cref{sec:threat}. Explicitly \emph{out of scope}: microarchitectural
+side-channels (a field-wide exclusion we make a finding of, \cref{sec:threat}), full
+verifiable computation (lightweight composable integrity is in scope, but zkLLM-class
+proving is not), and foundational/superseded schemes.
 
 \subsection{Contributions}
 This paper is a \emph{systematization of knowledge}. Concretely:
@@ -65,6 +76,10 @@ This paper is a \emph{systematization of knowledge}. Concretely:
   \item \textbf{A performance comparison} synthesized from reported numbers
         (\cref{sec:synthesis}) --- the cost axis the existing RAG-privacy SoK
         \cite{bodea_sok} omits --- with an explicit non-comparability caveat.
+  \item \textbf{A deployment-readiness synthesis} (\cref{sec:synthesis}) that scores
+        each family on performance, fidelity, and threat-model fit, showing that
+        real-world readiness comes from balancing the three rather than maximizing any
+        one --- and locating each family on that frontier.
   \item \textbf{A stage\,$\times$\,mechanism gap-map} (\cref{sec:synthesis})
         whose empty cells are the field's open problems.
   \item \textbf{A focused vignette} (\cref{sec:obfuscation}): static

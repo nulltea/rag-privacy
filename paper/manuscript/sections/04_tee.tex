@@ -1,13 +1,14 @@
 \section{Trusted Execution Environments (Baseline)}
 \label{sec:tee}
 
-% SCOPE ROLE (correction #2): TEE is the BASELINE, not a protagonist family.
+% SCOPE ROLE (correction #2): TEE is the Tier-3 performance BASELINE (HW-gated);
+% scored on the deployment-readiness criteria in §8 (\cref{ssec:deployment}).
 % Pure-TEE inference (full model in enclave, or a confidential GPU H100/B200) gives
 % near-plaintext performance but DEMANDS specialized confidential-compute hardware and
 % full enclave trust. We keep it compact: it establishes (a) the near-plaintext
 % performance ceiling the hybrid family is measured against, and (b) the
 % hardware-availability axis (confidential-GPU-required vs commodity-GPU-OK) that
-% motivates the hybrid split (\cref{sec:hybrid}) as the deployable sweet spot.
+% motivates the hybrid split (\cref{sec:hybrid}) as the Tier-2 alternative.
 \dnote{keep this section SHORT --- baseline + hardware axis only; the depth goes to
 \cref{sec:hybrid}}
 
@@ -16,11 +17,17 @@ A trusted execution environment runs the computation in plaintext inside a
 hardware-isolated enclave, attested to the client over RATLS. Pure-TEE inference is
 our \emph{baseline}: it achieves near-plaintext speed and shifts trust to the silicon
 vendor, but at full scale it demands either a CPU enclave large enough for the model
-or a \emph{confidential GPU} (H100/B200 CC). That hardware requirement---not the
-performance---is what motivates the commodity-GPU hybrid split (\cref{sec:hybrid}); we
-therefore keep this section to the performance ceiling and the hardware-availability
-axis. The strongest adversary in our corpus appears here: Opal~\cite{kaviani_opal}
-assumes a \emph{malicious host} and additionally hides access patterns with ORAM.
+(Tier~2, slow for large models) or a \emph{confidential accelerator} (Tier~3---an
+H100/B200-class GPU-TEE). The schemes here are therefore predominantly Tier~3, which we
+keep as the performance/trust baseline rather than systematize in depth: once the
+accelerator is trusted end-to-end, confidentiality reduces to enclave construction and
+attestation, a hardware-specific space systematized separately~\citep{accel_tee_sok}.
+That Tier-3 hardware requirement---not the performance---is what motivates the Tier-2
+commodity-GPU hybrid split (\cref{sec:hybrid}). The strongest adversary in our corpus
+appears here: Opal~\cite{kaviani_opal} assumes a \emph{malicious host} and additionally
+hides access patterns with ORAM. On the deployment-readiness criteria of
+\cref{sec:intro}, pure TEE scores highest on performance and fidelity, but its Tier-3
+hardware dependence is the binding deployability constraint (\cref{sec:synthesis}).
 
 \subsection{Approach}
 % CPU-TEE (SGX/TDX) and GPU-TEE (confidential H100/H200/B200): hardware-isolated

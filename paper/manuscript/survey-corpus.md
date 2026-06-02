@@ -12,11 +12,13 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
    schemes with good security *and* low-enough overhead to be deployable.
    Foundational/superseded works are cited for lineage only (see the
    *Foundational / Superseded* section), never placed in comparison tables.
-2. **Widely deployable; no specialized confidential-compute hardware.** Prioritize
-   schemes that run on a CPU-TEE + **commodity GPUs**; do **not** assume expensive
-   confidential GPUs (NVIDIA H100/B200 CC). Pure-TEE-on-CC-GPU is kept only as the
-   performance/trust **baseline** (§3); the protagonist family is **hybrid split**
-   (CPU-TEE + any GPU, §6).
+2. **Organizing lens = deployment readiness** (perf × fidelity × threat-model fit;
+   the last meaning *appropriate*, not maximal). Prioritize schemes that run on a
+   CPU-TEE + **commodity GPUs**; do **not** assume expensive confidential GPUs
+   (NVIDIA H100/B200 CC). Pure-TEE-on-CC-GPU (Tier 3) is kept only as the
+   performance/trust **baseline** (§3). The paper does **not** champion one family;
+   hybrid split + obfuscation lead the deployment-readiness scoring as a **finding**
+   (§8), by the best performance-to-threat ratio, not by fiat.
 3. **Graph-RAG selection re-balanced to LightRAG's actual retrieval surface** (2026-06-02,
    grounded in `../docs/dev/prototype/private-graph-rag-design.md`, a direct read of the
    LightRAG implementation). LightRAG retrieval = entity/relation/chunk ANN + **one-hop** edge
@@ -226,7 +228,7 @@ proving overhead is 100×–1000s×.
 | [x] | Towards Secure RAG | Mu et al. 2026 | flags reranking privacy underdeveloped |
 | [ ] | Private Transformer Inference Survey | 2024 (2412.08145) | FHE/MPC/TEE survey |
 | [ ] | PPLLM-in-Practice comparative survey | 2026, ePrint 2026/105 | practical private LLM inference |
-| [ ] | SoK: Accelerator TEE Designs | 2026, NDSS | accelerator-TEE systematization |
+| [x] | SoK: Analysis of Accelerator TEE Designs ✓ | Zhang et al. 2026, NDSS | accelerator/GPU-TEE systematization (access-control/mem-enc/attestation); **Tier-3 deferral anchor** (verified via ndss-symposium.org) |
 | [ ] | ETH Confidential-Inference benchmark | 2025 (2509.18886) | CPU/GPU TEE benchmark |
 | [ ] | Confidential GPU guides | Spheron 2026 / NVIDIA WP-11459 | practitioner/vendor refs |
 
