@@ -105,6 +105,40 @@ fn sample_orthogonal(d: usize, rng: &mut ChaCha20Rng) -> Array2<f32> {
     m
 }
 
+/// Random `d×d` invertible matrix with condition number exactly `kappa`:
+/// `C = U · diag(s) · Vᵀ`, `U,V` Haar-orthogonal, singular values `s` spread in
+/// `[1/√κ, √κ]` (so `cond(C)=κ`; extremes pinned, geometric mean ≈ 1 →
+/// magnitude-neutral, stays in fp16/bf16 range). This is the `C_v` value cover —
+/// the **non-orthogonal** generalization of `O_v` that distorts the per-head
+/// value norm/Gram (breaking the `WEIGHTS-PUB` dictionary) while staying exactly
+/// invertible (the TEE corrects with `C_v⁻¹`). κ is the dial between
+/// dictionary-break strength and fp16 cancellation error — swept by this gate.
+/// See docs/dev/logs/perm-attn-gpu-offload.md (*Adapting covariant obfuscation
+/// to the offload*).
+fn sample_kappa_bounded_invertible(d: usize, kappa: f32, rng: &mut ChaCha20Rng) -> Array2<f32> {
+    let u = sample_orthogonal(d, rng);
+    let vt = sample_orthogonal(d, rng);
+    let hi = kappa.sqrt();
+    let lo = 1.0 / hi;
+    let mut s = vec![1.0f32; d];
+    s[0] = hi;
+    if d > 1 {
+        s[d - 1] = lo;
+    }
+    for sj in s.iter_mut().take(d.saturating_sub(1)).skip(1) {
+        let t = rng.next_u32() as f32 / u32::MAX as f32; // uniform [0,1]
+        *sj = lo + t * (hi - lo);
+    }
+    // C = U · diag(s) · Vᵀ  (scale U's columns by s, then right-multiply by Vᵀ).
+    let mut us = u;
+    for j in 0..d {
+        for i in 0..d {
+            us[(i, j)] *= s[j];
+        }
+    }
+    us.dot(&vt)
+}
+
 #[test]
 #[ignore = "loads real Qwen3 weights from the HF cache"]
 fn capture_attn_cover_adversary_view() -> Result<()> {
@@ -113,13 +147,24 @@ fn capture_attn_cover_adversary_view() -> Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0.01);
-    // Rotation-only cover = the offloaded-PREFILL cover (feature rotation
-    // O_qk/O_v, no permutation, σ=0). The Phase-5 WEIGHTS-PUB spike attacks
-    // this view. Default off → the decode capture is unchanged.
-    let rotation_only = std::env::var("GELO_CAPTURE_COVER")
-        .map(|v| v.eq_ignore_ascii_case("rotation"))
-        .unwrap_or(false);
-    let sigma = if rotation_only { 0.0 } else { sigma };
+    // Cover mode (GELO_CAPTURE_COVER):
+    //  - "rotation": offloaded-PREFILL cover (O_qk/O_v feature rotation, no
+    //    permutation, σ=0) — the Phase-5 WEIGHTS-PUB spike view.
+    //  - "cv": the re-scoped lever — same prefill structure (identity perm,
+    //    σ=0, O_qk orthogonal) but the V cover is a κ-bounded *non-orthogonal*
+    //    invertible `C_v` (GELO_CAPTURE_KAPPA, default 4.0). Isolates the
+    //    value-cover fix for the Stage-1 norm-dictionary gate.
+    //  - default: decode permutation cover (perm_kv + σ-on-K + O_qk + O_v).
+    let cover_mode = std::env::var("GELO_CAPTURE_COVER").unwrap_or_default();
+    let rotation_only = cover_mode.eq_ignore_ascii_case("rotation");
+    let cv_mode = cover_mode.eq_ignore_ascii_case("cv");
+    let kappa: f32 = std::env::var("GELO_CAPTURE_KAPPA")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4.0);
+    // Both rotation and cv modes use the prefill structure: identity perm + σ=0.
+    let no_perm = rotation_only || cv_mode;
+    let sigma = if no_perm { 0.0 } else { sigma };
     let prompt = std::env::var("GELO_CAPTURE_PROMPT").unwrap_or_else(|_| {
         "The mitochondria is the powerhouse of the cell. In distributed \
          systems, consensus protocols like Raft elect a leader to order writes."
@@ -205,7 +250,7 @@ fn capture_attn_cover_adversary_view() -> Result<()> {
         // In rotation-only mode the permutation is the identity (the
         // offloaded-prefill cover hides coordinates, not order).
         let mut perm: Vec<usize> = (0..n_kv).collect();
-        if !rotation_only {
+        if !no_perm {
             perm.shuffle(&mut rng);
         }
 
@@ -214,10 +259,16 @@ fn capture_attn_cover_adversary_view() -> Result<()> {
         for h in 0..n_kv_heads {
             let c0 = h * d_head;
             let o_qk = sample_orthogonal(d_head, &mut rng);
-            let o_v = sample_orthogonal(d_head, &mut rng);
+            // Value cover: orthogonal `O_v` by default; in cv mode the
+            // κ-bounded non-orthogonal `C_v` (the re-scoped lever).
+            let v_cover = if cv_mode {
+                sample_kappa_bounded_invertible(d_head, kappa, &mut rng)
+            } else {
+                sample_orthogonal(d_head, &mut rng)
+            };
 
             // Per-head slices, row-permuted; K noised then O_qk-rotated,
-            // V O_v-rotated (un-noised).
+            // V cover-rotated (un-noised).
             let mut k_perm = Array2::<f32>::zeros((n_kv, d_head));
             let mut v_perm = Array2::<f32>::zeros((n_kv, d_head));
             for (i, &src) in perm.iter().enumerate() {
@@ -228,14 +279,20 @@ fn capture_attn_cover_adversary_view() -> Result<()> {
                 }
             }
             let k_rot = k_perm.dot(&o_qk);
-            let v_rot = v_perm.dot(&o_v);
+            let v_rot = v_perm.dot(&v_cover);
             for i in 0..n_kv {
                 for c in 0..d_head {
                     k_sent[(i, c0 + c)] = k_rot[(i, c)];
                     v_sent[(i, c0 + c)] = v_rot[(i, c)];
                 }
             }
-            tensors.push((format!("layer{li:03}.o_v.head{h:02}"), f32_tensor(o_v.view())));
+            // Save the value cover (named by kind) for the Stage-2
+            // covariance/Procrustes attacks; the Stage-1 norm gate ignores it.
+            let cover_key = if cv_mode { "c_v" } else { "o_v" };
+            tensors.push((
+                format!("layer{li:03}.{cover_key}.head{h:02}"),
+                f32_tensor(v_cover.view()),
+            ));
         }
 
         let perm_i64: Vec<i64> = perm.iter().map(|&x| x as i64).collect();
@@ -310,7 +367,13 @@ fn capture_attn_cover_adversary_view() -> Result<()> {
         );
     }
 
-    let cover_str = if rotation_only {
+    let cv_cover_str = format!(
+        "O_qk(K) + C_v(V) [kappa-bounded non-orthogonal, kappa={kappa}], no perm, sigma=0 \
+         — re-scoped value-cover lever (Stage-1 gate)"
+    );
+    let cover_str: &str = if cv_mode {
+        &cv_cover_str
+    } else if rotation_only {
         "O_qk(K) + O_v(V), rotation-only (no perm, sigma=0) — offloaded-prefill cover"
     } else {
         "perm_kv + sigma-noise(K) + O_qk(K) + O_v(V), prefill-only"
@@ -327,12 +390,14 @@ fn capture_attn_cover_adversary_view() -> Result<()> {
         .map(|l| l.to_string())
         .collect::<Vec<_>>()
         .join(", ");
+    let v_cover_key = if cv_mode { "c_v" } else { "o_v" };
     let meta = format!(
         "{{\n  \"schema_version\": \"attn-cover-1\",\n  \"model_id\": \"{}\",\n  \
          \"n_kv\": {n_kv},\n  \"kv_dim\": {kv_dim},\n  \"n_kv_heads\": {n_kv_heads},\n  \
-         \"d_head\": {d_head},\n  \"sigma\": {sigma},\n  \"layers\": [{layers_json}],\n  \
+         \"d_head\": {d_head},\n  \"sigma\": {sigma},\n  \"cv_mode\": {cv_mode},\n  \
+         \"cv_kappa\": {kappa},\n  \"layers\": [{layers_json}],\n  \
          \"cover\": \"{cover_str}\",\n  \
-         \"keys\": \"layer{{L:03}}.{{k_clean,v_clean,k_sent,v_sent,perm_kv,o_v.head{{H:02}}}}\"\n}}\n",
+         \"keys\": \"layer{{L:03}}.{{k_clean,v_clean,k_sent,v_sent,perm_kv,{v_cover_key}.head{{H:02}}}}\"\n}}\n",
         variant.hf_model_id(),
     );
     std::fs::write(out_dir.join("attn_cover.meta.json"), meta)?;

@@ -2,8 +2,8 @@
 type: dev-log
 status: current
 created: 2026-05-29
-updated: 2026-06-01
-tags: [gelo, dgpu, attention, gpu, persistent-kv, permutation, feature-rotation, security, threat-model, aloepri, flash-attention]
+updated: 2026-06-02
+tags: [gelo, dgpu, attention, gpu, persistent-kv, permutation, feature-rotation, security, threat-model, aloepri, covariant-obfuscation, flash-attention]
 companion: [2026-05-22-dgpu-attention-revival, gelo-llm-perf-chronicle_dgpu]
 ---
 
@@ -34,9 +34,11 @@ per-op performance numbers live in the companion perf chronicle
 (perf); the Phase-5 `WEIGHTS-PUB` security spike then showed both offload
 covers leak token identity (prefill rotation: token + position; decode
 permutation: membership, order held) — so prefill is ⛔ blocked behind
-Phase 5b (covariant weight obfuscation, AloePri), and decode ships only
-if the bag-of-tokens residual is accepted. See *Sequencing* for the live
-state.
+Phase 5b (covariant obfuscation; **re-scoped 2026-06-02** from static AloePri
+*weight* obfuscation to a per-session non-orthogonal *activation-space* value
+cover `C_v` — see *Adapting covariant obfuscation to the offload*), and decode
+ships only if the bag-of-tokens residual is accepted. See *Sequencing* for the
+live state.
 
 ## Why this exists (the binding measurement)
 
@@ -1088,10 +1090,252 @@ tokens are still recovered, just not isolated.
   both neutralises decoys *and* keeps them indistinguishable is non-trivial and
   unbudgeted.
 
-⇒ **covariant weight obfuscation (AloePri, Phase 5b) remains the planned lever**
-(it closes the leak *and* keeps the offload); decoys are noted only as the
-fallback shape if obfuscation proves unviable *and* the bag-of-tokens residual
-is judged unacceptable.
+⇒ **a covariant obfuscation remains the planned lever** (it closes the leak
+*and* keeps the offload); decoys are noted only as the fallback shape if
+obfuscation proves unviable *and* the bag-of-tokens residual is judged
+unacceptable. **⚠ Refined (2026-06-02):** the earlier shorthand "covariant
+**weight** obfuscation (AloePri)" is *not* the minimal lever — adapting AloePri
+to GELO's split-inference architecture narrows it to a **per-session
+non-orthogonal value cover**, applied in activation space, not a static weight
+transform. See *Adapting covariant obfuscation* immediately below; it supersedes
+the weight-space framing wherever the two conflict.
+
+## Adapting covariant obfuscation to the offload: the dynamic↔static spectrum and the minimal lever (2026-06-02)
+
+The Phase-5 spike lands the verdict that *some* covariant obfuscation is
+required to neutralise the `WEIGHTS-PUB` token-membership leak. This section
+resolves **which** — and corrects the earlier shorthand that the lever is
+"covariant **weight** obfuscation (AloePri)." The precise lever is narrower, and
+it sits at the **dynamic** end of an obfuscation spectrum rather than importing
+AloePri's static construction wholesale.
+
+**The spectrum.** GELO's covers and AloePri's obfuscation are two ends of one
+axis — *how often the secret is refreshed, and whether it lives in the
+activation or the weight*:
+
+| | Fully dynamic (GELO) | Fully static (AloePri) |
+|---|---|---|
+| Secret lives in | the per-op **activation** cover | the deployed **weights** |
+| Refresh cadence | per session (prefill: per-prefill; decode: session-fixed `O_v`, per-block `perm_kv`) | fixed at deployment, never |
+| Runtime cost | a re-cover per refresh | zero (covariant, folds into the served weights) |
+| Security rests on | the secret resetting before enough is observed | the obfuscated weights being **hard to invert** (VMA-resistance) |
+| Adversary assumption | worst-case `GPU-ADV` (accumulates across sessions) | *constrained* attacker (AloePri's stated scope) |
+
+The question for this junction: **what is the minimal covariant addition, kept
+near the dynamic end, that closes the offload leak without (a) deployment
+complexity or (b) accuracy loss?** Two findings constrain the answer; one of
+them corrects a claim made mid-design (that the per-session orthogonal `O_v`
+supplies the accumulation defence — it does not).
+
+### Design constraints (what any solution at this junction must satisfy)
+
+- **C1 — resident-clear weights.** The GPU holds the offloaded projection
+  weights **resident, in the clear**: it computes `(A·X)·W` with `W` registered
+  once at load (`gelo-gpu-wgpu/src/lib.rs::register_weight{,_bf16}`) and the
+  per-call cover masking *only the activation* (`U = A·X`, fresh orthogonal
+  row-mask + shield rows; `gelo-protocol/src/mask.rs`). This is a GELO property,
+  not an artifact: under `WEIGHTS-PUB` the weights are public, so GELO never hid
+  them — its confidentiality protects the *user's activations*, not the model.
+  ⇒ any obfuscation baked into a *resident weight* `W' = f(W)` must be
+  **non-invertible from public `W`**.
+- **C2 — the leak is the un-mixed attention operand, not the projection
+  matmul.** The norm/Gram dictionary leak lives **only** where the GPU sees
+  per-token-row *un-mixed* value vectors — the `cubek` attention path (`V·O_v`
+  uploaded per row). The projection output `A·V` is row-mixed by the orthogonal
+  mask (per-token norms are not readable off it; un-mixing needs the fresh
+  secret `A`). ⇒ the fix need only act on the attention operands, not the
+  weights.
+- **C3 — no negative accuracy (user constraint b).** Greedy-token parity must
+  hold (today: byte-identical at σ=0). The fix must avoid AloePri's three
+  accuracy sinks: RoPE-block permutation (approximate score), embedding/head
+  noise, and ill-conditioned key matrices (fp16 cancellation).
+- **C4 — no deployment complexity (user constraint a).** No whole-model weight
+  rewrite + redeploy, no offline obfuscation pipeline, no secret-vocab-mapping
+  I/O layer, no RMSNorm-fusion / router-permutation. A localized change to the
+  attention cover, not a new deployment artifact.
+- **C5 — correctable through the fused kernel + existing covers.** Composes with
+  `cubek`'s normalised output via a TEE-side linear post-correction; never
+  touches the token axis / causal mask (no π-leak); composes with
+  `O_qk`/`O_v`/`perm_kv`/σ/tail-in-TEE; RoPE-compatible where it touches Q/K.
+- **C6 — bounded fp16 conditioning.** A non-orthogonal transform separated from
+  its inverse by the fp16 GPU attention incurs cancellation error ∝ `cond`;
+  bound it (the κ dial).
+- **C7 — accumulation / freshness.** The secret must resist a worst-case
+  `GPU-ADV` accumulating observations *across sessions*. A deployment-static
+  secret faces unbounded accumulation; a per-session-fresh secret resets.
+- **C8 — break the norm *and* the Gram.** The demonstrated attack used per-head
+  norms (the cheapest `O_v`-invariant); the per-head Gram is strictly stronger.
+  The fix must distort the Gram form `W_v(·)W_vᵀ`, not merely rescale norms (a
+  per-head scalar is erased by the attack's per-head standardisation).
+
+### Finding 1 — weight-space obfuscation cannot be *minimal* (the resident-clear-weight constraint)
+
+If we register an obfuscated value weight `W̃_v = W_V·Ũ_vo` resident on the GPU,
+a `WEIGHTS-PUB` adversary recovers the secret in one step: `W_V` is public and
+full column rank `[d_model, d_head]`, so `W_V⁺·W̃_v = (W_V⁺W_V)·Ũ_vo = Ũ_vo`. A
+*bare* covariant weight transform is **trivially invertible when resident** (C1
+fails).
+
+The fix is not cheap. Making a resident `W'` non-invertible from public `W`
+requires a *left*, cross-layer-entangled key matrix (`W̃_v = Q̂_v·W_v·Ũ_vo`,
+with `Q̂_v` constrained by the cross-layer cancellation `P̃·Q̃ = I` of adjacent
+layers) and/or the vocabulary permutation `Π`; separating those is exactly
+AloePri's VMA problem, which is only defended by the full Algorithm-1 key-matrix
+machinery + head/block permutation (AloePri Table 4: bare noise → 40 % recovery;
++KeyMat → 0.82 %; +KeyMat+perm → 0.0 %). **So "safe-when-resident weight
+obfuscation" ⇒ (most of) whole-model AloePri** — which violates both C3
+(accuracy budget) and C4 (deployment artifact). The resident-clear-weight
+property is *precisely why AloePri is a whole-model construction and not a
+one-weight patch*; there is no minimal weight-space option.
+
+### Finding 2 — an *orthogonal* refresh does not freshen the attack surface
+
+The attack surface is the per-head value **Gram** `G[i,j] = (V_i C)(V_j C)ᵀ =
+V_i (C Cᵀ) V_jᵀ` (and its diagonal, the norm `r_i = √(V_i (CCᵀ) V_iᵀ)`), where
+`C` is the value cover. Everything the dictionary attack needs is a function of
+**`C Cᵀ`**.
+
+For an orthogonal cover, `C Cᵀ = I` ⇒ `G = V_iV_jᵀ`, the clean Gram, matched by
+the public-weight dictionary. **Now refresh the cover with a fresh orthogonal
+factor**, `C = C_0·Q` (`Q` Haar per session): `C Cᵀ = C_0 Q Qᵀ C_0ᵀ = C_0 C_0ᵀ`
+— **independent of `Q`**. The orthogonal refresh leaves `C Cᵀ` fixed, so it does
+**not** change what the attacker sees. *(This corrects a claim made mid-design:
+the per-session `O_v` does not supply the accumulation defence, because `O_v` is
+orthogonal and the Gram is orthogonal-invariant — it is the very invariance the
+attack exploits.)*
+
+Consequences:
+- **A static non-orthogonal cover is accumulation-broken.** If `C Cᵀ = M` is
+  fixed at deployment, the adversary accumulates `{V_i(session s)·C}` across
+  sessions; with public `W_V` each observation is `√(V_i M_h V_iᵀ)` for some
+  token, and `M_h` (`d_head(d_head+1)/2` params/head) is massively
+  over-determined by thousands of distinct tokens seen across sessions → `M`
+  becomes identifiable → reduces back to the public dictionary. (This is the
+  risk AloePri accepts under its *constrained-attacker* scope and its
+  VMA-hardness; GELO's worst-case `GPU-ADV` does not get to accept it.)
+- **Freshness must come from the *non-orthogonal* part.** Only a value cover
+  whose `C Cᵀ` **changes per session** denies the accumulation target. A
+  per-session-fresh, well-conditioned *invertible* `C_v` (fresh singular values
+  **and** vectors) gives a fresh `C_v C_vᵀ` each session ⇒ accumulation-safe at
+  session granularity.
+
+### Options considered (against C1–C8)
+
+| # | Option | Verdict |
+|---|---|---|
+| **A** | **Per-session non-orthogonal value cover `C_v`** — generalise `O_v` from orthogonal to κ-bounded invertible, sampled per session, applied where `O_v` is today, corrected by `C_v⁻¹`. | **✓ all.** The lever — see below. |
+| B | Bare static weight `Ũ_vo` (resident `W̃_v = W_V·Ũ_vo`). | ✗ C1 — `W_V⁺W̃_v` inverts it (Finding 1). |
+| C | Full AloePri weight obfuscation (Alg.1 key matrices + `Π` + block/head perm + noise). | ✗ C3 (accuracy), ✗ C4 (whole-model redeploy). The static end of the spectrum. |
+| D | Additive value blinding (TwinShield-style on V): `V+R` up, subtract after. | ✗ C5 — additive V-noise is uncorrectable through the `probs·V` token-axis contraction (the TEE never sees the softmax weights; cf. the fallback section). |
+| E | V-norm flattening — upload unit-norm V + a per-row scale corrected TEE-side. | ✗ C5 — the per-key scale lives *inside* the `Σ_j P_j V_j` contraction; it cannot be factored out post-hoc. |
+| F | Cross-head orthogonal mixing (rotate the full `H·d_head` value, scrambling per-head norms). | ✗ C5 — attention is per-head (`P[h]·V[h]`); a cross-head mix breaks the per-head/GQA contraction and cannot be un-mixed after the per-head softmax. |
+| G | Static non-orthogonal activation cover `C_v` (fixed at deployment) **under** a fresh per-session `O_v`. | ✗ C7 — by Finding 2 the Gram is `C_v C_vᵀ` (fixed) and `O_v`-invariant; the orthogonal refresh adds no freshness → accumulation-broken. Dominated by A. |
+| H | `C_v` refreshed **per block** (finer than per-session). | ✓ security, ✗ minimality — adds the per-block re-rotate (the dominant re-cover term, gate 1) for no gain over per-session, since the protected secret is one session's prompt. Dominated by A. |
+
+### Conclusion — the minimal lever
+
+**The minimal covariant addition is Option A: generalise the value cover from an
+orthogonal `O_v` to a per-session, κ-bounded, *non-orthogonal* invertible
+`C_v`** — AloePri's value/output covariant pair (`Ũ_vo` / `Ũ_vo⁻¹`), **relocated
+from static weight-space to GELO's existing dynamic activation-space cover.**
+Concretely:
+
+- **Construction:** `C_v = U·diag(s)·Vᵀ`, Haar `U,V`, singular values in
+  `[1/√κ, √κ]` (within-head mixing ⇒ distorts norm *and* Gram, C8;
+  `cond ≤ κ` ⇒ bounded fp16 error + no overflow, C6). Sampled **fresh per head
+  per session** (fresh `C_v C_vᵀ` ⇒ accumulation-safe, C7/Finding 2).
+- **Application:** replaces `O_v` at `rotate_heads`; correction `C_v⁻¹ =
+  V·diag(1/s)·Uᵀ` (precomputed once/session) replaces `O_vᵀ` in
+  `correct_unfold_into` (prefill) and `acc_uncover_tee` (decode). Decode's
+  resident prefix stores `V·C_v`; the in-TEE tail attends plaintext V and the
+  merge happens *after* un-covering — unchanged structure (C5).
+- **No weight is touched** ⇒ resident weights stay public-and-fine (C1), no
+  deployment artifact (C4). **Greedy parity at the chosen κ** (C3, to be
+  measured, not assumed — honest "parity at κ", not byte-identical). **Perf
+  unchanged** — same op as `O_v`, the only delta is `C_v⁻¹` is not a transpose
+  (a one-off per-session inverse; the 2.83× prefill / ~4× decode hold; if κ
+  conditioning demands, the in-TEE correction may run in f32 — minor).
+- **QK side deferred (the conditional second addition).** `O_qk` must stay
+  *orthogonal* (it cancels in the score). The K/Q self-Gram anchor would need
+  the `Ĥ_qk` post-qk-norm scaling trick; qk_norm already flattens the cheap
+  K-*norm* signal and the self-Gram reconstruction is unmeasured, so `Ĥ_qk`
+  stays deferred until a measured attack shows it bites.
+
+**The dynamic↔static hyperparameter, made precise:** it is the **refresh
+granularity of the non-orthogonal value transform `C_v`** (equivalently, how
+often `C_v C_vᵀ` resets). GELO sits at **per-session** — accumulation-safe and
+free of a deployment-static secret. The static (AloePri) end only buys runtime
+savings by moving into weight-space, which Finding 1 shows demands the full
+VMA-resistant machinery (and forfeits C3/C4). Between them there is no cheaper
+midpoint, because the per-session activation re-sample is already ~free (it is
+the same op `O_v` already pays). So for the offload, **the minimal-cost secure
+point and the dynamic end coincide.**
+
+**Why this is "covariant-obfuscation aligned" and not just "a different cover."**
+`C_v` is exactly AloePri's value covariant transform (`V·Ũ_vo` undone by
+`Ũ_vo⁻¹` folded into the output path) — the same covariance principle
+(computation preserved by an invertible value-basis change), with the single
+adaptation that GELO applies it *dynamically in activation space* (where its
+secrecy is information-theoretic, C2) instead of *statically in weight space*
+(where, per Finding 1, it would be trivially invertible).
+
+### The decisive gate (cheap, unchanged in spirit)
+
+Add a `C_v` capture mode to `attn_cover_capture.rs` (κ-bounded SVD value cover,
+`O_qk` orthogonal as today) and re-run `gate3_prefill_dict.py` (container),
+**sweeping κ**: accept the smallest κ that drops per-slot top-1 to the chance
+floor (≈1/|vocab|) **and** holds greedy parity, run against *both* the per-head
+**norm** fingerprint and the strictly-stronger per-head **Gram** (C8). Confirm
+at the full-vocab candidate pool (the dev-log's standing caveat) and at a deeper
+contextual layer, not only layer 0. **Pass ⇒ flip both offload paths default-on
+behind the c5 condition (now read as "`C_v` cover," not "AloePri weights"). Fail
+at every κ that holds parity ⇒ escalate to the QK-side `Ĥ_qk` addition, then
+re-gate.**
+
+### Stage-1 result — `C_v` breaks the norm dictionary, min κ ≈ 5 (2026-06-02)
+
+Ran the cheap screen. `attn_cover_capture.rs` gained a `cv` cover mode
+(`GELO_CAPTURE_COVER=cv`, `GELO_CAPTURE_KAPPA`): prefill structure (identity
+perm, σ=0, `O_qk` orthogonal) with the value cover replaced by the κ-bounded
+non-orthogonal `C_v = U·diag(s)·Vᵀ` (`sample_kappa_bounded_invertible`, Haar
+`U,V`, singular values pinned to give `cond = κ` exactly, geometric mean ≈ 1).
+Real Qwen3-4B, layer 0, n_kv=64, CPU reference capture; `gate3_prefill_dict.py`
+norm attack, K=8054 dictionary (54 prompt-unique + 8000 distractors), in the
+`gelo-attack` container. Hold bar: per-slot top-1 ≤ 0.02.
+
+| κ (=cond `C_v`) | top-1 | top-5 | median rank (/8054) | verdict |
+|---:|---:|---:|---:|---|
+| 1.0 (orthogonal control) | **1.000** | 1.000 | 0 | LEAKS — reproduces the `O_v` baseline ✓ |
+| 1.5 | 0.734 | 0.906 | 0 | LEAKS |
+| 2.0 | 0.375 | 0.453 | 18 | LEAKS |
+| 3.0 | 0.219 | 0.312 | 252 | LEAKS |
+| 4.0 | 0.062 | 0.219 | 531 | LEAKS |
+| **5.0** | **0.016** | 0.156 | 870 | **HOLDS** (min κ) |
+| 6.0 | 0.000 | 0.156 | 1118 | HOLDS |
+| 7.0 | 0.000 | 0.109 | 1258 | HOLDS |
+| 8.0 | 0.000 | 0.047 | 1382 | HOLDS |
+
+**Reading.** Recovery falls **monotonically** in κ; the orthogonal control
+(κ=1) recovers perfectly, confirming the harness *and* that the leak is exactly
+`O_v`'s orthogonality (norm-preservation). The dictionary dies (top-1 ≤ 0.02) at
+**κ ≈ 5**; κ=6 gives top-1 = 0.000 at margin (the safe operating point). Dict
+faithfulness rel-err = 0 throughout (the dictionary is the true layer-0 value
+map — the negative is real, not a broken attack).
+
+**Caveat carried to Stage 2.** top-5 **plateaus at ~0.11–0.16 for κ ∈ [5,8]** —
+it does *not* vanish with κ. The per-head norm fingerprint collapses to a small
+ambiguity set (~5 candidates) ~15% of the time even when top-1 is zero; raising
+κ past ~6 buys little there. So κ is **not** the lever for the residual top-k —
+the bare-norm fingerprint saturates. Stage 2 must check whether (a) the full
+per-head **Gram** / covariance-Procrustes attacks exploit that residual, and (b)
+top-5 falls at the full 152k vocab (the 8k pool inflates collision rates).
+**κ ≈ 6 is the Stage-1 recommendation**, pending the Stage-2 + greedy-parity
+(fp16-conditioning) checks — `cond=6` ⇒ fp16 round-trip cancellation ≈ 2⁻¹⁰·6 ≈
+6e-3 relative, which the parity bench on the real offload path must confirm is
+below the greedy-argmax margin.
+
+Artefacts: `GELO_CAPTURE_COVER=cv` mode in `attn_cover_capture.rs`;
+`evals/aloepri-attacks/captures_cv_k{1.0…8.0}/`.
 
 ## Offload perf-upside — per-op breakdowns (2026-06-01)
 
@@ -1556,13 +1800,25 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
    **⛔ BLOCKED by the Phase-5 result (2026-06-01):** the rotation cover
    leaks every prompt token under `WEIGHTS-PUB` (top-1 = 1.000), so Phase 6
    does **not** proceed as-is. It is gated behind **Phase 5b** below.
-7b. **Phase 5b — covariant weight obfuscation (AloePri), if pursuing prefill
-   offload.** Statically transform the deployed weights (compensated
-   covariantly) so the attacker's public `W` no longer matches the deployed
-   `W'`, collapsing the known bilinear forms to unknown and removing the
-   dictionary. Then re-run the Phase-5 spike against the obfuscated
-   deployment. Open: obfuscation correctness/overhead + composition with the
-   fused kernel. If it does not pan out, **prefill stays in-TEE**.
+7b. **Phase 5b — covariant obfuscation to neutralise `WEIGHTS-PUB`.**
+   **⚠ Re-scoped 2026-06-02** (see *Adapting covariant obfuscation to the
+   offload*): the lever is **not** static weight obfuscation. Two findings rule
+   that out as the *minimal* path — GELO holds the offloaded weights
+   resident-in-the-clear, so a bare covariant weight transform is trivially
+   invertible from public `W` (a VMA-safe resident `W'` would require
+   ~whole-model AloePri, forfeiting accuracy + adding a deployment artifact);
+   and an orthogonal refresh of the cover does not freshen the `O_v`-invariant
+   Gram the attack reads. The minimal lever is instead a **per-session,
+   κ-bounded, non-orthogonal value cover `C_v`** (AloePri's value covariant pair
+   relocated from static weight-space into GELO's existing dynamic
+   activation-space cover): generalise `O_v` from orthogonal to invertible,
+   correct with `C_v⁻¹`. No weight touched, no deployment complexity, greedy
+   parity at the chosen κ, perf unchanged, accumulation-safe at session
+   granularity. Gate: re-run `gate3_prefill_dict.py` against a `C_v` capture
+   (κ-sweep, norm + Gram, full vocab, deeper layer). QK-side `Ĥ_qk` is a
+   conditional second addition, deferred until the K/Q self-Gram is measured to
+   bite. If no κ both breaks the dictionary and holds parity, escalate to
+   `Ĥ_qk`; if that also fails, **prefill stays in-TEE**.
 8. **Phase 6 — prefill-attention offload.** **🟡 PERF WIRE LANDED, default-on
    still ⛔ gated on Phase 5b.** The perf wire is in the production forward
    path (`decoder_block_batched`, `GELO_GPU_PREFILL_OFFLOAD`, default-off):

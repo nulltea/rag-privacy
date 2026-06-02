@@ -5,9 +5,9 @@ created: 2026-06-01
 updated: 2026-06-01
 tags: [gelo, dgpu, attention, prefill, decode, gpu-offload, perf, phase-5a]
 companion: [perm-attn-gpu-offload]
-superseded_by: 2026-06-01-attn-offload-phase5a-aloepri-gate
+superseded_by: 2026-06-02-attn-offload-cv-cover-gate
 archive_reason: >
-  Unified into 2026-06-01-attn-offload-phase5a-aloepri-gate (which folds in the
+  Unified into 2026-06-02-attn-offload-cv-cover-gate (which folds in the
   later loop-batching + fused-O_vᵀ + dispatch-granularity findings). Superseded
   in full.
 ---
