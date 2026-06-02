@@ -1,15 +1,15 @@
 ---
 type: handoff
-status: current
+status: stale
 created: 2026-06-01
 updated: 2026-06-01
 tags: [gelo, dgpu, attention, prefill, decode, gpu-offload, perf, phase-5a]
-companion: [perm-attn-gpu-offload, 2026-06-01-feature-rotated-prefill-offload-weights-pub-break]
+companion: [perm-attn-gpu-offload]
+superseded_by: 2026-06-01-attn-offload-phase5a-aloepri-gate
 archive_reason: >
-  Supersedes the PERF framing of 2026-06-01-feature-rotated-prefill-offload-weights-pub-break
-  (prefill is now wired + O1/O2-optimised, not "blocked behind perf-opt"); that
-  doc's SECURITY content (the WEIGHTS-PUB break math + AloePri Phase-5b tasks)
-  remains the live reference — hence companion, not supersedes.
+  Unified into 2026-06-01-attn-offload-phase5a-aloepri-gate (which folds in the
+  later loop-batching + fused-O_vᵀ + dispatch-granularity findings). Superseded
+  in full.
 ---
 
 # Handoff — prefill 2.83× + decode ~4×; next = cubek read-index / O6 / AloePri

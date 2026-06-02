@@ -1,10 +1,15 @@
 ---
 type: handoff
-status: current
+status: stale
 created: 2026-06-01
 updated: 2026-06-01
 tags: [gelo, dgpu, attention, gpu, prefill, feature-rotation, threat-model, aloepri]
 companion: [perm-attn-gpu-offload]
+superseded_by: 2026-06-01-attn-offload-phase5a-aloepri-gate
+archive_reason: >
+  Unified into 2026-06-01-attn-offload-phase5a-aloepri-gate. Its WEIGHTS-PUB
+  break math + AloePri Phase-5b tasks live on in the dev-log
+  (perm-attn-gpu-offload) and are summarised in the unified handoff.
 ---
 
 # Handoff — offload covers break under public weights; both paths now wired + benched; next is perf-opt then AloePri
