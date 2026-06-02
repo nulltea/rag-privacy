@@ -1,13 +1,26 @@
 ---
 type: handoff
-status: current
+status: stale
 created: 2026-06-02
 updated: 2026-06-02
 tags: [gelo, dgpu, attention, gpu-offload, cubek, fp16, bf16, accuracy, humaneval, numerical]
 companion: [perm-attn-gpu-offload, 2026-06-02-attn-offload-cv-cover-gate]
+superseded_by: 2026-06-02-offload-attention-collapse-sm120-rootcause
+archive_reason: >
+  Diagnosis FALSIFIED (2026-06-02). The 0/20 collapse is NOT an f16-storage
+  overflow and BF16 is NOT the fix. Real cause: cubek's BlackboxAccelerated kernel
+  is broken on cubecl-wgpu/Vulkan (NaN ∀ n≥3), and the original run had
+  CUBEK_STRATEGY=blackbox leaked into the env. cubek's softmax/accumulator are F32
+  (max-subtracted) so no overflow exists; bf16 is 8× worse. See the superseding
+  handoff for the root cause, the CUDA/sm_120 finding, and next steps.
 ---
 
 # Handoff — offload attention fp16 NaN bug; fix = BF16 cubek kernel (in progress)
+
+> **⚠ SUPERSEDED / FALSIFIED (2026-06-02).** Everything below — the "f16-storage
+> overflow" diagnosis and the BF16-kernel fix — is **wrong**. Read
+> [`2026-06-02-offload-attention-collapse-sm120-rootcause`](2026-06-02-offload-attention-collapse-sm120-rootcause.md)
+> instead. Kept only for the reasoning trail.
 
 **Focus for the next session: implement a BF16 cubek attention path** to fix a
 pre-existing fp16-storage overflow that makes the offloaded prefill attention

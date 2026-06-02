@@ -87,31 +87,33 @@ flate2 = "1.0"
 zip = "2.0"
 tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 wgpu = "26"
-cubecl = { version = "=0.9.0", default-features = false, features = ["std", "wgpu"] }
-cubecl-core = { version = "=0.9.0", default-features = false, features = ["std"] }
-cubecl-runtime = { version = "=0.9.0", default-features = false, features = ["std"] }
-cubecl-std = { version = "=0.9.0", default-features = false }
-cubecl-common = { version = "=0.9.0", default-features = false, features = ["std"] }
-cubecl-wgpu = { version = "=0.9.0", default-features = false, features = ["std", "spirv"] }
+cubecl = { version = "=0.10.0", default-features = false, features = ["std", "wgpu"] }
+cubecl-core = { version = "=0.10.0", default-features = false, features = ["std"] }
+cubecl-runtime = { version = "=0.10.0", default-features = false, features = ["std"] }
+cubecl-std = { version = "=0.10.0", default-features = false }
+cubecl-common = { version = "=0.10.0", default-features = false, features = ["std"] }
+cubecl-wgpu = { version = "=0.10.0", default-features = false, features = ["std", "spirv"] }
 # CUDA runtime for cubecl — the dGPU/Nvidia backend behind the engine's
 # `cuda` feature (opt-in; Vulkan stays the default for OEM-agnostic
 # operation). Used to A/B the GPU-matmul path against the Vulkan/SPIR-V
 # path on Nvidia hardware. cudarc supports CUDA 13 (`cuda-13000`).
-cubecl-cuda = { version = "=0.9.0", default-features = false, features = ["std"] }
+cubecl-cuda = { version = "=0.10.0", default-features = false, features = ["std"] }
 # CubeK attention kernels — fused FlashAttention-style Q·Kᵀ →
 # softmax → ·V in a single GPU dispatch. Used by
 # `WgpuVulkanEngine::fused_attention_batched` at decode shapes
 # where the burn-tensor chain otherwise pays 3-5 kernel-launch
-# overheads per attention block. Pinned to 0.1.1 — same upstream
-# (tracel-ai/cubek) the burn-cubecl 0.20.1 release uses
-# transitively, so version alignment with our cubecl 0.9.0 stack
-# is automatic.
-cubek-attention = { version = "=0.1.1", default-features = false, features = ["std"] }
+# overheads per attention block. Bumped to 0.2.0 (2026-06-02) for
+# RTX 5090 / sm_120 CUDA support: 0.2.0 carries the closed fixes for
+# the prefill-offload CUDA failures — cubek #55 (UnitRoutine tile/line-size
+# alignment for f16/bf16) and #102/#81 (cuda accelerated WMMA types).
+# Aligned with the cubecl 0.10.0 / burn-cubecl 0.21.0 stack (which carries
+# burn #4622, the RTX 50-series nvrtc --gpu-architecture fix).
+cubek-attention = { version = "=0.2.0", default-features = false, features = ["std"] }
 # Spike: burn-cubecl as smart-runtime over cubecl (real autotune + fusion + lazy eval).
 # Replaces direct cubecl-matmul use — cubecl-matmul has no stable release, only 0.9.0-pre.X.
-burn-cubecl = { version = "=0.20.1", default-features = false, features = ["std", "autotune", "fusion"] }
-burn-tensor = { version = "=0.20.1", default-features = false, features = ["std"] }
-burn-backend = { version = "=0.20.1", default-features = false, features = ["std", "cubecl-wgpu"] }
+burn-cubecl = { version = "=0.21.0", default-features = false, features = ["std", "autotune", "fusion"] }
+burn-tensor = { version = "=0.21.0", default-features = false, features = ["std"] }
+burn-backend = { version = "=0.21.0", default-features = false, features = ["std", "cubecl-wgpu"] }
 # M5 — SEV-SNP attestation
 sev = { version = "7", default-features = false, features = ["snp", "crypto_nossl"] }
 x509-cert = { version = "0.2", default-features = false, features = ["std", "pem"] }

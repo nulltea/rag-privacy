@@ -326,6 +326,63 @@ fn cubek_gqa_nan_sweep() {
     }
 }
 
+/// FAST COLLAPSE GATE (2026-06-02): the *actual* n-sweep the comment above
+/// promised but never ran (the sibling fixes n=24). Sweeps sequence length n
+/// densely over small values and tile boundaries at the Qwen3-4B per-seq shape
+/// the prefill offload uses (`cubek_attention_folded_gqa`, Hq=32/Hkv=8/d=128,
+/// causal), random unit operands, deterministic seed. Model-free, ~seconds.
+/// A NaN at any n is the collapse, reproduced deterministically. Prints every
+/// n; asserts none NaN at the end so it is a hard pass/fail gate.
+#[test]
+#[ignore = "real Vulkan device; FAST deterministic collapse gate (cubek NaN vs n)"]
+fn cubek_gqa_nan_nsweep() {
+    let (hq, hkv, d) = (32usize, 8usize, D);
+    let group = hq / hkv;
+    let scale = 1.0 / (d as f32).sqrt();
+
+    // Dense 1..=72 (catches small-n + the failing n=23), plus tile boundaries
+    // and realistic prompt lengths. Overridable via GELO_NSWEEP_NS (comma-sep) —
+    // e.g. tile-aligned n for the blackbox kernel, which requires the stage seq_q
+    // to divide the problem seq_q (the Unit kernel handles arbitrary n).
+    let mut ns: Vec<usize> = (1..=72).collect();
+    ns.extend([
+        96, 100, 127, 128, 129, 200, 255, 256, 257, 384, 511, 512, 513, 545, 1024, 2048,
+    ]);
+    if let Ok(spec) = std::env::var("GELO_NSWEEP_NS") {
+        ns = spec
+            .split(',')
+            .filter_map(|s| s.trim().parse::<usize>().ok())
+            .collect();
+    }
+
+    let amp = 1.0_f32; // unit-scale; amp-dependence is the sibling test
+    let mut bad: Vec<usize> = Vec::new();
+    println!("{:>6} {:>10} {:>12}", "n", "nan/inf", "max_abs");
+    for &n in &ns {
+        let mut rng = ChaCha20Rng::seed_from_u64(0x5EED);
+        let mk = |rng: &mut ChaCha20Rng, h: usize| {
+            Array3::from_shape_fn((h, n, d), |_| (rng.random::<f32>() - 0.5) * 2.0 * amp)
+        };
+        let q = mk(&mut rng, hq);
+        let k = mk(&mut rng, hkv);
+        let v = mk(&mut rng, hkv);
+        let out = cubek_attention_folded_gqa(q.view(), k.view(), v.view(), group, scale, true);
+        let nf = out.iter().filter(|x| !x.is_finite()).count();
+        let mx = out
+            .iter()
+            .filter(|x| x.is_finite())
+            .fold(0f32, |a, &x| a.max(x.abs()));
+        if nf > 0 {
+            bad.push(n);
+        }
+        println!(
+            "{n:>6} {nf:>10} {mx:>12.3e}{}",
+            if nf > 0 { "   <-- NaN/Inf" } else { "" }
+        );
+    }
+    assert!(bad.is_empty(), "cubek NaN at sequence lengths n={bad:?}");
+}
+
 // ─── Deliverable 2: parity ──────────────────────────────────────────────
 
 #[test]

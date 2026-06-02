@@ -38,7 +38,10 @@ use burn_tensor::{Tensor, TensorData, Transaction, activation};
 // Backend runtime + device, selected at compile time: wgpu/Vulkan by
 // default (OEM-agnostic), cubecl-cuda under the `cuda` feature. The rest
 // of the file refers to the runtime/device only through `Rt` / `Dev`.
-#[cfg(not(feature = "cuda"))]
+// `future` is backend-agnostic (`cubecl_common`); both the wgpu `gpu_ctx`
+// init and the cubek `CUBEK_PROFILE` sync barrier use it, so it must be in
+// scope under the cuda feature too (previously not-cuda-gated, which broke
+// the cuda build at the cubek profile barrier).
 use cubecl_common::future;
 #[cfg(not(feature = "cuda"))]
 use cubecl_wgpu::{AutoGraphicsApi, RuntimeOptions, WgpuDevice, WgpuRuntime, init_setup_async};
@@ -68,6 +71,17 @@ type CubeWgpu32 = CubeBackend<Rt, f32, i32, u8>;
 /// extension (true on AMD RDNA2/3, NVIDIA Maxwell+, most modern Intel
 /// iGPUs).
 type CubeWgpu16 = CubeBackend<Rt, f16, i32, u8>;
+
+/// burn-cubecl backend specialised to bf16 floats. Used by the cubek
+/// prefill-offload path to store the attention operands and intermediate
+/// tiles with f32-range exponent — bf16's 8-bit exponent removes the f16
+/// (max 65 504) overflow that NaNs the offloaded prefill on real Qwen3-4B
+/// activations (`perm-attn-gpu-offload` BF16-kernel fix), at the cost of
+/// 3 mantissa bits vs f16. On **CUDA** bf16 is fully `all_scalar`; on
+/// **Vulkan** cubecl registers it as `Conversion | Buffer` only (gated on
+/// `VK_KHR_shader_bfloat16`), which suffices because cubek keeps the
+/// reductions in the f32 accumulator and only loads/stores bf16.
+type CubeWgpuBf16 = CubeBackend<Rt, bf16, i32, u8>;
 
 /// Backend device class, abstracted over the wgpu / CUDA split so the
 /// engine reports device identity uniformly across both runtimes.
@@ -549,6 +563,20 @@ fn array3_to_tensor_f16(view: ArrayView3<'_, f32>, device: &Dev) -> Tensor<CubeW
     let mut dst = vec![f16::ZERO; src.len()];
     dst.convert_from_f32_slice(src);
     Tensor::<CubeWgpu16, 3>::from_data(TensorData::new(dst, [b, m, k]), device)
+}
+
+/// bf16 sibling of [`array3_to_tensor_f16`] for the cubek bf16 storage
+/// path. Same SIMD `convert_from_f32_slice` (half implements
+/// `HalfFloatSliceExt` for `bf16` too); only the element type differs.
+fn array3_to_tensor_bf16(view: ArrayView3<'_, f32>, device: &Dev) -> Tensor<CubeWgpuBf16, 3> {
+    let b = view.shape()[0];
+    let m = view.shape()[1];
+    let k = view.shape()[2];
+    let std = view.as_standard_layout();
+    let src = std.as_slice().expect("standard-layout slice is contiguous");
+    let mut dst = vec![bf16::ZERO; src.len()];
+    dst.convert_from_f32_slice(src);
+    Tensor::<CubeWgpuBf16, 3>::from_data(TensorData::new(dst, [b, m, k]), device)
 }
 
 fn tensor2_to_array_f16(t: Tensor<CubeWgpu16, 2>) -> Result<Array2<f32>> {
@@ -1166,6 +1194,117 @@ impl GpuOffloadEngine for WgpuVulkanEngine {
     }
 }
 
+/// Storage dtype for the cubek attention operands + intermediate tiles,
+/// selected at runtime via `GELO_CUBEK_DTYPE` (`f16` default, `bf16`,
+/// `f32`). cubek's public API only exposes the operand/out global dtype
+/// (`AttentionGlobalTypes::from_single_dtype`) — the score/softmax tile
+/// precisions are derived from it — so this is a whole-pipeline switch,
+/// not a per-tile one.
+///
+/// - **f16** — the original 2-byte path; 10 mantissa bits but the 5-bit
+///   exponent (max 65 504) overflows on real Qwen3-4B activations → NaN.
+/// - **bf16** — the fix: 2-byte, f32-range 8-bit exponent (no overflow),
+///   at 7 mantissa bits (a pass@1 risk gated at acceptance, not here).
+/// - **f32** — 4-byte fallback: full range *and* precision, but ~2× the
+///   upload (the dominant cost), so the prefill speedup roughly halves.
+///   Kept as the in-pocket fallback if bf16 regresses pass@1.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CubekDtype {
+    F16,
+    Bf16,
+    F32,
+}
+
+impl CubekDtype {
+    fn from_env() -> Self {
+        match std::env::var("GELO_CUBEK_DTYPE").as_deref() {
+            Ok("bf16") => CubekDtype::Bf16,
+            Ok("f32") => CubekDtype::F32,
+            _ => CubekDtype::F16,
+        }
+    }
+
+    /// cubecl element `Type` for this dtype (cubek 0.2.0 `from_single_float_dtype`
+    /// and `TensorHandle::new` take `impl Into<Type>`, not a raw `StorageType`).
+    fn cube_type(self) -> cubecl::ir::Type {
+        use cubecl::prelude::CubePrimitive;
+        match self {
+            CubekDtype::F16 => f16::as_type_native_unchecked(),
+            CubekDtype::Bf16 => bf16::as_type_native_unchecked(),
+            CubekDtype::F32 => f32::as_type_native_unchecked(),
+        }
+    }
+
+    fn elem_size(self) -> usize {
+        match self {
+            CubekDtype::F16 | CubekDtype::Bf16 => 2,
+            CubekDtype::F32 => 4,
+        }
+    }
+
+    /// f32 host slice → LE bytes of this dtype, ready for cubek upload.
+    fn f32_to_bytes(self, src: &[f32]) -> Vec<u8> {
+        match self {
+            CubekDtype::F16 => {
+                let mut dst = vec![f16::ZERO; src.len()];
+                dst.convert_from_f32_slice(src);
+                bytemuck::cast_slice(&dst).to_vec()
+            }
+            CubekDtype::Bf16 => {
+                let mut dst = vec![bf16::ZERO; src.len()];
+                dst.convert_from_f32_slice(src);
+                bytemuck::cast_slice(&dst).to_vec()
+            }
+            CubekDtype::F32 => bytemuck::cast_slice(src).to_vec(),
+        }
+    }
+
+    /// cubek readback LE bytes of this dtype → f32 host vec (`n` elems).
+    fn bytes_to_f32(self, bytes: &[u8], n: usize) -> Vec<f32> {
+        let mut out = vec![0.0_f32; n];
+        match self {
+            CubekDtype::F16 => {
+                let h: &[f16] = bytemuck::cast_slice(&bytes[..n * 2]);
+                h.convert_to_f32_slice(&mut out);
+            }
+            CubekDtype::Bf16 => {
+                let h: &[bf16] = bytemuck::cast_slice(&bytes[..n * 2]);
+                h.convert_to_f32_slice(&mut out);
+            }
+            CubekDtype::F32 => {
+                out.copy_from_slice(bytemuck::cast_slice(&bytes[..n * 4]));
+            }
+        }
+        out
+    }
+}
+
+/// Max |element| of an f32 view — cheap operand-magnitude probe for the
+/// which-tile-overflows diagnosis (logged under `GELO_DEBUG_OFFLOAD`).
+fn max_abs3(view: ArrayView3<'_, f32>) -> f32 {
+    view.iter().fold(0f32, |a, &x| a.max(x.abs()))
+}
+
+/// cubek attend strategy from `CUBEK_STRATEGY` (`unit` default / `blackbox`).
+/// `unit` = portable (no tensor cores); `blackbox` = cooperative-matmul / tensor
+/// cores. cubek 0.2.0's `BlackboxAcceleratedStrategy` is no longer `Default`, so
+/// the `Inferred` hint supplies minimal partition counts (1 each) and lets the
+/// blueprint inference expand them to valid tensor-core tiles.
+fn cubek_strategy_from_env() -> cubek_attention::launch::Strategy {
+    use cubek_attention::launch::{BlueprintStrategy, Strategy};
+    use cubek_attention::routines::blackbox_accelerated::BlackboxAcceleratedStrategy;
+    match std::env::var("CUBEK_STRATEGY").as_deref() {
+        Ok("blackbox") => Strategy::BlackboxAccelerated(BlueprintStrategy::Inferred(
+            BlackboxAcceleratedStrategy {
+                num_planes: 1,
+                seq_q: 1,
+                seq_kv: 1,
+            },
+        )),
+        _ => Strategy::Unit(BlueprintStrategy::Inferred(())),
+    }
+}
+
 /// Folded-head attention via the `cubek-attention` portable kernel.
 ///
 /// Treats the leading dim of `q`/`k`/`v` (`[B*Hq, n_q, d]` /
@@ -1188,13 +1327,9 @@ pub fn cubek_attention_folded(
     scale: f32,
     causal: bool,
 ) -> Array3<f32> {
-    use cubecl::ir::{ElemType, FloatKind, StorageType};
     use cubecl::std::tensor::TensorHandle;
-    use cubek_attention::definition::{
-        AccumulatorPrecision, AttentionDims, AttentionGlobalTypes, AttentionOptions,
-        AttentionProblem,
-    };
-    use cubek_attention::launch::{BlueprintStrategy, Strategy, launch};
+    use cubek_attention::definition::{AccumulatorPrecision, AttentionGlobalTypes, AttentionOptions};
+    use cubek_attention::launch::launch_ref;
 
     let bh = q.shape()[0];
     let n_q = q.shape()[1];
@@ -1209,8 +1344,12 @@ pub fn cubek_attention_folded(
     let device = Dev::default();
     let client = <Rt as cubecl::Runtime>::client(&device);
 
-    let f16_dtype = StorageType::Scalar(ElemType::Float(FloatKind::F16));
-    let global_dtypes = AttentionGlobalTypes::from_single_dtype(f16_dtype);
+    // Storage dtype (f16 default / bf16 fix / f32 fallback) — whole-pipeline,
+    // since the score/softmax tiles derive from the operand dtype.
+    let dtype = CubekDtype::from_env();
+    let dtype_ty = dtype.cube_type();
+    let global_dtypes =
+        AttentionGlobalTypes::from_single_float_dtype(dtype_ty, AttentionGlobalTypes::mask_dtype(&client));
 
     // Per-stage preparation breakdown (perm-attn-gpu-offload Phase 5a). The
     // cubek attend bucket lumps convert + upload + compute + readback into
@@ -1221,63 +1360,54 @@ pub fn cubek_attention_folded(
     let profile = std::env::var("CUBEK_PROFILE").as_deref() == Ok("1");
     let sync_barrier = |reason: &str| {
         if profile {
-            client.flush();
+            let _ = client.flush();
             future::block_on(client.sync()).unwrap_or_else(|e| {
                 panic!("cubek_attention_folded sync barrier ({reason}) failed: {e:?}")
             });
         }
     };
 
-    // ── Stage 1: f32 → f16 host convert via half's SIMD
-    //    `convert_from_f32_slice` (F16C `vcvtps2ph`, runtime-detected) — the
-    //    same path the engine's K/V upload uses (`array3_to_tensor_f16`),
-    //    ~10× the scalar `f16::from_f32` loop it replaces (Phase-5a O1). Timed
-    //    per operand so the GQA-expanded K/V convert cost stays explicit.
-    let to_f16 = |arr: ArrayView3<'_, f32>| -> Vec<f16> {
+    // ── Stage 1: f32 → storage-dtype host convert via half's SIMD
+    //    `convert_from_f32_slice` (F16C, runtime-detected) for f16/bf16, or a
+    //    direct copy for f32 — the same path the engine's K/V upload uses
+    //    (`array3_to_tensor_f16`). Timed per operand so the GQA-expanded K/V
+    //    convert cost stays explicit. Returns LE bytes ready for upload.
+    let to_bytes = |arr: ArrayView3<'_, f32>| -> Vec<u8> {
         let std = arr.as_standard_layout();
         let src = std.as_slice().expect("standard-layout slice is contiguous");
-        let mut dst = vec![f16::ZERO; src.len()];
-        dst.convert_from_f32_slice(src);
-        dst
-    };
-    // f16 is `repr(transparent)` over `u16`; on this LE host its in-memory
-    // bytes are already the LE encoding cubek's uploader expects.
-    let as_bytes = |h: &[f16]| -> &[u8] {
-        unsafe { std::slice::from_raw_parts(h.as_ptr() as *const u8, std::mem::size_of_val(h)) }
+        dtype.f32_to_bytes(src)
     };
 
     let t = std::time::Instant::now();
-    let q_h = to_f16(q);
+    let q_bytes = to_bytes(q);
     let cvt_q = t.elapsed();
     let t = std::time::Instant::now();
-    let k_h = to_f16(k);
+    let k_bytes = to_bytes(k);
     let cvt_k = t.elapsed();
     let t = std::time::Instant::now();
-    let v_h = to_f16(v);
+    let v_bytes = to_bytes(v);
     let cvt_v = t.elapsed();
-    let (q_bytes, k_bytes, v_bytes) = (as_bytes(&q_h), as_bytes(&k_h), as_bytes(&v_h));
 
     // cubek shape: [batch, num_heads, seq, head_dim] with num_heads = 1.
     let q_shape = vec![bh, 1, n_q, d];
     let kv_shape = vec![bh, 1, n_kv, d];
     let out_shape = vec![bh, 1, n_q, d];
-    let elem_size = 2;
+    let elem_size = dtype.elem_size();
 
     // ── Stage 2: host → device upload (DMA). Under the profile barrier the
     //    elapsed time is the real transfer; otherwise the alloc just enqueues.
     let t = std::time::Instant::now();
-    let q_alloc = client.create_tensor_from_slice(q_bytes, &q_shape, elem_size);
-    let k_alloc = client.create_tensor_from_slice(k_bytes, &kv_shape, elem_size);
-    let v_alloc = client.create_tensor_from_slice(v_bytes, &kv_shape, elem_size);
+    let q_alloc = client.create_tensor_from_slice(&q_bytes, q_shape.clone().into(), elem_size);
+    let k_alloc = client.create_tensor_from_slice(&k_bytes, kv_shape.clone().into(), elem_size);
+    let v_alloc = client.create_tensor_from_slice(&v_bytes, kv_shape.clone().into(), elem_size);
 
     let q_tensor: TensorHandle<Rt> =
-        TensorHandle::new(q_alloc.handle, q_shape, q_alloc.strides, f16_dtype);
+        TensorHandle::new(q_alloc.memory, q_shape, q_alloc.strides, dtype_ty);
     let k_tensor: TensorHandle<Rt> =
-        TensorHandle::new(k_alloc.handle, kv_shape.clone(), k_alloc.strides, f16_dtype);
+        TensorHandle::new(k_alloc.memory, kv_shape.clone(), k_alloc.strides, dtype_ty);
     let v_tensor: TensorHandle<Rt> =
-        TensorHandle::new(v_alloc.handle, kv_shape, v_alloc.strides, f16_dtype);
-    let out_tensor: TensorHandle<Rt> =
-        TensorHandle::empty(&client, out_shape, f16_dtype);
+        TensorHandle::new(v_alloc.memory, kv_shape, v_alloc.strides, dtype_ty);
+    let out_tensor: TensorHandle<Rt> = TensorHandle::empty(&client, out_shape, dtype_ty);
     sync_barrier("upload");
     let upload_ms = t.elapsed();
 
@@ -1285,42 +1415,26 @@ pub fn cubek_attention_folded(
         causal,
         accumulator_precision: AccumulatorPrecision::default(),
     };
-    let problem = AttentionProblem {
-        dims: AttentionDims {
-            batch: bh,
-            num_heads: 1,
-            seq_q: n_q,
-            seq_kv: n_kv,
-            head_dim: d,
-            val_dim: d,
-        },
-        masked: false,
-        global_dtypes: global_dtypes.clone(),
-        options: options.clone(),
-    };
-    let _ = problem;
 
     // Strategy: `unit` = portable (no tensor cores); `blackbox` = accelerated
-    // (cooperative-matmul / tensor cores). Select via CUBEK_STRATEGY.
-    let strategy = match std::env::var("CUBEK_STRATEGY").as_deref() {
-        Ok("blackbox") => {
-            Strategy::BlackboxAccelerated(BlueprintStrategy::Inferred(Default::default()))
-        }
-        _ => Strategy::Unit(BlueprintStrategy::Inferred(())),
-    };
+    // (cooperative-matmul / tensor cores). Select via CUBEK_STRATEGY. cubek 0.2.0's
+    // BlackboxAcceleratedStrategy is no longer `Default` — supply minimal partition
+    // counts and let the blueprint inference expand them.
+    let strategy = cubek_strategy_from_env();
 
     // ── Stage 3: GPU attend (tiled online-softmax · V). The profile barrier
     //    isolates pure compute; without it this just enqueues and the cost
     //    surfaces in the readback sync below.
     let t = std::time::Instant::now();
-    launch::<Rt>(
+    let out_handle = out_tensor.handle.clone();
+    launch_ref::<Rt>(
         strategy,
         &client,
-        q_tensor,
-        k_tensor,
-        v_tensor,
+        q_tensor.binding(),
+        k_tensor.binding(),
+        v_tensor.binding(),
         None,
-        out_tensor.clone(),
+        out_tensor.binding(),
         &global_dtypes,
         options,
     )
@@ -1331,26 +1445,19 @@ pub fn cubek_attention_folded(
     // ── Stage 4: device → host readback (includes the implicit sync if the
     //    profile barriers are off, in which case it absorbs upload+compute).
     let t = std::time::Instant::now();
-    let out_bytes = client.read_one(out_tensor.handle);
+    let out_bytes = client.read_one_unchecked(out_handle);
     let readback_ms = t.elapsed();
 
-    // ── Stage 5: f16 → f32 host convert of the output via SIMD
-    //    `convert_to_f32_slice` (Phase-5a O1; was a scalar `from_bits` loop).
+    // ── Stage 5: storage-dtype → f32 host convert of the output. f16/bf16
+    //    SIMD-widen via `convert_to_f32_slice`; f32 is a copy (Phase-5a O1).
     let t = std::time::Instant::now();
     let n_out = bh * n_q * d;
-    // Reinterpret the LE f16 readback bytes as `&[f16]` (no copy), then
-    // SIMD-widen into the f32 output buffer. GPU readback buffers are
-    // runtime-allocated and ≥2-byte aligned; assert it in debug.
     debug_assert_eq!(
-        out_bytes.as_ptr() as usize % std::mem::align_of::<f16>(),
-        0,
-        "cubek readback buffer is not f16-aligned"
+        out_bytes.len(),
+        n_out * elem_size,
+        "cubek readback size mismatch"
     );
-    debug_assert_eq!(out_bytes.len(), n_out * 2, "cubek readback size mismatch");
-    let out_h: &[f16] =
-        unsafe { std::slice::from_raw_parts(out_bytes.as_ptr() as *const f16, n_out) };
-    let mut out_vec = vec![0.0_f32; n_out];
-    out_h.convert_to_f32_slice(&mut out_vec);
+    let out_vec = dtype.bytes_to_f32(&out_bytes, n_out);
     let out = Array3::from_shape_vec((bh, n_q, d), out_vec)
         .expect("cubek out shape matches buffer");
     let cvt_out = t.elapsed();
@@ -1360,7 +1467,7 @@ pub fn cubek_attention_folded(
         let q_el = bh * n_q * d;
         let kv_el = bh * n_kv * d;
         eprintln!(
-            "[cubek-prep] bh={bh} n_q={n_q} n_kv={n_kv} d={d}  \
+            "[cubek-prep] dtype={dtype:?} bh={bh} n_q={n_q} n_kv={n_kv} d={d}  \
              (Q {q_el} el, K/V {kv_el} el each)"
         );
         eprintln!(
@@ -1373,7 +1480,7 @@ pub fn cubek_attention_folded(
         eprintln!("  upload (DMA, synced)        {:7.2} ms", ms(upload_ms));
         eprintln!("  compute (GPU attend)        {:7.2} ms", ms(compute_ms));
         eprintln!("  readback                    {:7.2} ms", ms(readback_ms));
-        eprintln!("  convert-out (f16→f32)       {:7.2} ms", ms(cvt_out));
+        eprintln!("  convert-out (→f32)          {:7.2} ms", ms(cvt_out));
         let prep = cvt_q + cvt_k + cvt_v + upload_ms;
         eprintln!(
             "  ── prep (convert+upload) {:7.2} ms  vs compute {:7.2} ms  \
@@ -1403,12 +1510,9 @@ pub fn cubek_attention_folded_gqa(
     scale: f32,
     causal: bool,
 ) -> Array3<f32> {
-    use cubecl::ir::{ElemType, FloatKind, StorageType};
     use cubecl::std::tensor::TensorHandle;
-    use cubek_attention::definition::{
-        AccumulatorPrecision, AttentionGlobalTypes, AttentionOptions,
-    };
-    use cubek_attention::launch::{BlueprintStrategy, Strategy, launch};
+    use cubek_attention::definition::{AccumulatorPrecision, AttentionGlobalTypes, AttentionOptions};
+    use cubek_attention::launch::launch_ref;
 
     let hq = q.shape()[0];
     let n_q = q.shape()[1];
@@ -1421,68 +1525,114 @@ pub fn cubek_attention_folded_gqa(
 
     let device = Dev::default();
     let client = <Rt as cubecl::Runtime>::client(&device);
-    let f16_dtype = StorageType::Scalar(ElemType::Float(FloatKind::F16));
-    let global_dtypes = AttentionGlobalTypes::from_single_dtype(f16_dtype);
+    // Storage dtype (f16 default / bf16 fix / f32 fallback) — whole-pipeline.
+    let dtype = CubekDtype::from_env();
+    let dtype_ty = dtype.cube_type();
+    let global_dtypes =
+        AttentionGlobalTypes::from_single_float_dtype(dtype_ty, AttentionGlobalTypes::mask_dtype(&client));
 
-    // Un-replicated SIMD convert + upload (array3_to_tensor_f16), then expand
-    // K/V on-device (reshape → repeat_dim → reshape), mirroring
-    // `resident_kv_expanded`. Q is already per-q-head.
-    let q_b = array3_to_tensor_f16(q, &device).reshape([hq, 1, n_q, d]);
-    let expand_kv = |t: Tensor<CubeWgpu16, 3>| -> Tensor<CubeWgpu16, 4> {
-        if group > 1 {
-            t.reshape([hkv, 1, n_kv, d])
-                .repeat_dim(1, group)
-                .reshape([hq, 1, n_kv, d])
-        } else {
-            t.reshape([hq, 1, n_kv, d])
+    // Which-tile-overflows probe (GELO_DEBUG_OFFLOAD). The f16 storage NaN is
+    // either the value tile (max|V| > 65 504) or the score tile (max|QKᵀᵀᵀ|/√d).
+    // max|V| is exact; the score bound mq·mk·√d is a loose upper bound (no
+    // matmul) that flags whether the score path *can* overflow f16. This tells
+    // the post-mortem which fallback applies if the pass@1 gate fails: a
+    // correctable V pre-scale (value-only) vs wider storage (score tile).
+    if std::env::var("GELO_DEBUG_OFFLOAD").is_ok() {
+        let (mq, mk, mv) = (max_abs3(q), max_abs3(k), max_abs3(v));
+        let score_ub = mq * mk * (d as f32).sqrt();
+        // Actual max |score| = max_{h,i,j} |Q[h,i,·]·K[h/group,j,·]| · (1/√d)
+        // (cubek's internal scale). Cheap at probe shapes; only the max is
+        // needed. exp(this) is what the f16 softmax tile must hold — f16
+        // overflows at score ≈ 11.09 (exp = 65 520 > 65 504), so this, not the
+        // operand range, is the real overflow seam (operands above are ≪ 65 504).
+        let inv_sqrt_d = 1.0_f32 / (d as f32).sqrt();
+        let mut score_max = 0.0_f32;
+        for h in 0..hq {
+            let kv = h / group;
+            for i in 0..n_q {
+                for j in 0..n_kv {
+                    let mut dot = 0.0_f32;
+                    for dd in 0..d {
+                        dot += q[[h, i, dd]] * k[[kv, j, dd]];
+                    }
+                    score_max = score_max.max((dot * inv_sqrt_d).abs());
+                }
+            }
         }
-    };
-    let k_b = expand_kv(array3_to_tensor_f16(k, &device));
-    let v_b = expand_kv(array3_to_tensor_f16(v, &device));
+        let exp_score = score_max.exp();
+        eprintln!(
+            "[cubek-tile] dtype={dtype:?} hq={hq} hkv={hkv} n_q={n_q} n_kv={n_kv} \
+             max|Q|={mq:.2e} max|K|={mk:.2e} max|V|={mv:.2e} \
+             score_ub≈{score_ub:.2e} |score|max={score_max:.2} exp={exp_score:.2e} \
+             (f16 max 6.55e4)"
+        );
+    }
 
-    // Bridge burn `Tensor<CubeWgpu16, 4>` → cubek `TensorHandle<Rt>`. The
-    // burn float primitive *is* `CubeTensor<Rt>` (burn-cubecl), whose buffer
-    // handle is valid for cubek's launch on the same client.
-    let to_handle = |t: Tensor<CubeWgpu16, 4>| -> TensorHandle<Rt> {
-        let ct = t.into_primitive().tensor();
-        TensorHandle::new(ct.handle, ct.shape.dims, ct.strides, f16_dtype)
+    // Un-replicated SIMD convert + upload, then expand K/V on-device
+    // (reshape → repeat_dim → reshape), mirroring `resident_kv_expanded`; Q is
+    // already per-q-head. The burn tensor element type differs per storage
+    // dtype, so the build+expand+bridge is generated per dtype by `build`
+    // (the on-device GQA broadcast and the `CubeTensor<Rt>` bridge are
+    // identical across dtypes). `bf16` is the overflow fix; `f32` the fallback.
+    macro_rules! build {
+        ($conv:ident, $B:ty) => {{
+            let q_b = $conv(q, &device).reshape([hq, 1, n_q, d]);
+            let expand_kv = |t: Tensor<$B, 3>| -> Tensor<$B, 4> {
+                if group > 1 {
+                    t.reshape([hkv, 1, n_kv, d])
+                        .repeat_dim(1, group)
+                        .reshape([hq, 1, n_kv, d])
+                } else {
+                    t.reshape([hq, 1, n_kv, d])
+                }
+            };
+            let k_b = expand_kv($conv(k, &device));
+            let v_b = expand_kv($conv(v, &device));
+            // Bridge burn `Tensor<$B, 4>` → cubek `TensorHandle<Rt>` via the
+            // `From<CubeTensor<R>>` impl (burn-cubecl): the burn float primitive
+            // *is* `CubeTensor<Rt>` for every `CubeBackend<Rt, _, _, _>`, so its
+            // buffer handle is valid for cubek's launch on the same client
+            // regardless of element type.
+            let to_handle = |t: Tensor<$B, 4>| -> TensorHandle<Rt> {
+                t.into_primitive().tensor().into()
+            };
+            (to_handle(q_b), to_handle(k_b), to_handle(v_b))
+        }};
+    }
+    let (q_tensor, k_tensor, v_tensor) = match dtype {
+        CubekDtype::F16 => build!(array3_to_tensor_f16, CubeWgpu16),
+        CubekDtype::Bf16 => build!(array3_to_tensor_bf16, CubeWgpuBf16),
+        CubekDtype::F32 => build!(array3_to_tensor_f32, CubeWgpu32),
     };
-    let q_tensor = to_handle(q_b);
-    let k_tensor = to_handle(k_b);
-    let v_tensor = to_handle(v_b);
-    let out_tensor: TensorHandle<Rt> =
-        TensorHandle::empty(&client, vec![hq, 1, n_q, d], f16_dtype);
+    let out_tensor: TensorHandle<Rt> = TensorHandle::empty(&client, vec![hq, 1, n_q, d], dtype_ty);
 
     let options = AttentionOptions {
         causal,
         accumulator_precision: AccumulatorPrecision::default(),
     };
-    let strategy = match std::env::var("CUBEK_STRATEGY").as_deref() {
-        Ok("blackbox") => {
-            Strategy::BlackboxAccelerated(BlueprintStrategy::Inferred(Default::default()))
-        }
-        _ => Strategy::Unit(BlueprintStrategy::Inferred(())),
-    };
+    let strategy = cubek_strategy_from_env();
 
-    launch::<Rt>(
+    let out_handle = out_tensor.handle.clone();
+    launch_ref::<Rt>(
         strategy,
         &client,
-        q_tensor,
-        k_tensor,
-        v_tensor,
+        q_tensor.binding(),
+        k_tensor.binding(),
+        v_tensor.binding(),
         None,
-        out_tensor.clone(),
+        out_tensor.binding(),
         &global_dtypes,
         options,
     )
     .expect("cubek_attention_folded_gqa launch failed");
 
-    let out_bytes = client.read_one(out_tensor.handle);
+    let out_bytes = client.read_one_unchecked(out_handle);
     let n_out = hq * n_q * d;
-    debug_assert_eq!(out_bytes.len(), n_out * 2, "cubek gqa readback size mismatch");
-    let out_h: &[f16] =
-        unsafe { std::slice::from_raw_parts(out_bytes.as_ptr() as *const f16, n_out) };
-    let mut out_vec = vec![0.0_f32; n_out];
-    out_h.convert_to_f32_slice(&mut out_vec);
+    debug_assert_eq!(
+        out_bytes.len(),
+        n_out * dtype.elem_size(),
+        "cubek gqa readback size mismatch"
+    );
+    let out_vec = dtype.bytes_to_f32(&out_bytes, n_out);
     Array3::from_shape_vec((hq, n_q, d), out_vec).expect("cubek gqa out shape matches buffer")
 }

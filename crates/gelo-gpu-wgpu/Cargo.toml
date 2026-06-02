@@ -5,17 +5,22 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-# Default-on (since 2026-05-19): BLIS-mt at n=2048 prefill is 5×
-# faster than matrixmultiply, and equal/better at smaller shapes
-# with threads=1 (the default). Pass through to gelo-protocol's
-# blas feature, which links AOCL-BLIS via blis-src `system`. To
-# force pure-Rust matrixmultiply, build with --no-default-features.
-default = ["blas"]
+# `blas` (BLIS-mt) — default-on since 2026-05-19: 5× faster than
+# matrixmultiply at n=2048 prefill, equal/better at smaller shapes with
+# threads=1. Pass through to gelo-protocol's blas feature (links AOCL-BLIS
+# via blis-src `system`). `cuda` — default-on (2026-06-02, dGPU/Nvidia
+# bring-up): this is the Nvidia/RTX-5090 deployment box and CUDA is the
+# production backend, so all benches + gates must run CUDA (real tensor
+# cores), NOT the Vulkan dev path where cubek's BlackboxAccelerated kernel
+# is broken. Requires a CUDA toolkit (nvrtc) + driver.
+#
+# Non-CUDA hosts (the Strix Halo iGPU dev track, or any box without a CUDA
+# toolkit) must build with `--no-default-features --features blas` to fall
+# back to the wgpu/Vulkan engine.
+default = ["blas", "cuda"]
 blas = ["gelo-protocol/blas"]
-# Opt-in CUDA backend (Nvidia dGPU). Flips the engine's cubecl runtime
-# from wgpu/Vulkan to cubecl-cuda at compile time; Vulkan stays the
-# default. Used to A/B the GPU-matmul path on Nvidia. Requires a CUDA
-# toolkit (nvrtc) + driver present.
+# CUDA backend (Nvidia dGPU). Flips the engine's cubecl runtime from
+# wgpu/Vulkan to cubecl-cuda at compile time. Default-on on this box (above).
 cuda = ["dep:cubecl-cuda", "burn-backend/cubecl-cuda"]
 
 [dependencies]
