@@ -141,72 +141,91 @@ were all retrieval-pipeline numbers reused), so it is an **open gap** (note afte
 §8); and **Retrieval is split by index structure** — vector (flat/IVF) vs graph-indexed
 (graph-based ANN + graph-semantic) search/storage.
 
+**Cost-table columns (8) and conventions (rebuilt 2026-06-02, grill #N):**
+`Scheme · Target model(s) · Hardware · ×-overhead vs plaintext · Comm · Preprocessing/offline · Fidelity · Flag`.
+- **×-overhead vs plaintext** is the headline, comparable metric (cost relative to running the
+  *unsecured* model on the same hardware), with the absolute figure in parentheses where given.
+  Head-to-head "X× vs scheme B" numbers are **not** comparable and are not used as the headline.
+  Where a scheme reports only relative speedups, the overhead is **extrapolated 1-hop within the
+  same model+hardware regime** and flagged `≈… (via B)`; if no same-regime vs-plaintext anchor
+  exists, the cell reads `— (only relative: …)` or gives the absolute figure only. Crypto (MPC/FHE)
+  schemes mostly land here — they report vs prior schemes, rarely vs plaintext — whereas
+  TEE/obfuscation/hybrid/DP schemes report clean vs-plaintext overhead.
+- **Comm** = absolute communication (e.g. 164 MB/inference, 20 Mb/token); `—` where negligible
+  (TEE/obfuscation), relative-only where a paper gives only "X× less than B".
+- **Preprocessing/offline** = type + magnitude of one-time setup: MPC offline triples / FSS keys;
+  FHE keygen; obfuscation *matrix setup* (cheap, e.g. AloePri/GELO) vs **offline training of a
+  transform/projection/encryptor network** (SGT, OSNIP, Eguard, SPARSE) — a major hidden cost for
+  "≈0 inference overhead" obfuscation/DP schemes.
+- **⚠ = not reported / not yet extracted** (especially hardware on some crypto/RAG schemes —
+  flagged for a follow-up fetch + `/verify-claims`).
+
 ## B.1 Generation (decoder inference)
 
-| Scheme | Perf | Prov. | Threat-fit | Fidelity | Flag |
-|---|---|---|---|---|---|
-| PermLLM | 3 s/token (ChatGLM-6B; 3×L20-class GPU; 2PC+dealer, WAN); ~20 Mb/token | self-reported | HbC cloud, 2 non-colluding + dealer; constrained (permutation not info-theoretic) | exact | ★ |
-| CryptoMoE | 2.8–3.5× latency / 2.9–4.3× comm reduction vs dense MoE (DeepSeek/OLMoE/QwenMoE 6.9–16.4B; Xeon 8468; 2PC LAN/WAN) | head-to-head | HbC 2PC, non-colluding; routing-pattern adversary | task-acc. 99.2% retained (≈−0.8%) | ★ |
-| GELO | 20–30% overhead (76% offload; Llama-2-7B; confidential GPU + untrusted GPU) | head-to-head | HbC shared-GPU, single-batch BSS adversary | exact (float32 recovered) | ★ |
-| TwinShield | 4.0–6.1× vs prior verifiable (87% offload; vision/lang Transformers; SGX + GPU); 5.4× vs TEE-only | head-to-head | malicious cloud (data+model+integrity) | exact | ★ |
-| ObfuscaTune | 1.5–4.3× (GPT2-small→XL; ~5% params in TEE) | self-reported | HbC cloud (dual model+data conf.) | exact-ish (invertible obfusc; numerical error grows w/ matrix condition number) | ★ |
-| SCX | near-zero online; target <50 ms (7B; GPU-TEE; per-session OTK) | self-reported | HbC cloud; KV-cache reconstruction adversary | exact | ★ |
-| Opal | KG-filter + synthesis = ~1.15 s of the 2.32 s/query path (gpt-oss-20b; B200 CC) | head-to-head | malicious host; access-pattern adversary | exact (model in enclave) | ★ |
-| AloePri | ~0% (near-plaintext; vLLM/SGLang drop-in; Qwen/Llama/DeepSeek) | head-to-head | HbC cloud, **constrained** attacker (RDP budget) | 0–3.5% acc. loss; <5% tokens recovered by VMA/IMA/IA/ISA | ★ |
-| SGT (Stained Glass) | ~0 ms client-side transform (Llama/Qwen3 decoders; token-embedding obfusc) | self-reported | HbC cloud, constrained attacker | downstream LLM util −0.29 to −0.5 pp (but AloePri reports SGT broken by IMA — see E #9) | ★ |
-| OSNIP | 0.96 ms (Llama-3.2-1B/3B, Qwen3-14B/32B; null-space projection) | self-reported | HbC cloud, KNN/vocab-match adversary | near-lossless util; KNN-attack ASR ≈ 0 | ★ |
-| BumbleBee | ~8 min/token (LLaMA-7B; CPU; 2PC); >10× vs Iron | self-reported | HbC 2PC, no dealer | exact | † |
-| SHAFT | 2.6–3.7× faster than BumbleBee, 1.8–2.4× than SIGMA, 62–70% less comm (BERT/GPT/ViT; 2PC LAN; constant-round softmax + Fourier GELU) | head-to-head (vs SIGMA/BumbleBee) | HbC 2PC, non-colluding | accuracy ≈ plaintext (GELU max err 4.6e-3) | ★ |
-| Fission | >8× vs CrypTen (BERT); 5× (ModernBERT); >3× (Llama-3-1B); ~seconds @1B (80 vCPU + 2×H100; MPC nodes + evaluator nodes) | head-to-head (vs CrypTen) | HbC distributed MPC, non-colluding incl. evaluators | exact-ish (linear=MPC, nonlinear in clear on shuffled shares; acc ≈ PyTorch) | ★ |
-| Euston | 5.5× (GPT-2-1.5B) / 8.8× (LLaMA-3-8B) vs NEXUS-CPU (batch 32×128 tok; LAN) | head-to-head (vs NEXUS) | HbC cloud, non-interactive | approx. (poly GELU/Softmax/LN; Δ n/r) | ★ |
-| NEXUS | 37.3 s/inference, 164 MB BW (BERT-base; non-interactive) | self-reported | HbC cloud, non-interactive | approx. (Δ n/r) | † |
-| PipeLLM | cuts CC overhead from 52.8%/88.2% (OPT-30B/66B) to <19.6% throughput (OPT 13B–175B; H100-SXM; speculative pipelined PCIe-AES) | head-to-head (vs vanilla CC) | HbC cloud, GPU-TEE operator | exact | ★ |
-| H100 CC baseline | GPU 4–7% throughput penalty (Llama2 7/13/70B; H100 CC); CPU-TEE <10% thr / <20% lat; RAG-in-TEE 7% | head-to-head | HbC cloud, Tier-3 (GPU-TEE) / Tier-2 (CPU-TEE) baseline | exact | ★ |
-| Portcullis | 96× vs Hide-and-Seek (mask/unmask); 1.33% overhead vs raw LLM inference; ~3 s latency (TDX gateway, LLaMA-2-7B/vLLM) | head-to-head (vs Hide-and-Seek/InferDPT) | HbC; protects PII before 3rd-party LLM | response cosine-sim >0.7 (GPT-4o-mini); beats Hide-and-Seek by 0.1 on Enron | ★ |
-| DP-RAG / DP-KSA | output-(ε,δ)-DP, backend-agnostic (PTR keyword extraction; δ=1e-4); F1 21.7→25.2 @ε=0→8 (Llama-3.2-3B, NQ; 80 ensembles); beats non-RAG @ε≥2 | head-to-head (vs non-RAG / non-private KSA) | HbC; query-only output-extraction adversary | utility ↑ with ε; > non-RAG at moderate ε | ★ |
+| Scheme | Target model(s) | Hardware | ×-overhead vs plaintext | Comm | Preprocessing/offline | Fidelity | Flag |
+|---|---|---|---|---|---|---|---|
+| PermLLM | ChatGLM-6B | 3×L20-class GPU; WAN 10 ms/1 Gbps | — (only relative: "orders faster than MPC"; abs 3 s/tok) | ~20 Mb/tok | MPC offline: Beaver + permutation triples (dealer) | exact | ★ |
+| CryptoMoE | DeepSeek/OLMoE/QwenMoE 6.9–16.4B | Xeon 8468; 2PC LAN 3 Gbps/WAN 400 Mbps | — (only relative: 2.8–3.5× vs dense-MPC) | 2.9–4.3× < dense-MPC (rel.) | MPC offline (HE+SS) | task-acc 99.2% (≈−0.8%) | ★ |
+| GELO | Llama-2-7B | confidential GPU (H200) + untrusted GPU (L40S) | **1.2–1.3×** (20–30% vs insecure offload) | — (TEE-local mixing) | per-batch fresh invertible matrix (cheap, online) | exact (float32) | ★ |
+| TwinShield | vision/language Transformers | Intel SGX + GPU | — (only relative: 5.4× vs TEE-only, 4.0–6.1× vs prior verifiable; 87% offload) | masked act. (⚠ abs n/r) | offline precompute of mask products (RW) | exact | ★ |
+| ObfuscaTune | GPT-2 small→XL | 2 GPUs (1 simulates TEE); "middle-range" (model n/r); 1–8 GPU-h/exp | **1.5–4.3×** (vs unprotected) | — | one-time obfusc-matrix setup (<10 s/GPT2-XL on mid GPU; low-cond.-number) | exact-ish (numerical err ↑ w/ cond.) | ★ |
+| SCX | 7B decoder | GPU-TEE + cloud GPU (⚠ testbed machine n/r — confirmed via full MD) | **~1×** (near-zero online; target <50 ms) | — | per-session one-time-key setup | exact | ★ |
+| Opal | gpt-oss-20b + nomic-embed | TDX CPU-TEE + B200 GPU-TEE; WAN | **1.57×** (vs plaintext Opal; abs 2.32 s/query) | ORAM batches (⚠ abs n/r) | ORAM index build + KG construction (offline) | exact | ★ |
+| AloePri | Qwen/Llama/DeepSeek (≤671B) | client 2×Xeon 8457C; server GPU cluster (vLLM) | **~1×** (near-plaintext) | — | one-time covariant obfusc of weights (offline matrix transforms) | 0–3.5% acc loss; <5% token recovery | ★ |
+| SGT (Stained Glass) | Llama-1B, Qwen3 | transform-training: 1×A100 80GB (small) → up to 64×8 A100 80GB (large); inference client-side | **~1×** (≈0 ms client transform) | obf. embeddings (> token IDs) | **offline training of SGT transformer** (MI-loss; ~6 GPU-h small → ~2 days large, FSDP2+TP) | −0.29–0.5 pp util (⚠ AloePri reports broken by IMA, E #9) | ★ |
+| OSNIP | Llama-3.2-1B/3B, Qwen3-14B/32B | ⚠ not reported (confirmed via full MD; client-side encryptor) | **~1×** (0.96 ms) | obf. embeddings | **offline training of encryption network** (gradient access to server LLM) | near-lossless; KNN-ASR ≈ 0 | ★ |
+| BumbleBee | LLaMA-7B | CPU (⚠ machine n/r); 2PC | — (only relative; abs ~8 min/tok) | 0.1× < BOLT (rel.) | HE (RLWE) + OT offline | exact | † |
+| SHAFT | BERT / GPT / ViT | 2×NVIDIA A40, 256 GB, Xeon Gold 5318Y; 2PC LAN | — (only relative: 1.3× vs SIGMA on BERT; 4.6–5.3× LAN / 2.9–4.4× WAN vs BumbleBee — *verified, E #17*) | 25–41% < SIGMA (rel.) | 2PC offline (SS triples) | acc ≈ plaintext (QNLI 90.4 vs 90.8) | ★ |
+| Fission | BERT/ModernBERT/Llama-3-1B | 80 vCPU + 2×H100 | — (only relative: >8× vs CrypTen; abs ~s/inf @1B) | 8× < CrypTen (rel.) | MPC offline (triples) | exact-ish (acc ≈ PyTorch) | ★ |
+| Euston | GPT-2-1.5B, LLaMA-3-8B | AMD EPYC 7542 (32-thread) + RTX 6000 Ada; LAN | — (only relative: 5.5–8.8× vs NEXUS) | 2.8–4.4× < NEXUS (rel.) | FHE (RNS-CKKS) keygen + offline SVD mask | approx. (poly GELU/Softmax/LN; Δ n/r) | ★ |
+| NEXUS | BERT-base (128 tok) | CPU (GPU variant 42.3×); WAN 100 Mbps/80 ms | — (abs 37.3 s/inf; vs-plaintext × n/r) | 164 MB/inf | FHE (RNS-CKKS) keygen | approx. (Δ n/r) | ★ |
+| PipeLLM | OPT 13B–175B | H100-SXM (CVM + GPU-TEE) | **~1.2×** (<19.6% throughput vs w/o-CC) | PCIe (internal) | none (runtime pipelining) | exact | ★ |
+| H100 CC baseline | Llama2 7/13/70B | H100 CC; Intel TDX·SGX | **1.04–1.08×** (4–8% GPU); CPU-TEE <10% thr / <20% lat | PCIe AES-GCM | none | exact | ★ |
+| Portcullis | gateway LLaMA-2-7B; LLM = GPT-4o-mini/Mistral | Intel TDX (Sapphire Rapids, 16 vCPU) | **~1.01×** (1.33% vs raw LLM) | — | none (NER masks) | response cosine-sim >0.7 (GPT-4o-mini) | ★ |
+| DP-RAG / DP-KSA | Qwen2.5-3B, Llama-3.2-3B/3.1-8B (+DPR) | ⚠ not reported (confirmed via full MD) | **≈N×** generator calls (N=80 ensemble) | — | none (output-DP, PTR; δ=1e-4) | F1 21.7→25.2 @ε=0→8; >non-RAG @ε≥2 | ★ |
 
 ## B.2 Embedding (encoder inference — BERT/RoBERTa/ViT)
 
-| Scheme | Perf | Prov. | Threat-fit | Fidelity | Flag |
-|---|---|---|---|---|---|
-| SecFormer | 71 s/sample (BERT-base, 512 tok; 3×V100, LAN); 3.57× faster than PUMA | head-to-head | HbC 2PC, non-colluding | task-acc. −0.9–1.3% vs PUMA (2Quad softmax) | ★ |
-| CipherFormer | 7.7–11.9× vs HErBERT (encoder, N=1–2, L≤128; 2-thread VM, HE+GC) | self-reported | HbC cloud, low-round | approx. (ReLU-Softmax; +3–11% acc vs HErBERT, Δ vs plaintext n/r) | ★ |
-| Euston | 3.5× faster than NEXUS (BERT-Base; EPYC + RTX 6000 Ada; LAN, batch 32×128) | head-to-head | HbC cloud, non-interactive | approx. (poly approx.; Δ n/r) | ★ |
-| NEXUS | 37.3 s/inference, 164 MB BW (BERT-base, 128 tok; WAN 100Mbps/80ms); non-interactive 1-round; 53.6× less BW vs BumbleBee, 372.5× vs BOLT; GPU 42.3× faster ($0.05/token) | head-to-head (vs BOLT/BumbleBee) | HbC 2-party, non-interactive | approx. (poly GELU/Softmax/LN; acc.–latency tradeoff) | ★ |
-| SHAFT | 62–70% less comm + 1.8–2.4× faster than SIGMA (BERT-base; 2PC LAN) | head-to-head (vs SIGMA/BumbleBee) | HbC 2PC, non-colluding | accuracy ≈ plaintext (constant-round softmax + Fourier GELU) | ★ |
-| TwinShield | 4.0–6.1× vs prior (BERT/ViT; SGX+GPU) | head-to-head | malicious cloud (dual) | exact | ★ |
-| DP-Forward | ~94% SST-2 acc @ moderate ε (BERT encoders; matrix-Gaussian forward) | head-to-head (own non-private + DP-SGD) | HbC cloud; embedding-inversion adversary | task-acc. Δ vs plaintext per ε (≈−1.7pp @ε≈3 w/ label privacy) | ★ |
-| SPARSE | ~0 overhead; leakage 60→19% & util 65% @ε=10 (STS12; GTR/T5/SBERT); Vec2Text leakage −92% @ε=5 | head-to-head (vs LapMech/PurMech) | HbC cloud; concept-specific metric-DP budget | util preserved on non-sensitive dims (−few pp) | ★ |
-| Eguard | inversion F1 → ~4% (>95% tokens protected); 1.6–3.4× train, 16.3 vs 9.6 ms/batch inference (T5/MPNet/RoBERTa, 2×A6000) | self-reported | HbC cloud, DB-breach/Vec2Text adversary | >98% downstream task acc retained | ★ |
+| Scheme | Target model(s) | Hardware | ×-overhead vs plaintext | Comm | Preprocessing/offline | Fidelity | Flag |
+|---|---|---|---|---|---|---|---|
+| SecFormer | BERT-base (512 tok) | 3×V100; LAN 10 GB/s | — (only relative: 3.57× vs PUMA; abs 71 s/sample) | ⚠ abs n/r (SS) | MPC offline (2Quad approx.) | task-acc −0.9–1.3% vs PUMA | ★ |
+| CipherFormer | text-class. encoder (L≤128) | 2-thread VM; 128-bit | — (only relative: 7.7–11.9× vs HErBERT) | ⚠ abs n/r (HE+GC) | HE keygen | approx. (+3–11% acc vs HErBERT; Δ vs plaintext n/r) | ★ |
+| Euston | BERT-Base | AMD EPYC 7542 + RTX 6000 Ada; LAN | — (only relative: 3.5× vs NEXUS) | 4.4× < NEXUS (rel.) | FHE keygen + offline SVD mask | approx. (Δ n/r) | ★ |
+| NEXUS | BERT-base (128 tok) | CPU (GPU variant 42.3×); WAN 100 Mbps/80 ms | — (abs 37.3 s/inf) | 164 MB/inf | FHE (RNS-CKKS) keygen | approx. (Δ n/r) | ★ |
+| SHAFT | BERT-base | 2×NVIDIA A40, 256 GB, Xeon Gold 5318Y; 2PC LAN | — (only relative: 1.3× vs SIGMA on BERT — *verified, E #17*) | 25–41% < SIGMA (rel.) | 2PC offline (SS triples) | acc ≈ plaintext (QNLI 90.4 vs 90.8) | ★ |
+| TwinShield | BERT / ViT | Intel SGX + GPU | — (only relative: 4.0–6.1× vs prior verifiable) | masked act. (⚠ abs n/r) | offline mask-product precompute | exact | ★ |
+| DP-Forward | BERT encoders (SST-2/QQP) | Tesla P100 GPU cluster | **~1×** (≈ non-private; ~3× less than DP-SGD) | — | none (forward-pass matrix-Gaussian noise; optional noisy pretrain) | task-acc Δ per ε (−1.7 pp @ε≈3 w/ label privacy) | ★ |
+| SPARSE | GTR-base/Sentence-T5/SBERT | ⚠ not reported (confirmed via full MD) | **~1×** (≈0 inference overhead) | — | **offline differentiable mask-learning per privacy concept** | util 65% @ε=10 (STS12); leakage 60→19%; Vec2Text −92% @ε=5 | ★ |
+| Eguard | T5/MPNet/RoBERTa | 2×NVIDIA A6000 | **~1.7×** inference (16.3 vs 9.6 ms/batch) | — | **offline training of projection network** (1.6–3.4× train) | >98% task acc; inversion F1 → ~4% | ★ |
 
 ## B.3 Vector retrieval & storage (flat/IVF ANN; no graph index)
 
-| Scheme | Perf | Prov. | Threat-fit | Fidelity | Flag |
-|---|---|---|---|---|---|
-| p²RAG | 3–300× vs PRAG (k=16–1024; 2-server SS) | head-to-head | HbC 2-server, non-colluding | exact | ★ |
-| RAGtime-PIANO | 40× lower latency, 323× lower comm vs PIR-RAG/GraphRAG (CKKS + PIANO PIR; IVF-Flat) | head-to-head | HbC 1-server; *fully secure* (no doc/distance/access leak) | better accuracy (two-stage FHE+PIR) | ★ |
-| RemoteRAG | 0.67 s + 46.66 KB @10⁶ docs (DistanceDP + PHE; flat) | head-to-head | HbC cloud; query-inversion adversary | no retrieval loss; Vec2Text BLEU 50→10 | ★ |
-| Panther | 18 s/query @10M points (single-server; cluster/IVF ANN; 284 MB; SIFT/Deep1B) | self-reported | HbC single-server, no non-collusion | exact (same accuracy as plaintext ANN) | ★ |
-| PIR-RAG | 16.84 s/query @5K docs (MS MARCO; LWE-PIR cluster-and-fetch; downlink up to 474 MB fetching full cluster, uplink 2.4–24 KB) | head-to-head (vs Graph-PIR/Tiptoe) | HbC 1-server PIR; hides target cluster | NDCG@10 0.799, P@10 0.710 (vs Graph-PIR 0.901; coarse clustering) | ★ |
-| SAP / ADCPE | ~0 ms (on-the-fly symmetric enc.; ANN-preserving storage) | self-reported | HbC snapshot adversary | approx. ANN (α-factor preserved; recall Δ n/r) | ★ |
-| CAPRISE | 2,339 vec/s encrypt (9× vs RemoteRAG; +15 ms over 79.5 ms embed; gtr-t5-base, A100, m=100K) | head-to-head | HbC cloud; repeated-query adversary | top-k expanded to k′ (recall preserved, Δ n/r); Vec2Text BLEU 83→12 | ★ |
-| TRSE | ~100s ms (k′=100; 2-round SE + FHE relevance scoring) — *keyword SSE, not embedding-ANN* | self-reported | HbC cloud; multi-keyword top-k, user-side ranking | exact scoring (Δ n/r) | ★ |
-| Tiptoe-class / SANNS | baselines (see corpus; mostly † or [ ]) | — | — | — | — |
+| Scheme | Target model(s) | Hardware | ×-overhead vs plaintext | Comm | Preprocessing/offline | Fidelity | Flag |
+|---|---|---|---|---|---|---|---|
+| p²RAG | RAG corpus (k=16–1024) | ⚠ not reported (2-server) | — (only relative: 3–300× vs PRAG) | ⚠ abs n/r | 2-server SS offline | exact (bisection = true top-k) | ★ |
+| RAGtime-PIANO | RAG corpus (IVF-Flat) | ⚠ not reported (1-server) | — (only relative: 40× vs PIR-RAG) | 323× < PIR-RAG (rel.); ⚠ abs n/r | FHE (CKKS) + PIANO-PIR client preproc | better acc than PIR-RAG | ★ |
+| RemoteRAG | 10⁶ docs (MiniLM/MPNet/T5/OpenAI emb) | 2×Xeon Gold 5420+ (28-core) + 2×A40 48 GB; Ubuntu 22.04 | **~1×** retrieval (abs 0.67 s @10⁶) | 46.66 KB @10⁶ | PHE keygen; embed + AES DB | no retrieval loss; Vec2Text BLEU 50→10 | ★ |
+| Panther | SIFT/Deep1B (10M pts) | ⚠ not reported (single-server) | — (abs 18 s/query @10M) | 284 MB/query | offline batch-PIR hint + SS/GC setup | exact (same acc as plaintext ANN) | ★ |
+| PIR-RAG | MS MARCO 5K (bge-base emb) | ⚠ not reported (1-server) | — (abs 16.84 s/query @5K) | downlink ≤474 MB; uplink 2.4–24 KB | LWE-PIR client preproc + cluster build | NDCG@10 0.799, P@10 0.710 (vs 0.901 Graph-PIR) | ★ |
+| SAP / ADCPE | vectors (storage layer) | n/a (symmetric enc., on-the-fly) | **~1×** (≈0 ms enc.) | — | none (deterministic DCPE) | approx. ANN (α-factor preserved; recall Δ n/r) | ★ |
+| CAPRISE | gtr-t5-base (100K vec) | NVIDIA A100 | **~1×** (+15 ms over 79.5 ms embed; 2,339 vec/s enc.) | — | DCPE+DP enc. of DB (offline/on-the-fly) | recall preserved (k′); Vec2Text BLEU 83→12 | ★ |
+| TRSE | encrypted docs (keyword) | server Xeon E5620; Linux | — (abs ~100s ms, k′=100) | ⚠ abs n/r | SE index build + HE keygen | exact scoring (Δ n/r) — *keyword SSE, not embedding-ANN* | ★ |
+| Tiptoe-class / SANNS | baselines (see corpus) | — | — | — | — | — | — |
 
 ## B.4 Graph retrieval & storage (graph-indexed ANN + graph-semantic search)
 
-| Scheme | Perf | Prov. | Threat-fit | Fidelity | Flag |
-|---|---|---|---|---|---|
-| Compass | 0.57–1.28 s/query (SIFT1M / MS MARCO; cross-region WAN; **HNSW**-on-Ring-ORAM); 920× vs HNSW-on-ORAM | head-to-head | **malicious server**, no HW trust | exact (Recall@10 ≥ 0.9, MRR@10 on par) | ★ |
-| Pacmann | 1.6 s LAN / 3.1 s WAN @100M SIFT (single-thread Xeon; **graph-ANN** via 1-server PIR; recall@10 0.90) | head-to-head (vs Tiptoe/NGT) | HbC 1-server, **public DB**; query-only privacy | recall ≈ 90% of NGT (−10pp); 2.5× recall@10 vs Tiptoe | ★ |
-| Opal | 1.57× vs plaintext Opal (2.32 s/query; B200 CC; KG + ANN over ORAM, 524K entries, WAN); 29.5× throughput vs in-memory secure | head-to-head | malicious host; access-pattern adversary | exact retrieval; KG-filter +13 pp judged-acc, matches plaintext Graphiti ceiling | ★ |
-| ARoG | no crypto cost (KG anonymization; LLM-side reasoning) | self-reported | HbC third-party LLM API; entity-semantics adversary | SoTA on WebQSP/CWQ/GrailQA (privacy-preserving scenario; Δ vs non-private n/r) | ★ |
-| PrivGemo | no crypto cost (dual-tower: local Hand LLM + remote Brain on anonymized view); SOTA on 6 KGQA (+17.1% vs best); 3.5 cloud calls vs 21.7 (ToG) | head-to-head (vs ToG/ARoG) | HbC; semantic+structural KG-exposure adversary | CWQ 67→59% (plaintext→full-anon); WebQSP 75%; lets Qwen3-4B ≈ GPT-4-Turbo | ★ |
-| XorMM | ~1.23n storage; optimal query comm (ℓ); 1.8× faster search + 76% less storage vs dprfMM (Patel CCS'19); VXorMM verifiable variant ~2.46n | head-to-head | HbC SSE, untrusted store; volume-hiding | exact (non-lossy EMM) | ★ |
-| FLASH | 2× storage saving, 90× faster setup, ~180× faster search vs OXTMM (conjunctive volume-hiding, symmetric-key; DP variants optional) | head-to-head (vs OXTMM) | HbC SSE, untrusted store; conjunctive volume-hiding | exact (non-lossy conjunctive EMM) | ★ |
-| PeGraph | <1 s/query over millions of entities (real social graph; 2-server SSE OXT + additive SS); 5× comp / 200× comm vs GraphSE² | head-to-head (vs GraphSE²) | HbC non-colluding 2-server; encrypted social-graph search | exact (exact/fuzzy/ranked queries) | ★ |
-| GORAM | 58.1 ms–35.7 s/query @41.6M vertices / 1.4B edges (3PC; 5 ego-query types) | self-reported | HbC 3PC, non-colluding; federated multi-silo | exact (ORAM ego-graph) | † |
-| H₂O₂RAM | ~10³× faster than prior O₂RAM; 5–44× less memory (TEE doubly-oblivious substrate; graph-RAG store role) | self-reported | HbC host; access-pattern observation | exact (oblivious storage) | † |
+| Scheme | Target model(s) | Hardware | ×-overhead vs plaintext | Comm | Preprocessing/offline | Fidelity | Flag |
+|---|---|---|---|---|---|---|---|
+| Compass | SIFT1M / MS MARCO | GCP n2-standard-8 client (8 vCPU/32 GB) + n2-highmem-64 server (64 vCPU/512 GB); 3 Gbps/1 ms ↔ 400 Mbps/80 ms | — (only relative: 920× vs HNSW-on-ORAM; abs 0.57–1.28 s/query) | client 5.5 MB–0.5 GB index cache (⚠ per-query comm n/r) | ORAM build + Faiss HNSW/PQ; AES-256 | exact (Recall@10 ≥0.9, MRR@10 on par) | ★ |
+| Pacmann | 100M SIFT | single-thread Xeon E5-2680; LAN/WAN | — (only relative: −22% lat vs Tiptoe; abs 1.6 s LAN / 3.1 s WAN @100M) | ⚠ abs n/r (PIANO PIR) | client-preproc PIANO PIR (amortized) + client graph hints | recall ≈90% of NGT (−10pp) | ★ |
+| Opal | gpt-oss-20b + nomic-embed (524K) | TDX + B200 CC; WAN | **1.57×** (vs plaintext Opal; abs 2.32 s/query) | ORAM batches (⚠ abs n/r) | ORAM index + KG build | exact; KG-filter +13 pp judged-acc | ★ |
+| ARoG | KG (WebQSP/CWQ/GrailQA); LLM-side | n/a (3rd-party LLM API) | **~1×** (no crypto; LLM reasoning) | — | none (entity→machine-ID anonymization) | SoTA on 3 KGQA (Δ vs non-private n/r) | ★ |
+| PrivGemo | KG (6 KGQA); Hand=Qwen3, Brain=GPT-4o-mini | n/a (local LLM + cloud LLM) | **~1×** (no crypto); 3.5 cloud calls vs 21.7 (ToG) | — | none (HMAC anon + structural de-uniqueness) | CWQ 67→59% (plaintext→full-anon); WebQSP 75% | ★ |
+| XorMM | encrypted multimap (adjacency) | Intel i5-9500 @3 GHz, 8 GB RAM (CPU) | — (storage ~1.23n; only relative: 1.8× faster search, 76% less storage vs dprfMM) | optimal query comm (ℓ results) | SSE index build (XOR filter) | exact (non-lossy EMM) | ★ |
+| FLASH | encrypted conjunctive multimap | Intel i5-10500 @3 GHz, 8 GB RAM (CPU) | — (only relative: 180× faster search, 2× less storage vs OXTMM) | near-optimal (⚠ abs n/r) | SSE index build (binary-fuse filter) | exact (non-lossy conjunctive EMM) | ★ |
+| PeGraph | real social graph (millions) | Intel i7-10700K, 64 GB RAM; 2-server | — (only relative: 5× comp / 200× comm vs GraphSE²; abs <1 s/query) | ⚠ abs n/r | SSE (OXT) index + additive-SS setup | exact (exact/fuzzy/ranked) | ★ |
+| GORAM | 41.6M vertices / 1.4B edges | ⚠ not reported (3PC) | — (abs 58.1 ms–35.7 s/query) | ⚠ abs n/r (3PC) | sqrt-ORAM ego-graph build | exact | † |
+| H₂O₂RAM | oblivious store (graph-RAG substrate) | ⚠ not reported (TEE/SGX) | — (only relative: ~10³× vs prior O₂RAM) | — (TEE-local) | doubly-oblivious RAM build | exact | † |
 
 > **Reranking — open gap (no cost bucket).** No surveyed scheme reports a standalone private
 > cross-encoder reranking benchmark; every figure is a retrieval-pipeline number reused:
@@ -355,8 +374,36 @@ highest-value corrections for the manuscript and `refs.bib`.
     on-device private-model-inference schemes (SecureInfer, Amulet) are out of scope.
 
 16. **SIGMA — dropped from scope (2026-06-02).** Removed from the comparison set per scope
-    refinement; SHAFT (which it is benchmarked against, and which beats it by 1.8–2.4×) covers
-    the 2PC-secret-sharing Transformer-inference point. SIGMA demoted to MPC lineage in the corpus.
+    refinement; SHAFT (which it is benchmarked against) covers the 2PC-secret-sharing
+    Transformer-inference point. SIGMA demoted to MPC lineage in the corpus.
+
+17. **SHAFT numbers — version discrepancy (CoVe HIGH-WARN, resolved 2026-06-02).** The
+    EdgeQuake-ingested SHAFT PDF *abstract* states "62–70% less comm, 1.8–2.4× vs SIGMA,
+    2.6–3.7× vs BumbleBee (LAN)". An independent CoVe check against the **NDSS camera-ready**
+    (Table VII / §C) found **1.3× vs SIGMA (BERT), 25–41% less comm, 4.6–5.3× LAN / 2.9–4.4×
+    WAN vs BumbleBee** — the higher abstract figures appear to conflate a softmax-component
+    micro-benchmark (Table V: 2.2–2.5×, 61–67% vs Zheng et al.) with the end-to-end SIGMA
+    comparison. Cost cells corrected to the table-cited camera-ready values; the ingested
+    preprint version differs and should be reconciled at citation time. Hardware (2×A40,
+    256 GB, Xeon Gold 5318Y) and accuracy ≈ plaintext were confirmed.
+
+18. **Hardware re-check + EdgeQuake query bug (2026-06-02).** A PDF cross-check (ar5iv) confirmed
+    EdgeQuake's PDF→MD conversion is *faithful*, but hybrid `query` is **recall-incomplete**: it
+    omitted experimental-setup/hardware chunks that exist in the docs. Re-pulling full MD via
+    `document_get_md` fixed 5 false-negative `⚠ not reported` hardware cells — ObfuscaTune
+    (2 GPUs, middle-range), DP-Forward (Tesla P100 cluster), RemoteRAG (2×Xeon Gold 5420+ /
+    2×A40 48 GB), Compass (GCP n2-standard-8 / n2-highmem-64), SGT (training 1→64×8 A100 80GB).
+    Confirmed genuinely-unreported: OSNIP, SPARSE, DP-KSA, SCX (+ PIR-RAG, Panther, p²RAG,
+    RAGtime-PIANO from earlier full-MD grep).
+    Bug filed: `~/repos/edgequake/issues/2026-06-02-hybrid-query-misses-hardware-chunks.md`.
+    Remaining `⚠`: GORAM, H₂O₂RAM (not in EdgeQuake — web-fetch only).
+
+19. **Cost-figure CoVe pass (2026-06-02).** Forked claim-verifier checked 17 headline cost
+    claims vs primary sources (web; no EdgeQuake). **15 SUPPORTED**, 1 CONTRADICTED (SHAFT, #17),
+    1 minor numeric fix (H100 CC 4–7%→**4–8%**, Chrapek et al.). Euston/Fission specifics
+    CANNOT-VERIFY (ePrint 403 bot-block — not contradictions). NEXUS, PipeLLM, Pacmann, PIR-RAG,
+    Opal, RemoteRAG, SecFormer, XorMM (Wang et al. confirmed), GraSS (83 h@1M), ObfuscaTune,
+    DP-KSA, Portcullis all confirmed against source.
 
 > **Doc-ID note:** during grounding the EdgeQuake doc IDs for Compass (`7b372edb`) and
 > Fuchsbauer SAP/ADCPE (`887283e3`) were each grounded by their actual content, not by label.
