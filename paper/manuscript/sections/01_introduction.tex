@@ -64,7 +64,11 @@ excludes. We treat a semi-honest cloud as the baseline adversary, documenting th
 to malicious in \cref{sec:threat}. Explicitly \emph{out of scope}: microarchitectural
 side-channels (a field-wide exclusion we make a finding of, \cref{sec:threat}), full
 verifiable computation (lightweight composable integrity is in scope, but zkLLM-class
-proving is not), and foundational/superseded schemes.
+proving is not), foundational/superseded schemes, and \emph{on-device model-inference
+protection}---schemes such as SecureInfer~\citep{secureinfer} and
+Amulet~\citep{amulet} that defend a proprietary model against the device owner
+(an inverted threat model: protecting the \emph{model} from the user, rather than the
+user's data from the cloud), which is orthogonal to the confidential-RAG setting we study.
 
 \subsection{Contributions}
 This paper is a \emph{systematization of knowledge}. Concretely:

@@ -58,7 +58,6 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [ ] | BOLT | 2024, S&P | embed,generate | HbC/2PC | min-scale (BERT); token-prune | HE+ASS, Remez softmax |
 | [x] | BumbleBee | 2025, NDSS | embed,generate | HbC/2PC | ~8min/tok (7B) | HE+ASS, segmented-poly exp; **2PC SOTA — most robust trust (no dealer/3-party)** |
 | [ ] | MPCFormer | 2023, ICLR | embed,generate | HbC/MPC | ~68s (BERT-base); quad approx | 2Quad + distillation |
-| [x] | SIGMA | 2024, PETS | embed,generate | HbC/2PC (FSS setup) | 45GB FSS key (BERT-large) | GPU FSS LUTs; **best online perf / billion-param scale**; weaker trust (setup) |
 | [ ] | Nimbus | 2024, NeurIPS | embed,generate | HbC/2PC | ? | distribution-aware poly nonlinears |
 | [ ] | Ditto | 2024, ICML | embed,generate | HbC/3PC | ? | quantization-aware |
 | [ ] | FABLE | 2025, USENIX | embed | HbC/MPC | ? | secret-table embedding lookup |
@@ -121,7 +120,6 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | Cover | Scheme | Ref | Stage | Threat | Perf | Note |
 |:---:|---|---|---|---|---|---|
 | [x] | AloePri ★ | Lin et al. (ByteDance) | embed,generate | HbC/none (wb+scheme) | ~0% (near-plaintext) | covariant (data+weight) obfusc; **the vignette target** |
-| [x] | Collaborative Obfuscation | Lin et al. 2026 (2603.01499) | generate | HbC/none | near-plaintext | dynamic covariance-structured masks |
 | [ ] | STIP | — | generate | HbC/3-party | near-plaintext | static permutation; breaks for open weights |
 | [ ] | TransLinkGuard | 2024, ACM MM | generate | HbC/none (static-key) | near-plaintext | static-key weight obfusc; cited-as-broken lineage (TSQP/ArrowMatch) — prose, not comparison |
 | [x] | SGT / Stained Glass ★ | Protopia 2025 | embed | HbC/none | ~0ms; −0.4% util | input-conditioned learned affine/Gaussian obfusc |
@@ -155,7 +153,6 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [x] | TwinShield ★ | 2025 (2507.03278) | embed,generate | HbC+verify/CPU-TEE | 4–6× vs TEE-only (87% offload) | masking + SS + U-Verify integrity |
 | [x] | ObfuscaTune ★ | Frikha et al. 2024 | embed,generate | HbC/TEE | 1.5–4.3×; 5% in TEE | GPU runs obfusc activations |
 | [ ] | Delta (All Rivers…) | Niu et al. 2023 (2312.05264) | rerank,generate,e2e | HbC/TEE | 7.6–20× vs TEE-only | asymmetric-flow split w/ formal DP |
-| [x] | SecureInfer | 2025 (2510.19979) | generate,e2e | HbC/TEE | 4.7× vs TEE-only; 2.06× vs GPU | XOR-OTP heterogeneous split |
 | [x] | SCX ★ | 2025, SIGCOMM | generate | HbC/TEE | near-zero online | per-session one-time-key; (ε,0)-DP not OTP |
 | [ ] | TOGES | Kane & Bkakria 2024, LNCS (2405.19259) | retrieve,gt | HbC/SGX+ORAM | wall-clock n/a (paywalled) | graph enc, Path-ORAM position-map in SGX |
 | [x] | Portcullis | 2025, AAAI | generate,e2e | HbC/TEE | 96× vs Hide-and-Seek | TEE-attested PII-anonymization gateway before cloud LLM |
@@ -237,7 +234,9 @@ or obsoleted by descendants — per scope correction #1).
 
 - **MPC/SS:** Iron (2022 — foundational 2PC HE+OT; superseded on comm by BumbleBee/BOLT) ·
   GraphSC (2015 — foundational oblivious SGA; 13h@1M) · Multiple-Millionaires (building
-  block; circuit-depth only) · **secure graph-analytics / GNN-inference (off-target for
+  block; circuit-depth only) · SIGMA (PETS 2024 — GPU-FSS 2PC, 45 GB offline keys; dropped from
+  comparison 2026-06-02, superseded by SHAFT at 1.8–2.4× speed / 62–70% less comm) ·
+  **secure graph-analytics / GNN-inference (off-target for
   LightRAG's 1-hop retrieval — no message-passing, no global SGA): CryptGNN (CCS 2025,
   secure GNN inference, drops non-colluding-3rd-party) · OblivGNN · Graphiti (MPC SGA) ·
   Influential-Spreaders / Local-Clustering (MPC PageRank/clustering); cite only if a
@@ -252,12 +251,12 @@ or obsoleted by descendants — per scope correction #1).
 - **Hybrid split:** Slalom (2019 — seminal additive-blinding offload; CNN/linear-only) ·
   DarKnight (2021 — coding-matrix generalization; CNN) · ShadowNet (2023 — weight-mask
   offload) · SOTER (2022 — fingerprint-integrity masking) · AsymML / 3LegRace
-  (low-rank/residual split) · Shredder (learned-noise activations) · **Amulet (2025,
-  2512.07495 — TEE+obfuscation hybrid, but defends a *malicious on-device user* and protects
-  the *model*, not user data, with a proven info-theoretic (MI=0) guarantee; dropped from the
-  comparison set as an out-of-scope inverted threat model — on-device model-IP lineage with
-  ShadowNet/SOTER/TEESlice)**. All superseded on performance by the modern obfuscated-split
-  schemes (GELO / TwinShield / ObfuscaTune / SecureInfer).
+  (low-rank/residual split) · Shredder (learned-noise activations). **On-device model-IP protection (OUT OF SCOPE —
+  inverted threat model: protects the *model* from the device user, not user data from the
+  cloud): Amulet (2025, 2512.07495 — TEE+obfuscation, proven info-theoretic MI=0) and
+  SecureInfer (2025, 2510.19979 — SGX+GPU XOR-OTP split). Both dropped from the comparison set
+  2026-06-02.** The cloud-facing predecessors above are superseded on performance by the modern
+  obfuscated-split schemes (GELO / TwinShield / ObfuscaTune).
 
 ## 10. Supporting / Foundational machinery (not privacy schemes; cited as building blocks)
 
@@ -284,11 +283,11 @@ Lattica · Javelin AI · Corvex (B200).
 
 Comparison-table sizes (after the practical-frontier reclassification):
 
-- Cryptographic (MPC/SS): 28 (+SHAFT, Pacmann, XorMM, FLASH, Veil, PeGraph) · (FHE/HE): 19 (−GraSS, demoted to lineage)
-- TEE (baseline): 8 (+H₂O₂RAM) · Static obfuscation: 12 (+TransLinkGuard) · DP: 9 (+DP-KSA) · Hybrid split: 9 (+Portcullis, −Amulet)
+- Cryptographic (MPC/SS): 27 (+SHAFT, Pacmann, XorMM, FLASH, Veil, PeGraph; −SIGMA→lineage) · (FHE/HE): 19 (−GraSS→lineage)
+- TEE (baseline): 8 (+H₂O₂RAM) · Static obfuscation: 11 (+TransLinkGuard, −Collaborative Obfusc. = dup of AloePri) · DP: 9 (+DP-KSA) · Hybrid split: 8 (+Portcullis, −Amulet, −SecureInfer→on-device lineage)
 - Targeted verification: 10 (+ZKGraph, ZKIFV; full-ZK inference excluded — separate SoK) · Attacks: ~26 (+Depth-False-Privacy) · Surveys/SoK: 7
-- **Foundational/superseded (mention-only): ~20** (graph-analytics/GNN demoted here: CryptGNN, OblivGNN, Graphiti, MPC-PageRank/clustering; +GraSS, +Amulet) · Supporting machinery: ~30 · Commercial: ~11
-- **EdgeQuake-indexed (★): 24** | **In-comparison privacy schemes (§1–§7): ~95** |
+- **Foundational/superseded (mention-only): ~22** (graph-analytics/GNN demoted here: CryptGNN, OblivGNN, Graphiti, MPC-PageRank/clustering; +GraSS, +Amulet, +SecureInfer, +SIGMA) · Supporting machinery: ~30 · Commercial: ~11
+- **EdgeQuake-indexed (★): 24** | **In-comparison privacy schemes (§1–§7): ~93** |
   selection target for the SoK: **~55–57 cited** (was ~45; grill-me #4 added the graph-RAG cluster A + family-completers B + defenses/attacks C).
 
 > Sources: `../docs/research/{private-llm-inference, private-embedding-research,

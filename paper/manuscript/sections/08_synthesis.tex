@@ -45,6 +45,11 @@ decision---rather than by family, putting the mechanisms that actually compete f
 stage side by side. Figures are normalized to the canonical metrics of
 \cref{tab:yardstick} and are indicative (self-reported across hardware/models/datasets)
 unless marked head-to-head; the non-comparability caveat of \cref{sec:comparison} stands.
+\emph{Reranking} is absent from \cref{tab:performance} by design: although it is a pipeline
+stage in the gap-map above, no surveyed scheme reports a standalone private cross-encoder
+reranking measurement---the few schemes with a scoring step (p\textsuperscript{2}RAG, TRSE,
+RemoteRAG's HE rerank, Opal's in-enclave rerank) fold it into a retrieval-pipeline figure---so
+private reranking stands as an \emph{open gap} rather than a comparable cost.
 \begin{table*}[t]
   \centering \footnotesize
   \caption{Performance and fidelity by use case (indicative; normalized to
@@ -55,18 +60,18 @@ unless marked head-to-head; the non-comparability caveat of \cref{sec:comparison
     \toprule
     Use case & Mechanisms (representative) & Overhead (normalized) & Fidelity \\
     \midrule
-    Generation & MPC (PermLLM, BumbleBee); TEE (PipeLLM); obfusc (AloePri); hybrid (GELO, SCX, Amulet)
+    Generation & MPC (PermLLM, BumbleBee); TEE (PipeLLM); obfusc (AloePri, SGT, OSNIP); hybrid (GELO, SCX, ObfuscaTune)
                & MPC 1--2 orders; TEE $<$20\%; obfusc $\sim$0; hybrid few$\times$
                & exact (MPC/TEE/hybrid); lossy (obfusc) \\
-    Embedding  & MPC (SecFormer, SHAFT); FHE (NEXUS, CipherFormer); obfusc (SGT, OSNIP); DP (DP-Forward, SPARSE)
+    Embedding (encoder) & MPC (SecFormer, SHAFT); FHE (NEXUS, CipherFormer); DP (DP-Forward, SPARSE); obfusc (Eguard)
                & crypto 1--2 orders; obfusc/DP $\sim$0
                & exact (crypto); acc.\ $\Delta$ (obfusc/DP) \\
-    Reranking  & crypto (p\textsuperscript{2}RAG, TRSE); DP+HE (RemoteRAG); TEE (Opal)
-               & \tq{} (regime-dependent)
-               & exact (crypto/TEE); recall $\Delta$ (DP) \\
-    Retrieval  & crypto (Compass, Pacmann, Panther, PIR-RAG); DP (RemoteRAG); TEE (Opal); enc (CAPRISE, SAP)
+    Vector retrieval & crypto (p\textsuperscript{2}RAG, Panther, PIR-RAG, RAGtime-PIANO); DP (RemoteRAG); enc (CAPRISE, SAP)
                & sub-s--10\,s @$10^6$--$10^7$; enc $\sim$0
-               & exact (PIR/ORAM); recall $\Delta$ (DP); order-leak (DCPE) \\
+               & exact (PIR/FHE); recall $\Delta$ (DP); order-leak (DCPE) \\
+    Graph retrieval & TEE (Opal); crypto (Compass, Pacmann); SSE (XorMM, PeGraph, GORAM); anon (ARoG, PrivGemo)
+               & graph-ANN sub-s--s; KG-anon $\sim$0
+               & exact (ORAM/SSE); quality-only (anon) \\
     \bottomrule
   \end{tabular}
 \end{table*}

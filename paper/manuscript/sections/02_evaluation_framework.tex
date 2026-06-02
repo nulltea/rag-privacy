@@ -262,10 +262,16 @@ generation---MPC, TEE, obfuscation, hybrid split---against one another, not the 
 family against the obfuscation family in the abstract. Grouping by use case puts the real
 alternatives side by side. We use four deployment use cases, aligned with the pipeline
 stages of the gap-map (\cref{sec:synthesis}): \emph{generation} (decoder inference),
-\emph{embedding} (encoder inference), \emph{reranking} (cross-encoder scoring), and
-\emph{retrieval} (vector/graph search and storage); graph-RAG is treated as a retrieval
-setting. \cref{tab:yardstick} fixes the canonical performance metric, fidelity metric, and
-plaintext baseline for each.
+\emph{embedding} (encoder inference), and \emph{retrieval}, which we split by index
+structure into \emph{vector retrieval} (flat/IVF nearest-neighbour search and vector
+storage) and \emph{graph retrieval} (graph-based ANN and graph-semantic search/storage),
+since the two impose different costs and threat surfaces. Each scheme is grouped by the
+model class it actually evaluates---an encoder-only scheme is an embedding scheme, a
+decoder scheme a generation one. \emph{Reranking} (cross-encoder scoring) is a pipeline
+stage we track in the gap-map, but no surveyed scheme reports a standalone
+private-reranking measurement, so we treat it as an open gap (\cref{sec:synthesis}) rather
+than a cost bucket. \cref{tab:yardstick} fixes the canonical performance metric, fidelity
+metric, and plaintext baseline for each.
 
 \begin{table}[t]
   \centering \footnotesize
@@ -277,9 +283,9 @@ plaintext baseline for each.
     Use case & Performance metric & Fidelity metric & Plaintext baseline \\
     \midrule
     Generation & latency/token; $\times$ overhead & task acc.\ / perplexity / BLEU $\Delta$ & plaintext decode \\
-    Embedding  & latency/seq; $\times$ overhead   & downstream task-acc.\ $\Delta$         & plaintext encode \\
-    Reranking  & latency/query (top-$k$)          & nDCG / recall $\Delta$                  & plaintext reranker \\
-    Retrieval  & latency/query @corpus-size; comm & recall@$k$ $\Delta$                      & plaintext ANN \\
+    Embedding (encoder) & latency/seq; $\times$ overhead   & downstream task-acc.\ $\Delta$  & plaintext encode \\
+    Vector retrieval & latency/query @corpus-size; comm & recall@$k$ $\Delta$               & plaintext flat/IVF ANN \\
+    Graph retrieval  & latency/query; comm              & recall@$k$ / answer-acc.\ $\Delta$ & plaintext graph search/ANN \\
     \bottomrule
   \end{tabular}
 \end{table}
