@@ -131,9 +131,11 @@ explicitly assume the attacker knows the open-source model and the method, and
 stake everything on an ephemeral secret. Second, the trust anchor varies more
 than the adversary behavior does---schemes that face nearly the same attacker
 nonetheless root trust in nothing, a CPU-TEE, or a GPU-TEE, which is the real
-axis of disagreement in the field. Third, Opal is alone in defending a
-\emph{malicious} host; every other scheme assumes the operator follows the
-protocol. Fourth---and most consequential---the \emph{security basis} cleaves the
+axis of disagreement in the field. Third, only Opal and Compass
+defend a \emph{malicious} operator---Opal a host that may tamper with computation outside
+the enclave, Compass a retrieval server that may deviate from the agreed search protocol
+(caught by its commitment and integrity checks, with no trusted hardware); every other
+scheme assumes the operator follows the protocol. Fourth---and most consequential---the \emph{security basis} cleaves the
 table where no other axis can: the obfuscation rows rest on heuristic,
 experimentally-measured resistance, while PermLLM and the cryptographic-retrieval
 schemes rest on hardness assumptions and the TEE designs on hardware. Several
@@ -174,7 +176,7 @@ axis---yet it is exactly what the vignette (\cref{ssec:vignette}) turns on.
     RemoteRAG    & HbC        & none           & ---  & query        & query+ap     & DP \\
     Caprise      & HbC        & none           & ---  & doc content  & ct+dist      & crypto* \\
     Pacmann      & HbC        & none (PIR)     & ---  & query+access & access pat.  & crypto \\
-    Compass      & HbC        & TEE/client ORAM & --- & query+access & access pat.  & crypto+HW \\
+    Compass      & malicious  & none (clt.\ ORAM) & --- & query+access & op-type only  & crypto \\
     \bottomrule
   \end{tabular}
 \end{table*}
