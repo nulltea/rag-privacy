@@ -165,9 +165,9 @@ were all retrieval-pipeline numbers reused), so it is an **open gap** (note afte
 | Scheme | Target model(s) | Hardware | ×-overhead vs plaintext | Comm | Preprocessing/offline | Fidelity | Flag |
 |---|---|---|---|---|---|---|---|
 | PermLLM | ChatGLM-6B | 3×L20-class GPU; WAN 10 ms/1 Gbps | — (only relative: "orders faster than MPC"; abs 3 s/tok) | ~20 Mb/tok | MPC offline: Beaver + permutation triples (dealer) | exact | ★ |
-| CryptoMoE | DeepSeek/OLMoE/QwenMoE 6.9–16.4B | Xeon 8468; 2PC LAN 3 Gbps/WAN 400 Mbps | — (only relative: 2.8–3.5× vs dense-MPC) | 2.9–4.3× < dense-MPC (rel.) | MPC offline (HE+SS) | task-acc 99.2% (≈−0.8%) | ★ |
+| CryptoMoE | DeepSeek/OLMoE/QwenMoE 6.9–16.4B | Xeon 8468 (48-core, 2.1 GHz); 2PC LAN 3 Gbps/0.2 ms, WAN 400 Mbps/40 ms | — (only relative: 1.7–5.9× vs dense-MPC; matches insecure baseline in some cases via batched MatMul; +18% for secure dispatch/combine) | 3.1–6.1× < dense-MPC (rel.; Table 2 per-token) | MPC offline (HE+SS) | task-acc 99.2% (≈−0.8%) | ★ |
 | GELO | Llama-2-7B | confidential GPU (H200) + untrusted GPU (L40S) | **1.2–1.3×** (20–30% vs insecure offload) | — (TEE-local mixing) | per-batch fresh invertible matrix (cheap, online) | exact (float32) | ★ |
-| TwinShield | vision/language Transformers | Intel SGX + GPU | — (only relative: 5.4× vs TEE-only, 4.0–6.1× vs prior verifiable; 87% offload) | masked act. (⚠ abs n/r) | offline precompute of mask products (RW) | exact | ★ |
+| TwinShield | vision/language Transformers (BERT/ViT/CLIP/LLaMA-8bit) | Xeon Gold 6342 (2.8 GHz, 512 GB) + A40 48 GB; SGX (FPGA/TPU also tested) | — (only relative: 5.4× vs TEE-only, 4.0–6.1× vs prior verifiable; 87% offload) | masked act. (⚠ abs n/r) | offline precompute of mask products (RW) | exact | ★ |
 | ObfuscaTune | GPT-2 small→XL | 2 GPUs (1 simulates TEE); "middle-range" (model n/r); 1–8 GPU-h/exp | **1.5–4.3×** (vs unprotected) | — | one-time obfusc-matrix setup (<10 s/GPT2-XL on mid GPU; low-cond.-number) | exact-ish (numerical err ↑ w/ cond.) | ★ |
 | SCX | 7B decoder | GPU-TEE + cloud GPU (⚠ testbed machine n/r — confirmed via full MD) | **~1×** (near-zero online; target <50 ms) | — | per-session one-time-key setup | exact | ★ |
 | Opal | gpt-oss-20b + nomic-embed | TDX CPU-TEE + B200 GPU-TEE; WAN | **1.57×** (vs plaintext Opal; abs 2.32 s/query) | ORAM batches (⚠ abs n/r) | ORAM index build + KG construction (offline) | exact | ★ |
@@ -193,7 +193,7 @@ were all retrieval-pipeline numbers reused), so it is an **open gap** (note afte
 | Euston | BERT-Base | AMD EPYC 7542 + RTX 6000 Ada; LAN | — (only relative: 3.5× vs NEXUS) | 4.4× < NEXUS (rel.) | FHE keygen + offline SVD mask | approx. (Δ n/r) | ★ |
 | NEXUS | BERT-base (128 tok) | CPU (GPU variant 42.3×); WAN 100 Mbps/80 ms | — (abs 37.3 s/inf) | 164 MB/inf | FHE (RNS-CKKS) keygen | approx. (Δ n/r) | ★ |
 | SHAFT | BERT-base | 2×NVIDIA A40, 256 GB, Xeon Gold 5318Y; 2PC LAN | — (only relative: 1.3× vs SIGMA on BERT — *verified, E #17*) | 25–41% < SIGMA (rel.) | 2PC offline (SS triples) | acc ≈ plaintext (QNLI 90.4 vs 90.8) | ★ |
-| TwinShield | BERT / ViT | Intel SGX + GPU | — (only relative: 4.0–6.1× vs prior verifiable) | masked act. (⚠ abs n/r) | offline mask-product precompute | exact | ★ |
+| TwinShield | BERT / ViT | Xeon Gold 6342 (2.8 GHz, 512 GB) + A40 48 GB; SGX | — (only relative: 4.0–6.1× vs prior verifiable) | masked act. (⚠ abs n/r) | offline mask-product precompute | exact | ★ |
 | DP-Forward | BERT encoders (SST-2/QQP) | Tesla P100 GPU cluster | **~1×** (≈ non-private; ~3× less than DP-SGD) | — | none (forward-pass matrix-Gaussian noise; optional noisy pretrain) | task-acc Δ per ε (−1.7 pp @ε≈3 w/ label privacy) | ★ |
 | SPARSE | GTR-base/Sentence-T5/SBERT | ⚠ not reported (confirmed via full MD) | **~1×** (≈0 inference overhead) | — | **offline differentiable mask-learning per privacy concept** | util 65% @ε=10 (STS12); leakage 60→19%; Vec2Text −92% @ε=5 | ★ |
 | Eguard | T5/MPNet/RoBERTa | 2×NVIDIA A6000 | **~1.7×** inference (16.3 vs 9.6 ms/batch) | — | **offline training of projection network** (1.6–3.4× train) | >98% task acc; inversion F1 → ~4% | ★ |
@@ -217,7 +217,7 @@ were all retrieval-pipeline numbers reused), so it is an **open gap** (note afte
 | Scheme | Target model(s) | Hardware | ×-overhead vs plaintext | Comm | Preprocessing/offline | Fidelity | Flag |
 |---|---|---|---|---|---|---|---|
 | Compass | SIFT1M / MS MARCO | GCP n2-standard-8 client (8 vCPU/32 GB) + n2-highmem-64 server (64 vCPU/512 GB); 3 Gbps/1 ms ↔ 400 Mbps/80 ms | — (only relative: 920× vs HNSW-on-ORAM; abs 0.57–1.28 s/query) | client 5.5 MB–0.5 GB index cache (⚠ per-query comm n/r) | ORAM build + Faiss HNSW/PQ; AES-256 | exact (Recall@10 ≥0.9, MRR@10 on par) | ★ |
-| Pacmann | 100M SIFT | single-thread Xeon E5-2680; LAN/WAN | — (only relative: −22% lat vs Tiptoe; abs 1.6 s LAN / 3.1 s WAN @100M) | ⚠ abs n/r (PIANO PIR) | client-preproc PIANO PIR (amortized) + client graph hints | recall ≈90% of NGT (−10pp) | ★ |
+| Pacmann | 100M SIFT | single-thread Xeon E5-2680; LAN/WAN | — (only relative: −22% lat vs Tiptoe; abs 1.6 s LAN / 3.1 s WAN @100M) | ~few KB/query (sublinear √n, Piano PIR) | client-preproc PIANO PIR (amortized, linear one-time) + client graph hints | recall ≈90% of NGT (−10pp) | ★ |
 | Opal | gpt-oss-20b + nomic-embed (524K) | TDX + B200 CC; WAN | **1.57×** (vs plaintext Opal; abs 2.32 s/query) | ORAM batches (⚠ abs n/r) | ORAM index + KG build | exact; KG-filter +13 pp judged-acc | ★ |
 | ARoG | KG (WebQSP/CWQ/GrailQA); LLM-side | n/a (3rd-party LLM API) | **~1×** (no crypto; LLM reasoning) | — | none (entity→machine-ID anonymization) | SoTA on 3 KGQA (Δ vs non-private n/r) | ★ |
 | PrivGemo | KG (6 KGQA); Hand=Qwen3, Brain=GPT-4o-mini | n/a (local LLM + cloud LLM) | **~1×** (no crypto); 3.5 cloud calls vs 21.7 (ToG) | — | none (HMAC anon + structural de-uniqueness) | CWQ 67→59% (plaintext→full-anon); WebQSP 75% | ★ |
@@ -404,6 +404,20 @@ highest-value corrections for the manuscript and `refs.bib`.
     CANNOT-VERIFY (ePrint 403 bot-block — not contradictions). NEXUS, PipeLLM, Pacmann, PIR-RAG,
     Opal, RemoteRAG, SecFormer, XorMM (Wang et al. confirmed), GraSS (83 h@1M), ObfuscaTune,
     DP-KSA, Portcullis all confirmed against source.
+
+20. **Comm/overhead full-MD re-check + a second EdgeQuake bug (2026-06-02).** Re-checking the
+    "only relative" overhead and `⚠ abs n/r` comm cells via full `document_get_md` (per the
+    hardware-bug lesson) fixed: **TwinShield hardware** (Xeon Gold 6342 + A40 48 GB; query
+    false-negative), **Pacmann comm** (~few KB/query, sublinear √n Piano PIR), and **CryptoMoE**
+    figures (query gave 2.8–3.5×/2.9–4.3×; full MD = 1.7–5.9× latency / 3.1–6.1× comm vs dense-MPC,
+    "matches insecure baseline in some cases"). **Key caveat:** most remaining `⚠ abs n/r` comm
+    cells are *not* "paper omits it" — the absolute communication/latency lives in **paper tables
+    that EdgeQuake's PDF→MD conversion drops to `![tbl_…]` placeholders** (CipherFormer Table IV,
+    SecFormer Table 1, Fission Table 2, CryptoMoE Table 2, …). So those numbers are unrecoverable
+    from EdgeQuake (query *or* document_get_md) and need the original PDF. Filed as a separate
+    high-severity bug: `~/repos/edgequake/issues/2026-06-02-md-conversion-drops-table-content.md`.
+    By contrast, vs-plaintext *overhead* for crypto schemes is usually a genuine absence (they
+    report vs prior scheme, not vs plaintext) — those `— (only relative)` cells are correct.
 
 > **Doc-ID note:** during grounding the EdgeQuake doc IDs for Compass (`7b372edb`) and
 > Fuchsbauer SAP/ADCPE (`887283e3`) were each grounded by their actual content, not by label.
