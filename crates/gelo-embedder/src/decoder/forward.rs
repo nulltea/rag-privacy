@@ -594,6 +594,22 @@ fn cover_kappa() -> f32 {
         .unwrap_or(6.0)
 }
 
+/// Session secret mixed into every offload-cover RNG (prefill
+/// `O_qk`/`C_v` rotation, decode resident cover, σ-noise). Derived from
+/// the executor's secret `MaskSeed` (`TrustedExecutor::cover_seed`) so
+/// the covers honour the documented per-session-secret contract — a
+/// compile-time-constant seed makes every cover derivable from source.
+/// The `fixed-cover-seed` cargo feature reverts to the legacy constant
+/// covers (seed 0) for bit-reproducible dev/bench comparisons across
+/// differently-seeded executors; never enable it in production.
+fn cover_session_seed(exec: &impl TrustedExecutor) -> u64 {
+    if cfg!(feature = "fixed-cover-seed") {
+        0
+    } else {
+        exec.cover_seed()
+    }
+}
+
 /// Value-cover operands `(C_v, C_v⁻¹)`. At `kappa ≤ 1` this is the orthogonal
 /// `O_v` (inverse = transpose) — the legacy cover, with a byte-identical rng
 /// draw. At `kappa > 1` it is the κ-bounded non-orthogonal cover
@@ -721,8 +737,9 @@ fn build_covered_prefix_session(
     dh: usize,
     sigma: f32,
 ) -> Result<()> {
+    let cover_seed = cover_session_seed(exec);
     let (k_cov, v_cov, cover) =
-        build_covered_prefix_cpu(layer_idx, kv_cache, batch_size, nkvh, dh, sigma)?;
+        build_covered_prefix_cpu(layer_idx, kv_cache, batch_size, nkvh, dh, sigma, cover_seed)?;
     let cap = kv_cache.capacity();
     let id = exec.resident_kv_create(k_cov.view(), v_cov.view(), cap)?;
     kv_cache.set_gpu_session(layer_idx, id);
@@ -744,13 +761,14 @@ fn build_covered_prefix_cpu(
     nkvh: usize,
     dh: usize,
     sigma: f32,
+    cover_seed: u64,
 ) -> Result<(Array3<f32>, Array3<f32>, DecodeCover)> {
     use rand::SeedableRng;
     use rand::seq::SliceRandom;
     use rand_chacha::ChaCha20Rng;
     use rand_distr::{Distribution, StandardNormal};
     const SALT: u64 = 0xC0FFEE_5EED;
-    let mut crng = ChaCha20Rng::seed_from_u64(SALT ^ layer_idx as u64);
+    let mut crng = ChaCha20Rng::seed_from_u64(SALT ^ cover_seed ^ layer_idx as u64);
     let o_qk = sample_orthogonal(dh, &mut crng);
     let (c_v, c_v_inv) = sample_value_cover(dh, cover_kappa(), &mut crng);
     let kv_views: Vec<(ArrayView2<'_, f32>, ArrayView2<'_, f32>)> = (0..batch_size)
@@ -819,6 +837,7 @@ fn build_covered_prefix_all_global(
     // each chunk serially on the engine. The per-layer head parallelism
     // alone (B·nkvh = 8 at B=1) under-fills the cores; cross-layer
     // fan-out fixes that.
+    let cover_seed = cover_session_seed(exec);
     profile::time("cover:build_covered_prefix+upload", || -> Result<()> {
         use rayon::prelude::*;
         for chunk in pending.chunks(4) {
@@ -827,7 +846,9 @@ fn build_covered_prefix_all_global(
                 .map(|&li| {
                     Ok((
                         li,
-                        build_covered_prefix_cpu(li, kv_cache, batch_size, nkvh, dh, sigma)?,
+                        build_covered_prefix_cpu(
+                            li, kv_cache, batch_size, nkvh, dh, sigma, cover_seed,
+                        )?,
                     ))
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -1005,6 +1026,7 @@ fn decoder_block_cached_batched(
         );
         let scale = 1.0_f32 / (dh as f32).sqrt();
         let sigma = resident_cover_sigma();
+        let cover_session = cover_session_seed(exec);
         profile::time("tee:attn_resident_cover", || -> Result<()> {
             const SALT: u64 = 0xC0FFEE_5EED;
             let q_st = stack_heads(q.view(), batch_size, nqh, dh); // (B·nqh,1,dh) plaintext
@@ -1042,7 +1064,8 @@ fn decoder_block_cached_batched(
                 let mut qn = q_st.clone();
                 if sigma > 0.0 {
                     let mut qrng = ChaCha20Rng::seed_from_u64(
-                        SALT ^ (layer_idx as u64) ^ ((prefix_len as u64) << 20)
+                        SALT ^ cover_session ^ (layer_idx as u64)
+                            ^ ((prefix_len as u64) << 20)
                             ^ q_pos_offsets[0] as u64,
                     );
                     for e in qn.iter_mut() {
@@ -1907,10 +1930,13 @@ fn decoder_block_batched(
             cfg.head_dim_value(),
         );
         let scale = 1.0_f32 / (dh as f32).sqrt();
+        let cover_session = cover_session_seed(exec);
         profile::time("tee:attn_prefill_offload", || -> Result<()> {
-            // Session-fixed shared cover per layer (re-derived from a per-layer
-            // seed; shared O across heads → GQA-broadcast-consistent).
-            let mut crng = ChaCha20Rng::seed_from_u64(PREFILL_SALT ^ layer_idx as u64);
+            // Session-fixed shared cover per layer — per-layer seed mixed
+            // with the executor's session secret (`cover_session_seed`);
+            // shared O across heads → GQA-broadcast-consistent.
+            let mut crng =
+                ChaCha20Rng::seed_from_u64(PREFILL_SALT ^ cover_session ^ layer_idx as u64);
             let o_qk = sample_orthogonal(dh, &mut crng);
             let (c_v, c_v_inv) = sample_value_cover(dh, cover_kappa(), &mut crng);
             let group = nqh / nkvh;

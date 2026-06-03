@@ -1344,6 +1344,18 @@ pub trait TrustedExecutor {
         false
     }
 
+    /// Session-secret seed for the GPU-offload covers (prefill
+    /// `O_qk`/`C_v` rotation, decode resident cover, σ-noise streams).
+    /// The forward pass mixes this into every per-layer cover RNG so the
+    /// covers are derived from the executor's secret `MaskSeed` — the
+    /// documented per-session `C_v` contract — instead of being
+    /// derivable from compile-time constants. Default 0 (legacy fixed
+    /// covers) for executors without secret state; secure executors
+    /// must override.
+    fn cover_seed(&self) -> u64 {
+        0
+    }
+
     /// [`GpuOffloadEngine::cubek_causal_attend`]. Default unsupported;
     /// `InProcessTrustedExecutor` delegates to the engine.
     fn cubek_causal_attend(

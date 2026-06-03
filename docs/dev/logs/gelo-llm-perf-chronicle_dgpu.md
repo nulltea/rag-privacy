@@ -1295,4 +1295,12 @@ prefix∥tail overlap — **parked**: ceiling ~150 ms (≈5% decode) needs
 build — done (fix 5). (c) `shield_stack` — probed; was `mean_row_norm`
 + serial memcpy (fixes 2–3), no overlap needed.
 
-**Artefacts:** `bench-results/gelo-b1-audit{1,2}-native-n{2048,8192}-2026-06-03.log`.
+**SMT sweep (follow-up):** `RAYON_NUM_THREADS=12` (physical cores) vs
+the default 24 (SMT): prefill **flat** (10.29 vs 10.31 s), decode 2.83
+vs 3.18 s — but a 24T run earlier also hit 2.82 s, so decode is
+**bimodal (~2.8 vs ~3.2 s) independent of thread count** (scheduling /
+thermal placement, not SMT). 12T is at least as fast; pinning down the
+decode bimodality needs repeated runs + core affinity — open.
+
+**Artefacts:** `bench-results/gelo-b1-audit{1,2}-native-n{2048,8192}-2026-06-03.log`,
+`bench-results/gelo-b1-smt12-native-n2048-2026-06-03.log`.

@@ -6,6 +6,12 @@ license.workspace = true
 
 [features]
 default = []
+# Revert the GPU-offload covers to the legacy compile-time-constant
+# seeds (prefill O_qk/C_v, decode resident cover, σ-noise) for
+# bit-reproducible dev/bench comparisons across differently-seeded
+# executors. NEVER enable in production — fixed covers are derivable
+# from source (see forward.rs::cover_session_seed).
+fixed-cover-seed = []
 
 [dependencies]
 anyhow.workspace = true

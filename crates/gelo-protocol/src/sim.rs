@@ -137,6 +137,10 @@ pub struct InProcessTrustedExecutor<E: GpuOffloadEngine> {
     /// `set_rng_stream` API still works for callers that depend on
     /// stream-keyed reproducibility.
     shield_rng: Xoshiro256PlusPlus,
+    /// Offload-cover session secret (see [`derive_cover_seed`]),
+    /// surfaced via `TrustedExecutor::cover_seed` and mixed into the
+    /// per-layer cover RNGs by the forward pass.
+    cover_seed: u64,
     /// Active shield for the current forward pass. Re-set by
     /// `begin_forward_pass(n)` from one of two configurations
     /// described below — see `shield_default` / `shield_small_n`.
@@ -282,12 +286,30 @@ fn derive_shield_rng(seed: &MaskSeed) -> Xoshiro256PlusPlus {
     Xoshiro256PlusPlus::from_seed(shield_seed)
 }
 
+/// ChaCha20 stream id for deriving the **offload-cover seed** from the
+/// executor's `MaskSeed` — domain-separated from the shield stream. The
+/// forward pass mixes this secret into every per-layer cover RNG
+/// (prefill `O_qk`/`C_v` rotation, decode resident cover + σ-noise) so
+/// the covers honour the documented per-session-secret contract instead
+/// of being derivable from compile-time constants.
+const COVER_SEED_STREAM: u64 = 0xC0FE_C0DE_0FF1_0AD5;
+
+/// Derive the offload-cover session secret from the executor's
+/// [`MaskSeed`] (see [`COVER_SEED_STREAM`]). Same single-shot
+/// dedicated-stream pattern as [`derive_shield_rng`].
+fn derive_cover_seed(seed: &MaskSeed) -> u64 {
+    let mut bootstrap = ChaCha20Rng::from_seed(seed.0);
+    bootstrap.set_stream(COVER_SEED_STREAM);
+    rand::RngCore::next_u64(&mut bootstrap)
+}
+
 impl<E: GpuOffloadEngine + Clone> Clone for InProcessTrustedExecutor<E> {
     fn clone(&self) -> Self {
         Self {
             engine: self.engine.clone(),
             rng: self.rng.clone(),
             shield_rng: self.shield_rng.clone(),
+            cover_seed: self.cover_seed,
             shield: self.shield,
             shield_default: self.shield_default,
             shield_small_n: self.shield_small_n,
@@ -341,8 +363,14 @@ enum SessionKind {
     /// Default batched mode at prefill (and the default at batched
     /// decode until the `BATCHED_DECODE_SHARED_A` gate clears). One
     /// mask per sequence; mask-apply rayon-parallel across `b`.
+    ///
+    /// `masks` is `Arc`-shared: every offload call clones it out of the
+    /// session to release the `&self.session` borrow, and a deep
+    /// `Vec<MaskFamily>` clone copied the 3 diagonal vectors per mask
+    /// (~25 KB × 252 calls/prefill + ~8K tiny clones/decode of pure
+    /// allocator churn). The Arc bump is free.
     PerSequence {
-        masks: Vec<MaskFamily>,
+        masks: Arc<Vec<MaskFamily>>,
         /// Per-sequence data-row count (excluding shield rows). All B
         /// sequences share this; right-padding to a common `n_max`
         /// happens at the caller.
@@ -390,10 +418,12 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
         }
         let shield_default = ShieldConfig::new(8, 4.0);
         let shield_rng = derive_shield_rng(&seed);
+        let cover_seed = derive_cover_seed(&seed);
         Self {
             engine,
             rng: ChaCha20Rng::from_seed(seed.0),
             shield_rng,
+            cover_seed,
             shield: shield_default,
             shield_default,
             // 2026-05-21: at m=1 decode the default k=8 gives
@@ -444,10 +474,12 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
     /// product). Production code should prefer [`Self::with_seed`].
     pub fn with_shield(engine: E, seed: MaskSeed, shield: ShieldConfig) -> Self {
         let shield_rng = derive_shield_rng(&seed);
+        let cover_seed = derive_cover_seed(&seed);
         Self {
             engine,
             rng: ChaCha20Rng::from_seed(seed.0),
             shield_rng,
+            cover_seed,
             shield,
             shield_default: shield,
             // Per-offload legacy/safety-test path: no shape-adaptive
@@ -1533,7 +1565,7 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
                  batched offload requires paper-parity mode"
             ));
         }
-        let masks: Vec<MaskFamily> = match &self.session {
+        let masks: Arc<Vec<MaskFamily>> = match &self.session {
             Some(SessionKind::PerSequence { masks, .. }) => masks.clone(),
             _ => unreachable!("offload_linear_per_sequence called outside PerSequence"),
         };
@@ -1564,7 +1596,7 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
         batch_size: usize,
         data_n: usize,
     ) -> Result<(Array2<f32>, Array2<f32>, Array2<f32>)> {
-        let masks: Vec<MaskFamily> = match &self.session {
+        let masks: Arc<Vec<MaskFamily>> = match &self.session {
             Some(SessionKind::PerSequence { masks, .. }) => masks.clone(),
             _ => unreachable!("offload_qkv_per_sequence called outside PerSequence"),
         };
@@ -1603,7 +1635,7 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
         if handles.is_empty() {
             return Ok(Vec::new());
         }
-        let masks: Vec<MaskFamily> = match &self.session {
+        let masks: Arc<Vec<MaskFamily>> = match &self.session {
             Some(SessionKind::PerSequence { masks, .. }) => masks.clone(),
             _ => unreachable!("offload_linear_many_per_sequence called outside PerSequence"),
         };
@@ -1826,7 +1858,7 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
             masks.push(mask);
         }
         self.session = Some(SessionKind::PerSequence {
-            masks,
+            masks: Arc::new(masks),
             data_n: n_max,
             batch_size,
         });
@@ -1916,7 +1948,7 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
             masks.push(mask);
         }
         self.session = Some(SessionKind::PerSequence {
-            masks,
+            masks: Arc::new(masks),
             data_n: 1,
             batch_size,
         });
@@ -2297,6 +2329,10 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
 
     fn supports_offloaded_attention(&self) -> bool {
         self.engine.supports_offloaded_attention()
+    }
+
+    fn cover_seed(&self) -> u64 {
+        self.cover_seed
     }
 
     fn cubek_causal_attend(
