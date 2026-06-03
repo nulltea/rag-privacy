@@ -1304,3 +1304,61 @@ decode bimodality needs repeated runs + core affinity — open.
 
 **Artefacts:** `bench-results/gelo-b1-audit{1,2}-native-n{2048,8192}-2026-06-03.log`,
 `bench-results/gelo-b1-smt12-native-n2048-2026-06-03.log`.
+
+## 21. Production shape B=8 (2026-06-03) — first measurement on the optimised stack
+
+Canonical cell (B=8, n=2048, K=32, warmed, native, bf16-on, secure
+covers). The only prior B=8 anchor is §9 (2026-05-29, CUDA warm, in-TEE
+attention, SSE2, f32, no cover):
+
+| | §9 anchor | today | Δ |
+|---|--:|--:|--:|
+| prefill wall | 197.6 s | **122.9 s** | **1.61×** (83 → 133 tok/s agg) |
+| decode wall | 34.8 s | **11.26 s** | **3.09×** (0.92 → **2.84 tok/s/seq**) |
+
+— with today's run carrying the full security stack §9 lacked
+(offloaded attention + `C_v` κ=6 + σ + session-secret covers).
+
+Per-op (ms · share · calls), prefill:
+
+| op | ms | share | calls |
+|---|--:|--:|--:|
+| ◆ `engine:matmul_many` | 29590.25 | 23.9% | 72 |
+| ◆ `engine:matmul` | 26696.00 | 21.5% | 72 |
+| `gelo:mask_unapply:dct4` | 17086.05 | 13.8% | 252 |
+| `tee:attn_prefill_offload` (wrap) | 13393.76 | 10.8% | 36 |
+| `gelo:mask_apply:dct4` | 7895.26 | 6.4% | 144 |
+| ↳ ◆ `prefill_cover:cubek_gpu` | 7098.90 | 5.7% | 36 |
+| `tee:residual` | 4892.50 | 3.9% | 72 |
+| `gelo:shield_stack` | 4255.18 | 3.4% | 144 |
+| ↳ `prefill_cover:rotate_tee` | 3313.07 | 2.7% | 36 |
+| `cover:build_covered_prefix+upload` | 3143.24 | 2.5% | 1 |
+| ↳ `prefill_cover:correct_tee` | 1467.67 | 1.2% | 36 |
+
+decode (top): `tee:attn_resident_cover` 2958 (20%) · `engine:matmul_many`
+2287 (16%) · `engine:matmul` 2001 (14%) · `shield_stack` 1407 (10%) ·
+`mask_unapply:hd3` 1355 (9%) · `prefix_partial_gpu` 1169 (8%).
+
+**B=1 → B=8 scaling (the finding):**
+
+| bucket | B=1 | B=8 | scale (8× work) |
+|---|--:|--:|--:|
+| `gelo:mask_unapply:dct4` | 3208 | 17086 | **5.3× — sub-linear ✓** |
+| `gelo:shield_stack` | 479 | 4255 | 8.9× |
+| `tee:attn_prefill_offload` | 1443 | 13394 | 9.3× |
+| ◆ `engine:matmul_many` | 1180 | 29590 | **25×** |
+| ◆ `engine:matmul` | 835 | 26696 | **32×** |
+| prefill wall | 10.31 s | 122.9 s | 11.9× (per-seq 1.49× worse) |
+| decode ms/tok/seq | 100 | **44** | **2.3× better** |
+
+- **Decode batches well** — the fixed per-step cost amortises across the
+  8 sequences (the §19 F+B·V model), per-token cost halves.
+- **B=8 prefill is GPU-matmul-bound**: `engine:matmul*` = 45% of wall
+  and scales **super-linearly** (25–32× for 8× rows). The CPU mask side
+  (this session's target) scales sub-linearly — the rayon fixes pay off
+  more at B=8. The matmul blow-up (~640 MB operands / ~1 GB read-backs
+  per layer → VRAM pressure, transfer, or autotune behaviour at the
+  large shapes) is the **next production-shape bottleneck** to
+  diagnose; none of this session's CPU-side levers address it.
+
+**Artefacts:** `bench-results/gelo-b8-current-native-n2048-2026-06-03.log`.
