@@ -1166,3 +1166,39 @@ share, so further mask-side gains need the FLOP-reducing levers
 **Artefacts:** `bench-results/gelo-b1-fusedunmask-native-n{2048,8192}-2026-06-03.log`;
 spike `dct4_bf16_unapply_overhead_spike`, parity
 `dct4_fused_bf16_unapply_parity` (dct4.rs).
+
+## 18. Batched-DCT library spike (2026-06-03) — FFTW/AOCL-FFTW route refuted
+
+Measure-only spike of the "batched DCT via FFTW `REDFT11` + `plan_many`"
+lever (§17 next-levers): a standalone C harness against the system
+`libfftw3f` (FFTW_MEASURE plans; manual declarations — no dev header, no
+shipped dependency), at the cascade tile shape (16 columns × n),
+single-threaded per-tile vs rustdct's per-column structure.
+
+Per single DCT-IV pass over a 16-column tile:
+
+| n=2112 | µs/tile-pass | ns/elem |
+|---|--:|--:|
+| **rustdct (current)** | **76.2** | **2.26** |
+| FFTW per-column ×16 | 122.7 | 3.63 |
+| FFTW `howmany=16` contiguous | 115.4 | 3.42 |
+| FFTW `howmany=16` interleaved | 121.8 | 3.61 |
+
+(n=8400: rustdct 341 µs vs FFTW 389–432 µs — same picture.)
+
+**Refuted on two counts:** (1) FFTW's r2r/REDFT11 codelets show **no
+across-batch SIMD win** — `howmany=16` ≈ per-column, the interleaved lane
+layout is *worse*; FFTW's SIMD strength is its complex-DFT codelets, not
+the DCT paths, so the 2–4× batch-FFT expectation does not materialise
+through this library. (2) rustdct at our `next_fast_n` sizes is already
+**1.14–1.5× faster** than system FFTW. AOCL-FFTW shares the r2r codelet
+architecture — closing some absolute gap is plausible, flipping a 0%
+batching structure into 2–4× is not. (The GPL question dissolves with it.)
+
+What survives: a **custom lane-parallel DCT-IV** (vertical SIMD, 16
+columns in AVX-512 lanes — the argument FFTW doesn't implement for r2r).
+First-principles ceiling is still several-× over rustdct's 2.26 ns/elem,
+but it is a from-scratch, week-scale kernel with no library shortcut —
+**deprioritised below R4 async overlap** (exact, hides the ~31% mask
+behind the GPU matmul) and the security-gated FFN-intermediate unmask
+elimination.
