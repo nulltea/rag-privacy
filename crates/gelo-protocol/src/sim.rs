@@ -2109,6 +2109,10 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
         self.engine.kv_drop_session(id)
     }
 
+    fn supports_offloaded_attention(&self) -> bool {
+        self.engine.supports_offloaded_attention()
+    }
+
     fn cubek_causal_attend(
         &mut self,
         q: ArrayView3<f32>,

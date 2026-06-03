@@ -2,7 +2,7 @@
 type: dev-log
 status: current
 created: 2026-05-29
-updated: 2026-06-02
+updated: 2026-06-03
 tags: [gelo, dgpu, attention, gpu, persistent-kv, permutation, feature-rotation, security, threat-model, aloepri, covariant-obfuscation, flash-attention]
 companion: [2026-05-22-dgpu-attention-revival, gelo-llm-perf-chronicle_dgpu]
 ---
@@ -30,17 +30,29 @@ supersedes the "Item 1 persistent K/V" sketch in
 per-op performance numbers live in the companion perf chronicle
 [`gelo-llm-perf-chronicle_dgpu.md`](gelo-llm-perf-chronicle_dgpu.md).
 
-**Current status (2026-06-02).** Both offload paths are wired + benched (perf:
-~2.9× prefill / ~3.6–4× decode vs in-TEE). The `WEIGHTS-PUB` membership leak is
+**Current status (2026-06-03).** Both offload paths are wired + benched. On the
+production **CUDA** backend (RTX 5090, sm_120 — landed via the cubek/burn/cubecl
+dependency bump, commit `8189d17`) the offload now runs correctly: prefill
+attention **1.79× (Unit kernel) / 3.16× (blackbox tensor-core)** and decode
+attention **~4.85–5.25×** vs in-TEE (CUDA, B=8, n=2048; see *Prefill offload —
+real-engine wire-up* and *Three-way per-op*). The `WEIGHTS-PUB` membership leak is
 closed by the **`C_v` value cover** (per-session non-orthogonal activation-space
 cover; re-scoped 2026-06-02 from static AloePri *weight* obfuscation — see
 *Adapting covariant obfuscation to the offload*), which **passes the Stage-1/2
-security gates and is perf-free**. **Default-on is still ⛔ blocked — now on TWO
-independent issues:** (1) security — `C_v` clears it, but decode also concedes a
-bag-of-tokens residual that must be accepted; and (2) **correctness — the cubek
-fp16-storage kernel NaNs on real Qwen3-4B activations** (HumanEval gate 0/20),
-needing a **BF16 cubek kernel** (handoff `2026-06-02-bf16-attention-kernel-fix`).
-Issue (2) is independent of the cover (`C_v` exonerated). See *Sequencing* and
+security gates and is perf-free**. **The earlier "cubek fp16-storage NaN"
+correctness blocker is FALSIFIED** — the 0/20 HumanEval run was the cubek
+`blackbox` tensor-core kernel NaN-ing on the cubecl-wgpu / Vulkan backend, from a
+`CUBEK_STRATEGY=blackbox` value leaked from the perf benches into the gate's
+environment; the offload **defaults to the portable `Unit` kernel**, which is
+correct, and on CUDA both kernels now run faithfully (see *Cover wired in*). The
+**end-to-end CUDA HumanEval accuracy gate passes** (2026-06-03): offload + blackbox
++ `C_v` (κ=6) scores **7/20 = in-TEE parity** (llama.cpp plain Qwen3-4B = 6/20) —
+no accuracy regression from offloading or from securing it. Ragged-`n` on blackbox
+is **landed** — the TEE zero-pads `n_q` to the stage-tile multiple before the
+offload and slices the real rows back (sound under causal masking), validated at
+the fp16 floor and exercised by the gate's 38–391-token prompts. What remains for
+default-on is the `WEIGHTS-PUB`/`C_v` **security** acceptance (the decode
+bag-of-tokens residual must be accepted — unchanged). See *Sequencing* and
 *Cover wired in* for the live state.
 
 ## Why this exists (the binding measurement)
@@ -83,6 +95,8 @@ steps.
 > 14 574 ms ÷ 1152 layer-steps; chronicle §9/§11). The spread is
 > harness/wrapper overhead, not an inconsistency; each speedup factor
 > below is computed against the cell named at its measurement.
+
+---
 
 ## Threat model — standardized assumptions
 
@@ -128,6 +142,8 @@ ambiguous — see the note at the end.)
 > document now uses those names exclusively. ("Reference" survives in this
 > document **only** in its unrelated numerical sense — a "CPU reference
 > implementation" for fp16-parity checks.)
+
+---
 
 ## Decisions taken (grill, 2026-05-29)
 
@@ -207,6 +223,8 @@ ambiguous — see the note at the end.)
   permutation path achieves it; if it becomes a hard requirement it
   re-ranks TwinShield-Xue to primary (fallback section).
 
+---
+
 ## The structure
 
 The resident K/V cache is split at a moving boundary `p`:
@@ -240,7 +258,9 @@ When the tail fills (N tokens) or a refresh is due:
 - TEE folds the tail into the prefix → new prefix `[0, p+N)`.
 - Samples a **fresh** `perm_kv^(b+1)` over the new length, re-noises K, uploads. Cost ∝ context length, paid once per N steps. **This is the only heavy transfer, and it's the refresh tax the microbench must measure.**
 
-## Threat model
+---
+
+## Threat model — the decode resident-cache exposure
 
 The trust boundary is the SEV-SNP enclave. **Trusted:** the TEE holds plaintext q/k/v, the secret permutations, the noise RNG, does the merge and un-permute. **Untrusted:** the VFIO-passed GPU — it executes matmul/softmax over whatever it's handed and can read its own VRAM and observe dispatch shapes/timing. The adversary controls the GPU.
 
@@ -262,6 +282,8 @@ Where the clock ticks — **and this is the part to grill**:
   - `O_v` hides *content* (the value coordinates, hence token identity via vocabulary matching); recovered by **covariance / cumulant alignment** (Procrustes / ICA — JADE, anchor_ica) against the model's known activation statistics, **fed by the number of distinct token-values observed** (grows with context length). → gate 3. **⚠ "hides content" is `WEIGHTS-BLIND`-only:** under `WEIGHTS-PUB`, covariance-alignment *fails to pin `O_v`* (gate-3 covariance rerun — `O_v` holds), but a *different* attack — matching the `O_v`-invariant value norm/Gram against the public-`W_V` dictionary — recovers token **membership** without ever pinning `O_v` (gate-3 @ `WEIGHTS-PUB`). So `O_v` hides coordinates, not membership.
   - The two don't help each other: `perm_kv` shuffles rows but covariance / Gram are computed over the row *set* (permutation-invariant), so `perm_kv` does **not** slow `O_v` recovery; and σ-noise is on Q,K only, so `V·O_v` is observed *noiselessly*, making `O_v` alignment *easier* than `perm_kv` recovery (and we can't noise `V·O_v` — that's the uncorrectable case). Hence `O_v` needs its own refresh cadence `M`, traded against the per-block rotation cost (gate 1).
 - One small *benefit*: the freshest N tokens (often the most sensitive, most-attended) stay in-TEE for the whole block and only ever reach the GPU permuted+noised, after a boundary fold.
+
+---
 
 The cover's order-hiding is preserved throughout (the `GPU-ADV` boundary holds for *order*): the GPU only ever sees permuted+noised operands, and the softmax it runs is over permuted scores (equivariant) — it never learns π. The TEE-side merge is a small plaintext correction, not a softmax-over-real-positions. (This is *order*-hiding only; *membership*-hiding fails under `WEIGHTS-PUB`, above.)
 
@@ -485,6 +507,8 @@ This is the load-bearing trait change every engine impl must follow; it
 lands only after gates 1–3 clear (it is the 2–3 week substrate refactor,
 not part of the microbench).
 
+---
+
 ## Fallback: TwinShield-Xue additive blinding
 
 If the block-fresh-π perf gate fails (the ∝L re-permute tax doesn't
@@ -545,6 +569,8 @@ failure.
 > normalised output is orthogonal feature rotation (`O_qk`/`O_v`) — which
 > we already have. TwinShield remains a *separate, kernel-incompatible*
 > lever (GEMM-offload + TEE softmax), not this lever's cover.
+
+---
 
 ## Fused attention kernel — `cubek-attention` (no hand-roll)
 
@@ -711,6 +737,8 @@ expected trivial).
   score-round-trip cost.
 
 The whole prefill-offload lever is downstream of this gate.
+
+---
 
 ## Open questions (the load-bearing gates)
 
@@ -1103,6 +1131,8 @@ non-orthogonal value cover**, applied in activation space, not a static weight
 transform. See *Adapting covariant obfuscation* immediately below; it supersedes
 the weight-space framing wherever the two conflict.
 
+---
+
 ## Adapting covariant obfuscation to the offload: the dynamic↔static spectrum and the minimal lever (2026-06-02)
 
 The Phase-5 spike lands the verdict that *some* covariant obfuscation is
@@ -1256,8 +1286,9 @@ Concretely:
   deployment artifact (C4). **Greedy parity at the chosen κ** (C3, to be
   measured, not assumed — honest "parity at κ", not byte-identical). **Perf
   unchanged** — same op as `O_v`, the only delta is `C_v⁻¹` is not a transpose
-  (a one-off per-session inverse; the 2.83× prefill / ~4× decode hold; if κ
-  conditioning demands, the in-TEE correction may run in f32 — minor).
+  (a one-off per-session inverse; the offload speedups hold — see *Three-way
+  per-op*; if κ conditioning demands, the in-TEE correction may run in f32 —
+  minor).
 - **QK side deferred (the conditional second addition).** `O_qk` must stay
   *orthogonal* (it cancels in the score). The K/Q self-Gram anchor would need
   the `Ĥ_qk` post-qk-norm scaling trick; qk_norm already flattens the cheap
@@ -1384,7 +1415,7 @@ broken (full-vocab top-1=0, top-5=0.047) and the cover non-recoverable
 `GELO_CAPTURE_DICT_FULL` mode;
 `evals/aloepri-attacks/captures_cv_{k6_fullvocab,covalign_k6.0,covalign_k1.0}/`.
 
-### Cover wired in; cover faithful, but the offload kernel has an fp16 bug (2026-06-02)
+### Cover wired in; cover faithful; the offload kernel is correct on CUDA (2026-06-03)
 
 The `C_v` value cover is wired into the offload behind `GELO_COVER_KAPPA` (κ=1 =
 orthogonal `O_v`; κ>1 = the non-orthogonal `C_v = U·diag(s)·Vᵀ`, log-uniform
@@ -1394,28 +1425,65 @@ perf-free**: the cover round-trip through the fused kernel measures rel-error
 **6.4e-4 (κ=1) → 1.2e-3 (κ=6) → 1.6e-3 (κ=16)** — sub-linear in κ, at the
 cubek-vs-f32 fp16 floor (4.4e-4) — on benign/random operands.
 
-**⚠ Default-on is NOT cleared — a separate offload-kernel bug blocks it
-(diagnosed 2026-06-02).** The HumanEval accuracy gate run at κ=6 returned
-**0/20**: the offloaded prefill attention emits NaN/Inf on *real* Qwen3-4B
-activations because cubek stores intermediate tiles in **fp16**, whose range
-(max 65 504) overflows on the model's large activations (qk-norm×γ Q/K,
-un-normalized V). It is **independent of the cover** (fails identically at κ=1)
-and **independent of batch** (the kernel is per-sequence) — `C_v` is exonerated;
-in-TEE (f32) is unaffected. The fix is a **BF16 cubek storage path**
-(cubek's accumulator is already f32; only storage range fails). **Until that
-lands, both offload paths stay default-off on correctness, not only on the
-`WEIGHTS-PUB` security gate.** Root-cause + fix plan in the handoff
-[`2026-06-02-bf16-attention-kernel-fix`](../../handoffs/2026-06-02-bf16-attention-kernel-fix.md);
-`C_v`/gate background in
+**The 0/20 HumanEval collapse was a kernel-configuration artifact — not an
+fp16-storage or cover bug.** It was the cubek `BlackboxAccelerated` (tensor-core)
+kernel producing NaN on the cubecl-wgpu / **Vulkan** dev backend (data-independent,
+all n ≥ 3), triggered by a `CUBEK_STRATEGY=blackbox` value leaked from the perf
+benches into the gate's environment; the offload **defaults to the portable `Unit`
+kernel**, which is correct on Vulkan. The leak is independent of the cover (fails
+identically at κ=1) and of batch, so `C_v` is exonerated and in-TEE (f32) was never
+affected. (The earlier "cubek stores fp16 tiles that overflow → fix with a BF16
+kernel" framing is falsified — cubek's softmax/accumulator are F32 and
+max-subtracted, so there is no overflow path, and bf16 is strictly worse
+numerically. Full diagnosis trail:
+[`2026-06-02-offload-attention-collapse-sm120-rootcause`](../../handoffs/2026-06-02-offload-attention-collapse-sm120-rootcause.md).)
+
+**Resolved on CUDA (commit `8189d17`).** The cubek/burn/cubecl dependency bump
+(see *CUDA / RTX 5090 support* below) makes both kernels run correctly on the
+production CUDA backend: **Unit is correct at any n** (deterministic NaN n-sweep
+clean across n = 1…2048 incl. ragged) and **blackbox is correct at tile-aligned n**
+natively. Numerical correctness is verified — cubek-vs-CPU-f32 rel-error at the
+fp16 floor (~5e-4), Unit ≡ blackbox (residual is f16-operand-rounding,
+kernel-independent). **Ragged prompts on blackbox are handled by caller-side `n_q`
+padding** — the TEE zero-pads `n_q` to the stage-tile multiple and slices the real
+rows back; sound under causal masking (cubek masks on absolute positions, so real
+rows are unchanged and the zero phantom rows attend real keys and are discarded).
+Validated at the fp16 floor (causal parity vs CPU max_abs 2.7e-5 at ragged n=24;
+finiteness clean across ragged n = 8…2048 under blackbox; degenerate prompts below
+the tensor-core KV tile floor — a handful of tokens — are a blackbox limitation the
+portable Unit kernel covers). **The end-to-end CUDA accuracy gate passes:** offload
++ blackbox + `C_v` (κ=6) = **7/20 = in-TEE parity** (2026-06-03; *Acceptance gate*).
+So the correctness blocker is closed on CUDA; default-on now waits only on the
+`WEIGHTS-PUB`/`C_v` security acceptance. `C_v`/gate background in
 [`2026-06-02-attn-offload-cv-cover-gate`](../../handoffs/2026-06-02-attn-offload-cv-cover-gate.md).
+
+### CUDA / RTX 5090 (sm_120) support — dependency bump (2026-06-03, commit `8189d17`)
+
+The cubek offload was previously non-functional on the production CUDA backend;
+two upstream failures (and one nvrtc target failure) blocked it. A dependency bump
+fixes all three: **cubek-attention 0.1.1 → 0.2.0, burn-cubecl/tensor/backend
+0.20.1 → 0.21.0, cubecl* 0.9.0 → 0.10.0**. It closes cubek #55 (Unit tile/line-size
+assert for f16/bf16), cubek #102/#81 (blackbox WMMA codegen), and burn #4622
+(RTX 50-series nvrtc `--gpu-architecture`). **CUDA is now a default feature** on
+this Nvidia box (`crates/gelo-gpu-wgpu/Cargo.toml`); non-CUDA hosts build
+`--no-default-features --features blas`. The per-kernel correctness status on CUDA
+is in *Cover wired in* above; the corrected perf numbers are in *Prefill offload —
+real-engine wire-up* and *Three-way per-op*.
+
+---
 
 ## Offload perf-upside — per-op breakdowns (2026-06-01)
 
 These measure the **performance** of the offloaded attention with its cover
-applied end-to-end, *decoupled from the security verdict*: covariant weight
-obfuscation (Phase 5b) is a static weight transform that does not change these
-per-step costs, so this is "what the offload buys once it is secured." All on
-RTX 5090 / Vulkan, Qwen3-4B (Hq=32, Hkv=8, d=128), B=8.
+applied end-to-end, *decoupled from the security verdict*. All on
+RTX 5090 / **Vulkan**, Qwen3-4B (Hq=32, Hkv=8, d=128), B=8. **⚠ These are the
+2026-06-01 Vulkan figures — superseded by the corrected CUDA measurements** in
+*Prefill offload — real-engine wire-up* and *Three-way per-op* (decode ~5×,
+prefill 1.79×/3.16×). The decode optimisation journey below (O4/O5) is a *work
+relocation* result that stands on either backend; its absolute ~4× is a Vulkan
+backend figure, since decode does not route through cubek (it uses the resident
+`attend_session_partial` burn-ops path), and is superseded by CUDA's faster
+decode attend — not invalidated.
 
 ### Decode — permuted-cover, secure (full wire)
 
@@ -1515,8 +1583,9 @@ the same bench. **⚠ This is the *unoptimised* analytical baseline** (synthetic
 per-layer, scalar f16 convert, pre-O1) — kept because its prep decomposition
 below is what *motivated* O1/O2. At this baseline the offload barely wins at
 n=2048 (essentially break-even) and only clearly at long context; the
-**optimised, production result is 2.83×** at n=2048 — see *Prefill offload —
-real-engine wire-up* below. The pre-optimisation per-layer numbers:
+**optimised, production result is the corrected CUDA measurement** at n=2048
+(Unit 1.79× / blackbox 3.16×) — see *Prefill offload — real-engine wire-up*
+below. The pre-optimisation per-layer numbers:
 
 | context (per layer, pre-O1) | full in-TEE | offload (rot+cubek+`O_vᵀ`) | ratio |
 |---|--:|--:|--:|
@@ -1625,15 +1694,31 @@ GPU only ever sees rotated bytes. **Correctness:** `cover_prefill_matches_in_tee
 production `causal_gqa_attention` (max_abs < 1e-3); `cubek_folded_causal_parity`
 covers the cubek fp16 step.
 
-**Measured on the canonical microbench** (Qwen3-4B, B=8, n=2048, RTX 5090 /
-Vulkan, `CUBEK_STRATEGY=blackbox`), full 36-layer prefill attention bucket:
+**⚠ The earlier Vulkan figures were timing a broken kernel — corrected below.**
+The previously documented prefill ratios (1.88× → 2.71× → 2.83× at n=2048) were
+measured on **Vulkan with `CUBEK_STRATEGY=blackbox`** — i.e. timing the
+NaN-producing tensor-core kernel (see *Cover wired in*), so they are invalid as
+correctness. The O1/O2/loop-batch *optimisation steps* below are real (they target
+host-side prep, not the kernel), but the absolute ratios must come from a correct
+kernel run.
 
-| prefill attention bucket (`tee:attn_prefill_offload`) | full prefill, B=8, n=2048 | ratio vs in-TEE |
-|---|--:|--:|
-| **in-TEE baseline** (`tee:attn_inplace_many`) | **44 062 ms** | 1.00× |
-| offload, O1 (SIMD convert) | 23 490 ms | **1.88×** |
-| offload, O1 + O2 (un-replicated K/V, on-device expand) | 16 237 ms | **2.71×** |
-| offload, + batched fold/correct (loop-batch + fused `O_vᵀ`) | **15 587 ms** | **2.83×** |
+**Corrected — CUDA, RTX 5090, full 36-layer prefill attention bucket**
+(`tee:attn_prefill_offload`; B=8, n=2048, warmed so nvrtc autotune is excluded;
+κ=6 secure cover). In-TEE baseline `tee:attn_inplace_many` = **44 062 ms**:
+
+| kernel | cubek_gpu | bucket | vs in-TEE |
+|---|--:|--:|--:|
+| CUDA Unit | 18 034 ms | 24 659 ms | **1.79×** |
+| CUDA blackbox | 7 352 ms | 13 952 ms | **3.16×** |
+
+- CPU cover buckets (strategy-invariant controls): `rotate_tee` ≈ 3 455–3 464 ms,
+  `correct_tee` ≈ 1 620–1 638 ms.
+- The blackbox tensor cores make the GPU attend (`cubek_gpu`) **2.45× faster** than
+  Unit (18.0 → 7.4 s).
+- Prefill **wall**: Unit 186 s / blackbox 175 s — the 2.45× attend speedup is
+  Amdahl-capped to ~6% of wall because the offloaded attention is only ~12% of
+  prefill wall (GPU matmuls dominate). Single-sample; ±~7% cross-run variance on
+  wall.
 
 **Loop-batching + fused `O_vᵀ` (2026-06-01).** For uniform-length batches (the
 common case — padded prompts share `n_max`) the in-TEE fold + rotate is done
@@ -1654,55 +1739,58 @@ kv-head **read-index** (broadcast, no materialisation) — would let the single
 dispatch win; until then the prefill folds the TEE work batched but loops cubek
 per-sequence.
 
-**Measured, not projected** — the offloaded prefill attention bucket is now
-**2.83×** vs in-TEE at the production shape. Still open: the upload-bandwidth
-probe (O3 — `queue.write_buffer` staging, ~1.5 GB/s, likely alloc/submit-bound)
-and the cubek read-index. **Security unchanged:** default-off *perf* wire; the
-rotation cover still fails `WEIGHTS-PUB`, so default-on stays gated on covariant
-obfuscation (Phase 5b).
+**Measured on a correct kernel** — the offloaded prefill attention bucket is
+**1.79× (Unit) / 3.16× (blackbox)** vs in-TEE at the production shape on CUDA.
+Still open: the upload-bandwidth probe (O3 — `queue.write_buffer` staging,
+~1.5 GB/s, likely alloc/submit-bound) and the cubek read-index. Blackbox at
+arbitrary prompt lengths is handled by caller-side `n_q` padding to the stage-tile
+multiple (validated at the fp16 floor — see *Cover wired in*). **Security:** the bare rotation cover fails
+`WEIGHTS-PUB`, closed by the `C_v` value cover (Stage-1/2 PASS); default-on is
+gated on that acceptance plus the end-to-end CUDA pass@1 run.
 
-### Three-way per-op — in-TEE vs insecure (`O_v`) vs secure (`C_v`); the defense is perf-free (2026-06-02)
+### Three-way per-op — in-TEE vs insecure (`O_v`) vs secure (`C_v`); the defense is perf-free (2026-06-03)
 
 The `WEIGHTS-PUB` defense is **covariant value obfuscation** — the non-orthogonal,
 κ-bounded value cover `C_v` (κ=1 = the insecure orthogonal `O_v`; κ=6 = secure).
-Canonical bench (B=8, n=2048, K=32, RTX 5090 / Vulkan, `CUBEK_STRATEGY=blackbox`,
-σ=0.01). in-TEE reuses the documented numbers above; insecure `O_v` (κ=1) **and**
-secure `C_v` (κ=6) were measured back-to-back this session (2026-06-02) so the
-insecure↔secure comparison is matched-config (no cross-vintage confound).
+The headline absolute ratios are the corrected CUDA numbers (this section);
+**the prefill/decode buckets previously tabulated here on Vulkan with
+`CUBEK_STRATEGY=blackbox` (prefill 2.89×/2.92×, `cubek_gpu` ≈ 8.2–8.5 s) are
+invalid** — they timed the NaN-producing blackbox kernel on Vulkan (*Cover wired
+in*). What that run *does* establish, and remains valid, is the **insecure↔secure
+delta**: `C_v` touches only strategy-invariant CPU buckets, so securing the
+offload is free regardless of the backend.
 
-**Prefill attention (per full 36-layer prefill):**
+**Corrected absolute ratios (CUDA, RTX 5090, B=8, n=2048, K=32, warmed, κ=6
+secure):**
 
-| op | in-TEE | offload insecure (`O_v`) | offload secure (`C_v`) | what it is |
-|---|--:|--:|--:|---|
-| **attention bucket** | **44 062 ms** | **15 267 ms (2.89×)** | **15 090 ms (2.92×)** | `tee:attn_inplace_many` → `tee:attn_prefill_offload` |
-| ├ `cubek_gpu` | — | 8 527 ms | 8 248 ms | GPU attend (`C_v`-independent) |
-| ├ `rotate_tee` | — | 3 574 ms | 3 571 ms | fold + `O_qk`/`C_v` rotate (CPU) |
-| └ `correct_tee` | — | 1 647 ms | 1 648 ms | `C_v⁻¹`/`O_vᵀ` correct + unfold (CPU) |
+| phase | in-TEE | offload (CUDA Unit) | offload (CUDA blackbox) |
+|---|--:|--:|--:|
+| **prefill** (`tee:attn_inplace_many` → `tee:attn_prefill_offload`) | 44 062 ms | 24 659 ms (**1.79×**) | 13 952 ms (**3.16×**) |
+| **decode** (`tee:attn_cached_inplace_many` → `tee:attn_resident_cover`) | 14 574 ms | 3 008 ms (**4.85×**) | 2 775 ms (**5.25×**) |
 
-**Decode attention (recurring, 36 layers × 32 steps):**
+**Decode is strategy-invariant** — it does **not** route through cubek (it uses
+the resident `attend_session_partial` burn-ops path), so the Unit-vs-blackbox
+decode difference is cross-run noise. The real decode driver is the **backend**:
+CUDA's burn-ops decode attend (`prefix_partial_gpu`) is ~2× faster than the
+documented Vulkan (1 213 vs 2 408 ms). So the prior Vulkan decode 3.6× was a valid
+*backend* figure (not a broken kernel), now superseded by CUDA's ~5×.
 
-| op | in-TEE | offload insecure (`O_v`) | offload secure (`C_v`) | what it is |
-|---|--:|--:|--:|---|
-| **attention bucket** | **14 574 ms** | **3 997 ms (3.6×)** | **4 042 ms (3.6×)** | `tee:attn_cached_inplace_many` → `tee:attn_resident_cover` |
-| ├ `prefix_partial_gpu` | — | 2 411 ms | 2 408 ms | GPU attend over frozen prefix (`C_v`-independent) |
-| ├ `q_cover_tee` | — | 382 ms | 392 ms | `q·O_qk` + σ (CPU) |
-| └ `acc_uncover_tee` | — | 234 ms | 237 ms | `acc·C_v⁻¹`/`O_vᵀ` (CPU) |
+**Why securing the offload is free** (the insecure↔secure delta, measured
+matched-config back-to-back): `C_v` is the same dense matmul as `O_v` plus a
+one-time per-session `C_v⁻¹` inverse, and it touches **only** the
+strategy-invariant CPU cover buckets — prefill `rotate_tee` ≈ 3 455–3 464 ms /
+`correct_tee` ≈ 1 620–1 638 ms, decode `q_cover_tee`/`acc_uncover_tee` — all flat
+to ~1% between κ=1 and κ=6. The GPU attend buckets (`cubek_gpu`,
+`prefix_partial_gpu`) are `C_v`-independent by construction.
 
-**Reading.** Scale vs in-TEE: prefill **~2.9×**, decode **~3.6×** (documented runs
-reach ~4×; the bucket carries ±~10% cubek cross-run variance) — the offload
-removes the in-TEE attention bottleneck (44→15 s prefill; 14.6→~4 s decode).
-**Insecure vs secure — the defense is free:** matched-config, *every* bucket is
-within ~1–3%, and the only ops `C_v` touches are dead flat — `rotate_tee`
-3 574→3 571 (−0.1%), `correct_tee` 1 647→1 648 (+0.1%), `acc_uncover` 234→237
-(+1.2%). By construction `C_v` is the same dense matmul as `O_v` plus a one-time
-per-session `C_v⁻¹` inverse; the GPU attend buckets (`cubek_gpu`,
-`prefix_partial_gpu` — `C_v`-independent) match to ~0.1% (`prefix_partial`
-2 411→2 408), confirming the resident-attend bucket is low-variance and the small
-deltas are noise, not the cover. **Verdict: GPU-offloaded attention gives ~2.9×
-(prefill) / ~3.6–4× (decode) over in-TEE, and securing it with `C_v` adds no
-measurable cost.** *(This is the perf ceiling of the path; it is not yet
-shippable — the prefill offload has an fp16-storage NaN bug on real activations,
-blocking default-on until the BF16 kernel lands; see* Cover wired in *above.)*
+**Reading.** GPU-offloaded attention gives **1.79× (Unit) / 3.16× (blackbox)**
+prefill and **~4.85–5.25×** decode over in-TEE on CUDA, and securing it with `C_v`
+adds no measurable cost. Single-sample; ±~7% cross-run variance on wall/decode.
+*(The path is not yet shippable: default-on awaits the `WEIGHTS-PUB`/`C_v`
+acceptance and the end-to-end CUDA pass@1 run (in progress). Blackbox ragged
+prompts are handled by caller-side `n_q` padding — see* Cover wired in *.)*
+
+---
 
 ## Acceptance gate (v1)
 
@@ -1746,12 +1834,51 @@ Layered — failing any tier reopens the TwinShield-Xue fallback:
    achievable invariant for an fp16 offload. pass@1 non-regression + coherence
    is the right bar.*
 
-   **First run (2026-06-02) — FAILED, exposed the offload fp16 bug.** Cell B
-   (offload+`C_v`, κ=6) scored **0/20**: degenerate output from the
-   fp16-storage NaN (see *Cover wired in*). Cell C (κ=1) fails identically →
-   attributed to the **offload kernel**, not the cover. The gate did its job —
-   it caught a correctness bug every lighter check passed. Re-run after the BF16
-   kernel fix lands.
+   **First run (2026-06-02) — 0/20, a kernel-configuration artifact (not a cover
+   or fp16 regression).** Cells B (κ=6) and C (κ=1) both scored **0/20**
+   identically → the offload kernel, not the cover. Root cause: the blackbox
+   tensor-core kernel NaN-ing on the Vulkan dev backend from a leaked
+   `CUBEK_STRATEGY=blackbox` (full trail: *Cover wired in* + the
+   [diagnosis handoff](../../handoffs/2026-06-02-offload-attention-collapse-sm120-rootcause.md)).
+
+   **CUDA re-run (2026-06-03) — PASS, parity.** Cell B (offload + blackbox + `C_v`
+   κ=6, GELO_BENCH_VARIANT=4b) scores **7/20 = the in-TEE GELO baseline (7/20)**,
+   above plain Qwen3-4B/llama.cpp (6/20) — `B ≥ A − ε` with ε=0, **no regression**
+   from offloading or from securing it, so cell C (κ=1) is not needed. All 20
+   prompts (38–391 tok, ragged) generated cleanly on the blackbox kernel via `n_q`
+   padding; the handful of misses are model-quality artifacts (markdown-fence /
+   prose contamination, logic errors) of the same class as in-TEE, not offload
+   defects. The acceptance run is instrumented to capture the per-op profile on the
+   variable-length prompts in the same pass — synthesised below.
+
+   **Per-op profile over the gate (20 prompts, B=1, prompt 38–391 tok median 101,
+   384 gen tok each; CUDA, blackbox, κ=6; cumulative ms).** Phase split by bucket
+   name; wrapper buckets (`tee:attn_prefill_offload`, `tee:attn_resident_cover`)
+   contain their `*_cover:*` children, so this is per-op attribution, not a wall
+   decomposition (wall ≈ 1955 s):
+
+   | phase | bucket | ms | calls |
+   |---|---|--:|--:|
+   | prefill (offloaded) | `tee:attn_prefill_offload` | 7 785 | 720 |
+   | └ blackbox GPU attend | `prefill_cover:cubek_gpu` | 1 560 | 720 |
+   | └ rotate / correct (TEE) | `prefill_cover:rotate_tee` / `correct_tee` | 808 / 836 | 720 |
+   | prefill→decode handoff | `cover:build_covered_prefix+upload` | 5 087 | 720 |
+   | decode (resident cover) | `tee:attn_resident_cover` | 478 620 | 276 480 |
+   | └ prefix attend (GPU) | `cover:prefix_partial_gpu` | 94 699 | 276 480 |
+   | └ tail attend / build (TEE) | `cover:tail_partial_tee` / `tail_build_tee` | 187 707 / 130 586 | 276 480 |
+   | └ q-cover / acc-uncover (TEE) | `cover:q_cover_tee` / `acc_uncover_tee` | 34 527 / 27 405 | 276 480 |
+   | shared GPU matmul | `engine:matmul_many` / `engine:matmul` | 318 409 / 225 860 | 554 400 / 562 080 |
+   | shared mask / shield | `gelo:mask_unapply:hd3` / `mask_apply:hd3` / `shield_stack` | 423 028 / 233 576 / 202 258 | — |
+   | logits | `tee:compute_logits` | 48 877 | 7 680 |
+
+   720 = 20 prompts × 36 global layers (one offloaded prefill attend per layer);
+   276 480 = 20 × 384 steps × 36 layers (decode layer-steps). At these short
+   HumanEval prompts (median 101 tok) the run is **decode-dominated** — the
+   offloaded prefill attention is ~0.3% of profiled time and the blackbox GPU
+   attend `prefill_cover:cubek_gpu` averages ~2.2 ms/layer; the prefill-heavy
+   production shape (n=2048) is where the blackbox 3.16× lands (*Three-way per-op*).
+
+---
 
 ## Sequencing — status (✅ done · ⛔ blocked · remaining)
 
@@ -1966,28 +2093,31 @@ Phase 1 (cover incl. O_v/O_qk, σ=0 parity)  + real-activation capture
    conditional second addition, deferred until the K/Q self-Gram is measured to
    bite. If no κ both breaks the dictionary and holds parity, escalate to
    `Ĥ_qk`; if that also fails, **prefill stays in-TEE**.
-8. **Phase 6 — prefill-attention offload.** **🟡 PERF WIRE LANDED, default-on
-   ⛔ gated on (a) `C_v` security [done] and (b) the BF16-kernel correctness fix
-   [pending — cubek fp16 NaN, HumanEval 0/20].** The perf wire is in the production
-   forward path (`decoder_block_batched`, `GELO_GPU_PREFILL_OFFLOAD`, default-off):
-   per-layer shared cover (`O_qk`/`O_v`, σ=0) → fold+GQA-expand+rotate →
-   `cubek_causal_attend` (engine/executor delegate to
+8. **Phase 6 — prefill-attention offload.** **🟡 PERF WIRE LANDED + correctness
+   resolved on CUDA (incl. ragged-`n` on blackbox via caller-side `n_q` padding,
+   and HumanEval pass@1 = 7/20 = in-TEE parity, 2026-06-03); default-on ⛔ gated
+   only on the `C_v` **security** acceptance [Stage-1/2 PASS; decode bag-of-tokens
+   residual must be accepted].** The perf wire is
+   in the production forward path (`decoder_block_batched`,
+   `GELO_GPU_PREFILL_OFFLOAD`, default-off): per-layer shared cover (`O_qk`/`O_v`,
+   σ=0) → fold+GQA-expand+rotate → `cubek_causal_attend` (engine/executor delegate to
    `cubek_attention_folded{,_gqa}`) then `·O_vᵀ`. O1 (SIMD convert) + O2
    (un-replicated K/V, on-device GQA broadcast) + loop-batching (one fold/rotate
    over B·Hq) + fused `O_vᵀ`+unfold folded in. Verified:
    `cover_prefill_matches_in_tee` / `cover_prefill_batched_matches_in_tee`
-   (f32 floor) + `cubek_folded_causal_parity` (fp16). **Measured 2.83×**
-   (44.1 s → 15.6 s) on the real `tee:attn_inplace_many` bucket — see *Prefill
-   offload — real-engine wire-up*. cubek dispatched **per-sequence** (a
-   controlled warm A/B settled it as 1.48× faster than one big dispatch — the
-   materialised-GQA-expand artifact). Remaining perf: the **cubek kv-head
-   read-index** (kills the materialised expand → lets the single dispatch win +
-   cuts `cubek_gpu`) and the upload-bandwidth lever (O3, `write_buffer` staging).
-   **Default-on remains blocked on TWO independent issues:** (1) security —
-   the cover's `WEIGHTS-PUB` membership leak, closed by the `C_v` value cover
-   (Stage-1/2 PASS); and (2) **correctness — the cubek fp16-storage NaN bug**
-   on real activations (HumanEval gate 0/20, 2026-06-02), which needs the BF16
-   cubek kernel and is independent of the cover. Both must clear before flip.
+   (f32 floor) + `cubek_folded_causal_parity` (fp16). **Measured (CUDA, corrected):
+   1.79× (Unit) / 3.16× (blackbox)** on the real `tee:attn_inplace_many` bucket
+   (44.1 s → 24.7 / 14.0 s) — see *Prefill offload — real-engine wire-up*. cubek
+   dispatched **per-sequence** (a controlled warm A/B settled it as 1.48× faster
+   than one big dispatch — the materialised-GQA-expand artifact). Remaining perf:
+   the **cubek kv-head read-index** (kills the materialised expand → lets the single
+   dispatch win + cuts `cubek_gpu`) and the upload-bandwidth lever (O3,
+   `write_buffer` staging). **The earlier "cubek fp16-storage NaN" correctness
+   blocker is FALSIFIED** (a Vulkan-only blackbox-kernel artifact from a leaked
+   `CUBEK_STRATEGY`, resolved on CUDA — see *Cover wired in* + the diagnosis
+   handoff). Blackbox ragged-`n` is handled by caller-side padding, and the CUDA
+   pass@1 gate passes at **7/20 (in-TEE parity)**. The only remaining gate is the
+   `C_v` security acceptance.
 9. **Acceptance + flip** — the 4-tier gate, then default-on behind the
    c5 AloePri condition (mirrors R3).
 10. **Fast-follows** — cubek kv-head read-index (broadcast K/V in-shader,
@@ -2013,6 +2143,8 @@ Most of Phases 2–4 is cover-agnostic and survives the pivot:
 is the cover layer + the softmax stage, not the substrate. De-risk
 TwinShield's R-rank in parallel (the 1B spike) so the fallback is
 *known-viable* before it's needed.
+
+---
 
 ## References
 

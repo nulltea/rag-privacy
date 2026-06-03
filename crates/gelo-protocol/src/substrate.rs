@@ -615,6 +615,14 @@ pub trait GpuOffloadEngine: Send {
     /// normalised context `(Hq, n, d_head)`. The caller (TEE) supplies
     /// feature-rotation-covered operands (`Q·O_qk`, `K·O_qk`, `V·O_v`) and
     /// corrects the output with `·O_vᵀ`; the engine only sees rotated bytes.
+    /// Whether this engine supports [`Self::cubek_causal_attend`] — the fused
+    /// tiled-softmax offload (the fp16 GPU engine). Drives the capability-gated
+    /// default for the offloaded + covered attention path: it is the default
+    /// when this returns true, and the in-TEE path otherwise.
+    fn supports_offloaded_attention(&self) -> bool {
+        false
+    }
+
     /// Default unsupported; the GPU engine routes to a tiled fused softmax
     /// (`cubek-attention`).
     fn cubek_causal_attend(
@@ -1265,6 +1273,14 @@ pub trait TrustedExecutor {
     /// Fused causal attention over folded, rotation-covered operands —
     /// the prefill-offload delegate (perm-attn-gpu-offload Phase 6). `k`/`v`
     /// are un-replicated `(Hkv, n, d)` with `group = Hq/Hkv`. See
+    /// Whether the executor's engine supports the fused offload
+    /// ([`Self::cubek_causal_attend`] / GPU-resident attention). Capability
+    /// default for the offloaded + covered path; `InProcessTrustedExecutor`
+    /// delegates to the engine. Default false (CPU / in-TEE executors).
+    fn supports_offloaded_attention(&self) -> bool {
+        false
+    }
+
     /// [`GpuOffloadEngine::cubek_causal_attend`]. Default unsupported;
     /// `InProcessTrustedExecutor` delegates to the engine.
     fn cubek_causal_attend(

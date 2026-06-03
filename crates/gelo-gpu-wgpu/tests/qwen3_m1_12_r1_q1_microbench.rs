@@ -784,22 +784,73 @@ fn humaneval_gate_generate() -> Result<()> {
 
     let kappa = std::env::var("GELO_COVER_KAPPA").unwrap_or_else(|_| "1".into());
     let offload = std::env::var("GELO_GPU_PREFILL_OFFLOAD").unwrap_or_else(|_| "0".into());
-    eprintln!("[humaneval] subset={} offload={offload} kappa={kappa} max_tokens={max_tokens}", subset.display());
+    let strategy = std::env::var("CUBEK_STRATEGY").unwrap_or_else(|_| "unit".into());
+    // Cap the number of prompts (smoke test = 1); default = whole subset.
+    let limit: usize = std::env::var("GELO_HE_LIMIT").ok().and_then(|s| s.parse().ok()).unwrap_or(usize::MAX);
+    // Per-prompt profile dump (verbose); the cumulative table always prints.
+    let profile_each = std::env::var("GELO_HE_PROFILE_EACH").as_deref() == Ok("1");
+    eprintln!(
+        "[humaneval] subset={} offload={offload} strategy={strategy} kappa={kappa} max_tokens={max_tokens} limit={}",
+        subset.display(),
+        if limit == usize::MAX { "all".into() } else { limit.to_string() }
+    );
 
-    for line in subset_txt.lines().filter(|l| !l.trim().is_empty()) {
+    // Per-op performance capture alongside accuracy. The `profile` buckets are
+    // always-on; we reset per prompt and accumulate into `cum`, so one run
+    // yields both pass@1 (score.py on completions.jsonl) and a per-op
+    // breakdown over the variable-length HumanEval prompts — synthesised into a
+    // perf table like the canonical `gelo_llm_prefill_decode_breakdown` (B=1
+    // here, ragged prefill n + decode). Prefill buckets (`tee:attn_prefill_offload`,
+    // `prefill_cover:*`, `engine:matmul*`) and decode buckets coexist, separated
+    // by name.
+    let mut cum = profile::Profile::default();
+    let mut prompt_lens: Vec<usize> = Vec::new();
+    let mut gen_lens: Vec<usize> = Vec::new();
+
+    for line in subset_txt.lines().filter(|l| !l.trim().is_empty()).take(limit) {
         let v: serde_json::Value = serde_json::from_str(line)?;
         let idx = v["idx"].as_u64().unwrap_or(0);
         let task_id = v["task_id"].as_str().unwrap_or("").to_string();
         let prompt = v["prompt"].as_str().unwrap_or("").to_string();
 
         let ids = tokenizer.encode(&prompt, 2048)?;
+        let n_prompt = ids.len();
+
+        profile::reset_all();
         let outs = generation::generate_batched(&cfg, &weights, &rope, &mut exec, &[ids], &gen_cfg)?;
+        profile::aggregate_threads();
+        let snap = profile::snapshot();
+        cum.merge(&snap);
+
         let completion = tokenizer.decode(&outs[0].tokens, true)?;
+        prompt_lens.push(n_prompt);
+        gen_lens.push(outs[0].tokens.len());
 
         let rec = serde_json::json!({ "idx": idx, "task_id": task_id, "completion": completion });
         writeln!(out, "{}", serde_json::to_string(&rec)?)?;
-        eprintln!("[humaneval] {idx:>2} {task_id} → {} tok{}", outs[0].tokens.len(),
+        eprintln!("[humaneval] {idx:>2} {task_id} prompt={n_prompt} tok → {} tok{}", outs[0].tokens.len(),
             if outs[0].stopped_on_eos { " (eos)" } else { "" });
+        if profile_each {
+            snap.dump(&format!("HumanEval idx={idx} (prompt={n_prompt} tok, gen={} tok)", outs[0].tokens.len()));
+        }
+    }
+
+    // Synthesised per-op table over the run + prompt-length distribution (so the
+    // variable-length perf numbers are interpretable against the fixed-N canonical bench).
+    let n_done = prompt_lens.len();
+    if n_done > 0 {
+        let mut pl = prompt_lens.clone();
+        pl.sort_unstable();
+        let (pmin, pmed, pmax) = (pl[0], pl[pl.len() / 2], pl[pl.len() - 1]);
+        let tot_p: usize = pl.iter().sum();
+        let tot_g: usize = gen_lens.iter().sum();
+        cum.dump(&format!(
+            "HumanEval per-op cumulative over {n_done} prompts (offload={offload} strategy={strategy} kappa={kappa}, B=1)"
+        ));
+        eprintln!(
+            "[humaneval] prompts={n_done}  prompt_len min/median/max = {pmin}/{pmed}/{pmax}  \
+             total_prompt_tok={tot_p}  total_gen_tok={tot_g}"
+        );
     }
     eprintln!("[humaneval] wrote {} → score with evals/humaneval-gate/score.py", out_path.display());
     Ok(())

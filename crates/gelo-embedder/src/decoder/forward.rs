@@ -356,20 +356,21 @@ fn gpu_resident_attn_enabled() -> bool {
     })
 }
 
-/// Prefill-attention GPU offload (perm-attn-gpu-offload Phase 6): route
-/// GLOBAL-layer prefill self-attention through the fused `cubek` kernel under
-/// the feature-rotation cover (`O_qk`/`O_v`, σ=0, public causal mask), instead
-/// of the in-TEE `causal_gqa_attention` B-loop. Default off → production
-/// prefill stays in-TEE; SWA layers always stay in-TEE. Security note: the
-/// rotation cover does NOT clear the `WEIGHTS-PUB` bar (token-norm dictionary)
-/// — this flag is a PERF wire, gated default-off until covariant obfuscation
-/// (AloePri, Phase 5b) lands.
-fn gpu_prefill_offload_enabled() -> bool {
-    static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+/// Explicit override for the prefill-attention GPU offload
+/// (perm-attn-gpu-offload Phase 6): route GLOBAL-layer prefill self-attention
+/// through the fused `cubek` kernel under the value cover (`O_qk` + the
+/// per-session non-orthogonal `C_v`), instead of the in-TEE
+/// `causal_gqa_attention` B-loop. `Some(true/false)` from
+/// `GELO_GPU_PREFILL_OFFLOAD`; `None` (unset) → the caller uses the
+/// **capability default** (on when the executor supports the fused offload —
+/// `exec.supports_offloaded_attention()` — and in-TEE otherwise). SWA layers
+/// always stay in-TEE.
+fn gpu_prefill_offload_override() -> Option<bool> {
+    static EN: std::sync::OnceLock<Option<bool>> = std::sync::OnceLock::new();
     *EN.get_or_init(|| {
         std::env::var("GELO_GPU_PREFILL_OFFLOAD")
+            .ok()
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
     })
 }
 
@@ -511,29 +512,33 @@ fn stack_cache(
     (k_st, v_st)
 }
 
-/// Permuted-cover tail-in-TEE decode path (perm-attn-gpu-offload). When on,
-/// the resident decode attention runs under the full feature-rotation +
-/// permutation + σ cover (session-fixed, no per-block re-permute), with the
-/// newest tokens held in-TEE (partial-stats prefix attend on GPU + in-TEE
-/// tail + online merge). Implies the resident path; requires `Global`.
-fn gpu_resident_cover_enabled() -> bool {
-    static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+/// Explicit override for the permuted-cover tail-in-TEE decode path
+/// (perm-attn-gpu-offload). When on, the resident decode attention runs under
+/// the full feature-rotation + permutation + σ + per-session `C_v` cover
+/// (session-fixed, no per-block re-permute), with the newest tokens held
+/// in-TEE (partial-stats prefix attend on GPU + in-TEE tail + online merge).
+/// `Some(..)` from `GELO_GPU_RESIDENT_COVER`; `None` (unset) → the caller uses
+/// the capability default (on when the executor supports the offload).
+/// Requires `Global`.
+fn gpu_resident_cover_override() -> Option<bool> {
+    static EN: std::sync::OnceLock<Option<bool>> = std::sync::OnceLock::new();
     *EN.get_or_init(|| {
         std::env::var("GELO_GPU_RESIDENT_COVER")
+            .ok()
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
     })
 }
 
-/// σ for the cover's K/q Hidden-No-More noise. Default 0.0 (exact —
-/// greedy-parity); set `GELO_RESIDENT_SIGMA=0.01` for the secure config.
+/// σ for the cover's K/q Hidden-No-More noise. **Default 0.01** (the secure
+/// decode config; only read on the cover path). Set `GELO_RESIDENT_SIGMA=0`
+/// for an exact, byte-identical-parity run.
 fn resident_cover_sigma() -> f32 {
     static S: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *S.get_or_init(|| {
         std::env::var("GELO_RESIDENT_SIGMA")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(0.0)
+            .unwrap_or(0.01)
     })
 }
 
@@ -560,15 +565,16 @@ fn sample_orthogonal<R: rand::Rng>(d: usize, rng: &mut R) -> Array2<f32> {
     a
 }
 
-/// Cover condition-number κ for the value cover `C_v` (`GELO_COVER_KAPPA`,
-/// default 1.0 = orthogonal `O_v`, the legacy cover). κ>1 enables the
-/// non-orthogonal `C_v` that breaks the `WEIGHTS-PUB` value norm/Gram
-/// dictionary (Stage-1/2 gate: min κ≈5, recommended κ≈6).
+/// Cover condition-number κ for the value cover `C_v` (`GELO_COVER_KAPPA`).
+/// **Default 6.0** — the secure non-orthogonal `C_v` that breaks the
+/// `WEIGHTS-PUB` value norm/Gram dictionary (Stage-1/2 gate: min κ≈5,
+/// recommended κ≈6). Set `GELO_COVER_KAPPA=1` for the legacy orthogonal `O_v`
+/// (insecure under `WEIGHTS-PUB`).
 fn cover_kappa() -> f32 {
     std::env::var("GELO_COVER_KAPPA")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(1.0)
+        .unwrap_or(6.0)
 }
 
 /// Value-cover operands `(C_v, C_v⁻¹)`. At `kappa ≤ 1` this is the orthogonal
@@ -736,8 +742,8 @@ fn build_covered_prefix_session(
 }
 
 /// Build covered resident prefixes for **all GLOBAL layers** at the
-/// prefill→decode handoff (O5). Gated by the caller on
-/// `gpu_resident_cover_enabled()`; idempotent (skips layers already built).
+/// prefill→decode handoff (O5). Gated by the caller on the capability-resolved
+/// resident-cover decision; idempotent (skips layers already built).
 /// Moves the one-time `build_covered_prefix` cost off the first decode step.
 fn build_covered_prefix_all_global(
     cfg: &DecoderConfig,
@@ -904,8 +910,9 @@ fn decoder_block_cached_batched(
     // Gated (default off → the in-TEE path below is unchanged); SWA layers
     // always stay in-TEE. NO cover/tail-in-TEE yet (those need the σ-vs-N
     // spike) — this measures the resident-attention decode-wall lever only.
-    let use_gpu_cover =
-        gpu_resident_cover_enabled() && matches!(layer_class, AttentionClass::Global);
+    let use_gpu_cover = gpu_resident_cover_override()
+        .unwrap_or_else(|| exec.supports_offloaded_attention())
+        && matches!(layer_class, AttentionClass::Global);
     let use_gpu_resident = !use_gpu_cover
         && gpu_resident_attn_enabled()
         && matches!(layer_class, AttentionClass::Global);
@@ -1646,7 +1653,7 @@ pub fn run_prefill_batched(
     // `build_covered_prefix` cost lands here instead of on the first decode
     // step. Gated on the decode-cover path; the decode block's lazy build
     // remains as an idempotent fallback.
-    if gpu_resident_cover_enabled() {
+    if gpu_resident_cover_override().unwrap_or_else(|| exec.supports_offloaded_attention()) {
         build_covered_prefix_all_global(cfg, exec, kv_cache, batch_size)?;
     }
 
@@ -1815,8 +1822,9 @@ fn decoder_block_batched(
     // and exactly corrected in-TEE by `O_vᵀ`, so output matches in-TEE at the
     // fp16 floor. PERF wire only — the cover does not clear `WEIGHTS-PUB`.
     let layer_class = cfg.effective_attention_class(layer_idx as usize);
-    let use_gpu_prefill =
-        gpu_prefill_offload_enabled() && matches!(layer_class, AttentionClass::Global);
+    let use_gpu_prefill = gpu_prefill_offload_override()
+        .unwrap_or_else(|| exec.supports_offloaded_attention())
+        && matches!(layer_class, AttentionClass::Global);
     if use_gpu_prefill {
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;

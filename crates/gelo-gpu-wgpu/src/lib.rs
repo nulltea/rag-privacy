@@ -832,6 +832,12 @@ impl GpuOffloadEngine for WgpuVulkanEngine {
         Ok(())
     }
 
+    fn supports_offloaded_attention(&self) -> bool {
+        // The fused cubek offload requires the fp16 engine; the f32 engine
+        // falls back to in-TEE attention.
+        self.fp16
+    }
+
     fn cubek_causal_attend(
         &self,
         q: ArrayView3<'_, f32>,
@@ -1285,24 +1291,70 @@ fn max_abs3(view: ArrayView3<'_, f32>) -> f32 {
     view.iter().fold(0f32, |a, &x| a.max(x.abs()))
 }
 
-/// cubek attend strategy from `CUBEK_STRATEGY` (`unit` default / `blackbox`).
-/// `unit` = portable (no tensor cores); `blackbox` = cooperative-matmul / tensor
-/// cores. cubek 0.2.0's `BlackboxAcceleratedStrategy` is no longer `Default`, so
-/// the `Inferred` hint supplies minimal partition counts (1 each) and lets the
-/// blueprint inference expand them to valid tensor-core tiles.
-fn cubek_strategy_from_env() -> cubek_attention::launch::Strategy {
+/// Minimum `n_kv` for the `blackbox` (tensor-core) kernel: below the seq_kv MMA
+/// tile there is no valid instruction ("Matmul is not supported: no tile size"),
+/// so tiny problems route to the portable `Unit` kernel. (The n-sweep gate
+/// confirms blackbox clean for n_kv ≥ 16; n_kv=1 fails.)
+const BLACKBOX_MIN_NKV: usize = 16;
+/// `seq_q` stage-tile extent the blackbox kernel requires `seq_q` to be a
+/// multiple of (`num_planes · partition_seq_q · tile_m` = 1·1·16 for the hint
+/// below + the fp16 tensor-core instruction). Ragged `seq_q` is zero-padded up
+/// to this and sliced back; `Unit` handles ragged `seq_q` natively.
+const BLACKBOX_SEQ_Q_ALIGN: usize = 16;
+
+/// Resolve the cubek attend strategy for a problem with `n_kv` keys, and whether
+/// it is the tensor-core (`blackbox`) kernel.
+///
+/// **Default: blackbox** (cooperative-matmul / tensor cores) on the CUDA backend
+/// for `n_kv ≥ BLACKBOX_MIN_NKV`; **Unit** (portable, ragged-safe) otherwise —
+/// i.e. on Vulkan (where blackbox is NaN-broken), for tiny `n_kv` below the tile
+/// floor, and for an explicit `CUBEK_STRATEGY=unit`. `CUBEK_STRATEGY`
+/// (`blackbox`/`unit`) overrides the backend default, but the tiny-`n_kv` guard
+/// still applies so blackbox is never launched below the floor. cubek 0.2.0's
+/// `BlackboxAcceleratedStrategy` is no longer `Default`, so the `Inferred` hint
+/// supplies minimal partition counts (1 each).
+fn cubek_strategy(n_kv: usize) -> (cubek_attention::launch::Strategy, bool) {
     use cubek_attention::launch::{BlueprintStrategy, Strategy};
     use cubek_attention::routines::blackbox_accelerated::BlackboxAcceleratedStrategy;
-    match std::env::var("CUBEK_STRATEGY").as_deref() {
-        Ok("blackbox") => Strategy::BlackboxAccelerated(BlueprintStrategy::Inferred(
-            BlackboxAcceleratedStrategy {
-                num_planes: 1,
-                seq_q: 1,
-                seq_kv: 1,
-            },
-        )),
-        _ => Strategy::Unit(BlueprintStrategy::Inferred(())),
+    let want_blackbox = match std::env::var("CUBEK_STRATEGY").as_deref() {
+        Ok("blackbox") => true,
+        Ok("unit") => false,
+        // Unset → production default: blackbox on CUDA, Unit on Vulkan/non-CUDA.
+        _ => cfg!(feature = "cuda"),
+    };
+    if want_blackbox && n_kv >= BLACKBOX_MIN_NKV {
+        (
+            Strategy::BlackboxAccelerated(BlueprintStrategy::Inferred(
+                BlackboxAcceleratedStrategy {
+                    num_planes: 1,
+                    seq_q: 1,
+                    seq_kv: 1,
+                },
+            )),
+            true,
+        )
+    } else {
+        (Strategy::Unit(BlueprintStrategy::Inferred(())), false)
     }
+}
+
+/// Zero-pad `q`'s `seq_q` (axis 1) up to a multiple of `align`, returning the
+/// padded copy only when padding is actually needed (`None` if already
+/// aligned). The phantom query rows are zero vectors: under causal masking they
+/// attend the real keys (`key ≤ query`, top-left aligned — cubek masks on
+/// absolute positions, so the real rows' masking is unchanged), yielding a
+/// finite softmax, and the caller slices them off the output. `seq_kv` is left
+/// ragged — cubek's K/V staged reader masks it via `check_bounds.seq_kv`.
+fn pad_seq_q_zeros(q: ArrayView3<'_, f32>, align: usize) -> Option<Array3<f32>> {
+    let (bh, n_q, d) = (q.shape()[0], q.shape()[1], q.shape()[2]);
+    let rem = n_q % align;
+    if rem == 0 {
+        return None;
+    }
+    let n_q_pad = n_q + (align - rem);
+    let mut padded = Array3::zeros((bh, n_q_pad, d));
+    padded.slice_mut(ndarray::s![.., ..n_q, ..]).assign(&q);
+    Some(padded)
 }
 
 /// Folded-head attention via the `cubek-attention` portable kernel.
@@ -1332,7 +1384,7 @@ pub fn cubek_attention_folded(
     use cubek_attention::launch::launch_ref;
 
     let bh = q.shape()[0];
-    let n_q = q.shape()[1];
+    let n_q_real = q.shape()[1];
     let d = q.shape()[2];
     let n_kv = k.shape()[1];
     assert_eq!(k.shape()[0], bh, "K leading dim must match Q (GQA-expanded)");
@@ -1340,6 +1392,22 @@ pub fn cubek_attention_folded(
     assert_eq!(k.shape()[2], d);
     assert_eq!(v.shape()[2], d);
     let _ = scale; // cubek derives scale = 1/sqrt(head_dim) internally.
+
+    // Resolve the cubek strategy (blackbox tensor cores by default on CUDA for
+    // n_kv ≥ the tile floor; Unit otherwise). For blackbox, zero-pad seq_q to the
+    // stage tile and slice the real rows back below (ragged-prompt support);
+    // no-op for Unit / already-aligned seq_q.
+    let (strategy, is_blackbox) = cubek_strategy(n_kv);
+    let q_cow: ndarray::CowArray<'_, f32, ndarray::Ix3> =
+        match is_blackbox
+            .then(|| pad_seq_q_zeros(q, BLACKBOX_SEQ_Q_ALIGN))
+            .flatten()
+        {
+            Some(p) => p.into(),
+            None => q.into(),
+        };
+    let q = q_cow.view();
+    let n_q = q.shape()[1];
 
     let device = Dev::default();
     let client = <Rt as cubecl::Runtime>::client(&device);
@@ -1416,11 +1484,7 @@ pub fn cubek_attention_folded(
         accumulator_precision: AccumulatorPrecision::default(),
     };
 
-    // Strategy: `unit` = portable (no tensor cores); `blackbox` = accelerated
-    // (cooperative-matmul / tensor cores). Select via CUBEK_STRATEGY. cubek 0.2.0's
-    // BlackboxAcceleratedStrategy is no longer `Default` — supply minimal partition
-    // counts and let the blueprint inference expand them.
-    let strategy = cubek_strategy_from_env();
+    // `strategy` (Unit vs blackbox) was resolved from `n_kv` at the head.
 
     // ── Stage 3: GPU attend (tiled online-softmax · V). The profile barrier
     //    isolates pure compute; without it this just enqueues and the cost
@@ -1491,7 +1555,12 @@ pub fn cubek_attention_folded(
             ms(prep + compute_ms + readback_ms + cvt_out)
         );
     }
-    out
+    // Drop the phantom padded query rows (no-op when seq_q was already aligned).
+    if n_q != n_q_real {
+        out.slice(ndarray::s![.., ..n_q_real, ..]).to_owned()
+    } else {
+        out
+    }
 }
 
 /// GQA-aware folded causal attention (perm-attn-gpu-offload Phase-5a O2).
@@ -1515,13 +1584,29 @@ pub fn cubek_attention_folded_gqa(
     use cubek_attention::launch::launch_ref;
 
     let hq = q.shape()[0];
-    let n_q = q.shape()[1];
+    let n_q_real = q.shape()[1];
     let d = q.shape()[2];
     let hkv = k.shape()[0];
     let n_kv = k.shape()[1];
     assert_eq!(v.shape()[0], hkv);
     assert_eq!(hq, hkv * group, "hq must equal hkv·group");
     let _ = scale; // cubek derives scale = 1/sqrt(head_dim) internally.
+
+    // Resolve the cubek strategy (blackbox tensor cores by default on CUDA for
+    // n_kv ≥ the tile floor; Unit otherwise). For blackbox, zero-pad seq_q to the
+    // stage tile and slice the real rows back below (ragged-prompt support);
+    // no-op for Unit / already-aligned seq_q.
+    let (strategy, is_blackbox) = cubek_strategy(n_kv);
+    let q_cow: ndarray::CowArray<'_, f32, ndarray::Ix3> =
+        match is_blackbox
+            .then(|| pad_seq_q_zeros(q, BLACKBOX_SEQ_Q_ALIGN))
+            .flatten()
+        {
+            Some(p) => p.into(),
+            None => q.into(),
+        };
+    let q = q_cow.view();
+    let n_q = q.shape()[1];
 
     let device = Dev::default();
     let client = <Rt as cubecl::Runtime>::client(&device);
@@ -1610,8 +1695,7 @@ pub fn cubek_attention_folded_gqa(
         causal,
         accumulator_precision: AccumulatorPrecision::default(),
     };
-    let strategy = cubek_strategy_from_env();
-
+    // `strategy` (Unit vs blackbox) was resolved from `n_kv` at the head.
     let out_handle = out_tensor.handle.clone();
     launch_ref::<Rt>(
         strategy,
@@ -1634,5 +1718,11 @@ pub fn cubek_attention_folded_gqa(
         "cubek gqa readback size mismatch"
     );
     let out_vec = dtype.bytes_to_f32(&out_bytes, n_out);
-    Array3::from_shape_vec((hq, n_q, d), out_vec).expect("cubek gqa out shape matches buffer")
+    let out = Array3::from_shape_vec((hq, n_q, d), out_vec).expect("cubek gqa out shape matches buffer");
+    // Drop the phantom padded query rows (no-op when seq_q was already aligned).
+    if n_q != n_q_real {
+        out.slice(ndarray::s![.., ..n_q_real, ..]).to_owned()
+    } else {
+        out
+    }
 }
