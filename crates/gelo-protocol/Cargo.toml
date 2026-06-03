@@ -72,6 +72,12 @@ blas-src = { workspace = true, optional = true }
 blis-src = { workspace = true, optional = true }
 cblas-sys = { version = "0.1", optional = true }
 
+# glibc malloc tuning at executor init (`mallopt`): raise the mmap/trim
+# thresholds so the offload's large transient buffers are arena-reused
+# instead of fresh-mmap'd + page-faulted on every call (chronicle §17).
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 half.workspace = true
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }

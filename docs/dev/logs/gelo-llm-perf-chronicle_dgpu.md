@@ -1105,3 +1105,64 @@ copy-out), **R4 async overlap**, and the **FLOP-reducing mask levers**
 
 **Artefacts:** `bench-results/gelo-b1-smoothpad-native-n{2048,8192}-2026-06-03.log`;
 `dct4::next_fast_n` + `next_fast_n_picks_fast_sizes` (dct4.rs).
+
+## 17. Fused bf16 unmask + glibc mmap-churn fix (2026-06-03) — prefill −7.7%
+
+§16 left the unapply bucket dominated by conversion/copy overhead. The
+overhead-split spike (`dct4_bf16_unapply_overhead_spike`, n=2112,
+gate∥up width) decomposed it:
+
+| component (per call, d=9728) | ms |
+|---|--:|
+| f32 transform floor | 14.99 |
+| + bf16 per-tile widen/narrow | +0.49 |
+| + output alloc + data-row widen copy (production tail) | **+33.36** |
+| — of which: warm widen-copy alone | 7.06 |
+| — of which: **fresh-mmap page-fault churn** | **~26** |
+
+The bf16 tile conversion is noise; the cost is (a) **page-fault churn** —
+glibc serves blocks above its mmap threshold (dynamic cap 32 MiB) by
+fresh `mmap` and frees by `munmap`, so every wide unmask re-pays ~20k
+minor faults + kernel zeroing on its ~80 MB output — and (b) a separate
+**single-threaded widen-copy** pass.
+
+Two fixes, both exact:
+
+1. **Fused unapply** — `Dct4Mask::unapply_bf16_into_f32_rows`: the
+   cascade tiles write the data rows **directly into the f32 output**
+   (read-only bf16 source; no whole-buffer bf16 narrow store, no separate
+   copy pass, pad/shield rows never stored, one bf16 rounding *fewer* per
+   element — accuracy equal-or-better, parity-tested).
+2. **`mallopt(M_MMAP_THRESHOLD/M_TRIM_THRESHOLD, 1 GiB)`** at executor
+   init (linux-gnu only): large transient buffers are arena-reused,
+   faulted once. Process-wide — it also covers the engine's upload Vecs.
+   Explicit `malloc_trim` (the bench's `glibc_release_freed`) still
+   reclaims.
+
+Measured (B=1, native, bf16-on, vs §16):
+
+| | before | after | Δ |
+|---|--:|--:|--:|
+| prefill n=2048 | 13.20 s | **12.19 s** | **−7.7%** |
+| `gelo:mask_unapply:dct4` (n=2048) | 4138 ms | **3169 ms** | **−23%** |
+| prefill n=8192 | 93.98 s | **88.80 s** | **−5.5%** |
+| ◆ `engine:matmul_many` (n=8192) | 15334 ms | **12729 ms** | **−17%** |
+| ◆ `engine:matmul` (n=8192) | 14622 ms | **12515 ms** | **−14%** |
+| decode (both n) | 3.28 / 3.61 s | 3.20 / 3.57 s | flat ✓ |
+
+At n=8192 the win lands in the **matmul buckets** — the mallopt relieved
+the mmap churn on the ~86 MB *upload* allocations (process-wide effect),
+while the unapply bucket there sat within variance. At n=2048 the unapply
+took the −23%.
+
+**Cumulative (n=2048, B=1, this session):** prefill **16.83 → 12.19 s
+(−27.6%)** [vs the pre-bf16 f32 SSE2 build: 18.62 → 12.19 = −34.5%],
+decode **6.61 → 3.20 s (2.07×, ~10 tok/s)**. The prefill bucket order is
+now: unapply 23% · attention-offload prep 18% · matmul+shield+correct+apply
+~8% each — the FFT transform itself is finally the unapply's dominant
+share, so further mask-side gains need the FLOP-reducing levers
+(batched/AOCL DCT, FFN-intermediate unmask elimination) or R4 overlap.
+
+**Artefacts:** `bench-results/gelo-b1-fusedunmask-native-n{2048,8192}-2026-06-03.log`;
+spike `dct4_bf16_unapply_overhead_spike`, parity
+`dct4_fused_bf16_unapply_parity` (dct4.rs).

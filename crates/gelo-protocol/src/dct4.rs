@@ -388,6 +388,52 @@ impl Dct4Mask {
             self.dct4.as_ref(),
         );
     }
+
+    /// **Fused** bf16 unapply (§16 follow-up): reads the `(n × cols)`
+    /// bf16 matmul output (read-only) and writes the unmasked **data
+    /// rows** `[..out_rows]` directly into the `(out_rows × cols)` f32
+    /// `out` from the cascade tiles — no in-place bf16 narrow, no
+    /// separate widen-copy pass, pad/shield rows never stored. One bf16
+    /// rounding *fewer* on every output element than
+    /// [`Self::unapply_in_place_slice_bf16`] + copy, so accuracy is
+    /// equal-or-better.
+    pub fn unapply_bf16_into_f32_rows(
+        &self,
+        src: &[bf16],
+        cols: usize,
+        out: &mut [f32],
+        out_rows: usize,
+    ) {
+        assert_eq!(
+            src.len(),
+            self.n.saturating_mul(cols),
+            "Dct4Mask::unapply_bf16_into_f32_rows: src has {} bf16s, expected n={} * cols={}",
+            src.len(), self.n, cols,
+        );
+        assert_eq!(
+            out.len(),
+            out_rows.saturating_mul(cols),
+            "Dct4Mask::unapply_bf16_into_f32_rows: out has {} f32s, expected out_rows={} * cols={}",
+            out.len(), out_rows, cols,
+        );
+        assert!(
+            out_rows <= self.n,
+            "Dct4Mask::unapply_bf16_into_f32_rows: out_rows {} > n {}",
+            out_rows, self.n,
+        );
+        dct4_cascade_unapply_bf16_into_f32_rows(
+            src,
+            self.n,
+            cols,
+            out,
+            out_rows,
+            &self.d1,
+            &self.d2,
+            &self.d3,
+            self.inv_norm,
+            self.dct4.as_ref(),
+        );
+    }
 }
 
 /// In-place DCT-IV applied along axis 0 of a row-major `Array2`.
@@ -813,6 +859,115 @@ fn dct4_cascade_apply_inplace_slice_bf16(
 
             unsafe {
                 copy_tile_out_bf16(tile_buf, tile_d, n, slice_ptr, d, tile_start);
+            }
+        });
+    };
+
+    if d >= DCT4_RAYON_COL_THRESHOLD {
+        (0..n_tiles).into_par_iter().for_each(process);
+    } else {
+        (0..n_tiles).for_each(process);
+    }
+}
+
+/// f32 tile-store for the **fused** unapply: writes only rows
+/// `[..out_rows]` of the tile into the `(out_rows × d)` f32 output —
+/// the data rows the caller keeps. Pad/shield rows above `out_rows`
+/// are simply dropped (never stored), and the f32 tile value goes to
+/// the output **without** the bf16 narrow round-trip the in-place
+/// variant pays.
+///
+/// SAFETY: caller must ensure `out_ptr` points to at least
+/// `out_rows * d` f32s, `tile_start + tile_d ≤ d`, `out_rows ≤ n`,
+/// and this thread is the only one writing
+/// `out[*, tile_start..tile_start+tile_d]`.
+#[inline]
+unsafe fn copy_tile_rows_out_f32(
+    tile_buf: &[f32],
+    tile_d: usize,
+    n: usize,
+    out_ptr: *mut f32,
+    d: usize,
+    tile_start: usize,
+    out_rows: usize,
+) {
+    debug_assert!(out_rows <= n);
+    for i in 0..out_rows {
+        // SAFETY: `i * d + tile_start + tile_d ≤ out_rows * d`.
+        let dst = unsafe { out_ptr.add(i * d + tile_start) };
+        for j in 0..tile_d {
+            // SAFETY: `j < tile_d`, dst valid for `tile_d` writes.
+            unsafe { *dst.add(j) = tile_buf[j * n + i] };
+        }
+    }
+}
+
+/// **Fused** bf16 unapply: reads the `(n × d)` bf16 matmul output
+/// (read-only — `src` is not clobbered), runs the inverse cascade per
+/// column tile, and stores the first `out_rows` rows of the result
+/// **directly into the `(out_rows × d)` f32 `out`**. Replaces the
+/// in-place-bf16-then-widen-copy sequence in the offload unmask, which
+/// paid (a) a full bf16 narrow store of the whole stacked buffer,
+/// (b) a separate single-threaded widen-copy pass of the data rows, and
+/// (c) one extra bf16 rounding on every output element. The fused store
+/// happens cache-hot from the tile, in parallel across column tiles, and
+/// skips the pad/shield rows entirely. (§16 follow-up — the
+/// conversion/copy overhead measured ~2× the transform itself.)
+fn dct4_cascade_unapply_bf16_into_f32_rows(
+    src: &[bf16],
+    n: usize,
+    d: usize,
+    out: &mut [f32],
+    out_rows: usize,
+    d1: &[f32],
+    d2: &[f32],
+    d3: &[f32],
+    inv_norm: f32,
+    dct4: &(dyn Dct4<f32> + Send + Sync),
+) {
+    debug_assert_eq!(src.len(), n.saturating_mul(d));
+    debug_assert_eq!(out.len(), out_rows.saturating_mul(d));
+    debug_assert!(out_rows <= n);
+    debug_assert_eq!(d1.len(), n);
+    debug_assert_eq!(d2.len(), n);
+    debug_assert_eq!(d3.len(), n);
+    if n < 2 || d == 0 || out_rows == 0 {
+        return;
+    }
+    let tile = DCT4_CASCADE_TILE;
+    let n_tiles = d.div_ceil(tile);
+    let src_addr = src.as_ptr() as usize;
+    let out_addr = out.as_mut_ptr() as usize;
+    let process = |t_idx: usize| {
+        let tile_start = t_idx * tile;
+        let tile_d = (tile_start + tile).min(d) - tile_start;
+        TILE_SCRATCH.with(|cell| {
+            let mut state = cell.borrow_mut();
+            let dct_scratch_len = dct4.get_scratch_len();
+            if state.tile.len() < tile * n {
+                state.tile.resize(tile * n, 0.0);
+            }
+            if state.dct_scratch.len() < dct_scratch_len {
+                state.dct_scratch.resize(dct_scratch_len, 0.0);
+            }
+            let TileScratch { tile: tile_buf, dct_scratch } = &mut *state;
+            let tile_buf = &mut tile_buf[..tile_d * n];
+            let dct_scratch = &mut dct_scratch[..dct_scratch_len];
+
+            // SAFETY: tiles read/write disjoint column ranges of
+            // `src`/`out`; `src` is only read.
+            let src_ptr = src_addr as *const bf16;
+            let out_ptr = out_addr as *mut f32;
+            unsafe {
+                copy_tile_in_bf16(src_ptr, n, d, tile_start, tile_d, tile_buf);
+            }
+
+            cascade_unapply_in_tile(
+                tile_buf, tile_d, n, d1, d2, d3, inv_norm, dct4, dct_scratch,
+            );
+
+            unsafe {
+                copy_tile_rows_out_f32(tile_buf, tile_d, n, out_ptr, d, tile_start, out_rows);
             }
         });
     };
@@ -1380,6 +1535,143 @@ mod tests {
             // threshold sends small shapes to HD₃), where the relative
             // term dominates and stays ≤ ~3% in practice.
             assert!(m - n <= 16 + n / 10, "pad too large at n={n} m={m}");
+        }
+    }
+
+    /// Fused `unapply_bf16_into_f32_rows` matches the f32 reference
+    /// within the bf16 floor, and is at least as accurate as the
+    /// in-place-bf16-then-widen-copy sequence it replaces (it skips the
+    /// final bf16 narrow on the output).
+    #[test]
+    fn dct4_fused_bf16_unapply_parity() {
+        let mut rng = ChaCha20Rng::from_seed([21u8; 32]);
+        for &(n, data_n, d) in &[(64usize, 48usize, 80usize), (2112, 2048, 256)] {
+            let mask = Dct4Mask::fresh(n, &mut rng);
+            let src_f32 = sample_normal(&mut rng, n, d);
+            let src_bf16: Vec<bf16> = src_f32.iter().map(|&v| bf16::from_f32(v)).collect();
+
+            // f32 reference on the bf16-quantised input.
+            let widened =
+                Array2::from_shape_vec((n, d), src_bf16.iter().map(|v| v.to_f32()).collect())
+                    .unwrap();
+            let reference = mask.unapply(widened.view());
+
+            // Fused path.
+            let mut out = vec![0.0f32; data_n * d];
+            mask.unapply_bf16_into_f32_rows(&src_bf16, d, &mut out, data_n);
+
+            // Old path: in-place bf16 + widen copy.
+            let mut buf = src_bf16.clone();
+            mask.unapply_in_place_slice_bf16(&mut buf, d);
+
+            let mut max_fused = 0.0f32;
+            let mut max_old = 0.0f32;
+            for i in 0..data_n {
+                for j in 0..d {
+                    let r = reference[(i, j)];
+                    max_fused = max_fused.max((out[i * d + j] - r).abs());
+                    max_old = max_old.max((buf[i * d + j].to_f32() - r).abs());
+                }
+            }
+            // Fused is exact vs the f32 reference up to in-tile noise
+            // (same cascade, no output narrowing); the old path adds a
+            // bf16 rounding on top.
+            assert!(
+                max_fused <= 5e-2,
+                "(n={n}) fused vs f32 reference: {max_fused:.3e}"
+            );
+            assert!(
+                max_fused <= max_old + 1e-6,
+                "(n={n}) fused ({max_fused:.3e}) should be ≤ old path ({max_old:.3e})"
+            );
+        }
+    }
+
+    /// **Spike microbench** (§16 follow-up): split the production bf16
+    /// unapply bucket into transform vs conversion/copy overhead. Times,
+    /// at the production stacked size, (a) the f32 in-place unapply
+    /// (transform floor), (b) the bf16 in-place unapply (adds the tile
+    /// widen/narrow), and (c) the full production composite — bf16
+    /// unapply + fresh f32 output alloc + data-row widen copy, exactly
+    /// what `unmask_per_sequence_bf16` does per call.
+    /// Run: `cargo test --release -p gelo-protocol --lib dct4_bf16_unapply_overhead_spike -- --ignored --nocapture`
+    #[test]
+    #[ignore = "perf microbench: bf16 unapply overhead split (transform vs convert/copy)"]
+    fn dct4_bf16_unapply_overhead_spike() {
+        use std::time::Instant;
+        let mut rng = ChaCha20Rng::from_seed([3u8; 32]);
+        let n: usize = 2112; // next_fast_n(2048 + 16)
+        let data_n: usize = 2048;
+        let mask = Dct4Mask::fresh(n, &mut rng);
+        eprintln!("=== bf16 unapply overhead split (n={n}, data_n={data_n}) ===");
+        for &d in &[4096usize, 9728] {
+            let src_f32: Vec<f32> = (0..n * d).map(|_| StandardNormal.sample(&mut rng)).collect();
+            let src_bf16: Vec<half::bf16> =
+                src_f32.iter().map(|&v| half::bf16::from_f32(v)).collect();
+            let reps = (40usize * 2048 / d).max(4);
+
+            // (a) f32 in-place transform floor.
+            let mut buf = src_f32.clone();
+            mask.unapply_in_place_slice(&mut buf, d);
+            let t = Instant::now();
+            for _ in 0..reps {
+                mask.unapply_in_place_slice(&mut buf, d);
+            }
+            let f32_t = t.elapsed().as_secs_f64() / reps as f64;
+
+            // (b) bf16 in-place (adds per-tile widen/narrow).
+            let mut buf_bf = src_bf16.clone();
+            mask.unapply_in_place_slice_bf16(&mut buf_bf, d);
+            let t = Instant::now();
+            for _ in 0..reps {
+                mask.unapply_in_place_slice_bf16(&mut buf_bf, d);
+            }
+            let bf16_t = t.elapsed().as_secs_f64() / reps as f64;
+
+            // (c) production composite: bf16 unapply + fresh f32 output
+            // alloc + data-row widen copy (the unmask_per_sequence_bf16
+            // tail).
+            let t = Instant::now();
+            for _ in 0..reps {
+                mask.unapply_in_place_slice_bf16(&mut buf_bf, d);
+                let mut out = vec![0.0f32; data_n * d];
+                for (o, i) in out.iter_mut().zip(buf_bf[..data_n * d].iter()) {
+                    *o = i.to_f32();
+                }
+                std::hint::black_box(&out);
+            }
+            let comp_t = t.elapsed().as_secs_f64() / reps as f64;
+
+            // (d) alloc-cycle only: fresh zeroed output + drop per rep
+            // (the mmap/page-fault/zero/munmap churn glibc pays for
+            // >32 MB blocks).
+            let t = Instant::now();
+            for _ in 0..reps {
+                let out = vec![0.0f32; data_n * d];
+                std::hint::black_box(&out);
+            }
+            let alloc_t = t.elapsed().as_secs_f64() / reps as f64;
+
+            // (e) widen copy only, into a reused (warm) buffer.
+            let mut out_warm = vec![0.0f32; data_n * d];
+            let t = Instant::now();
+            for _ in 0..reps {
+                for (o, i) in out_warm.iter_mut().zip(buf_bf[..data_n * d].iter()) {
+                    *o = i.to_f32();
+                }
+                std::hint::black_box(&out_warm);
+            }
+            let copy_t = t.elapsed().as_secs_f64() / reps as f64;
+
+            let ms = |s: f64| s * 1e3;
+            eprintln!(
+                "  d={d:5}: f32 transform {:7.2} ms | bf16 in-place {:7.2} ms (tile-convert +{:.2}) | composite {:7.2} ms (alloc+copy +{:.2})",
+                ms(f32_t), ms(bf16_t), ms(bf16_t - f32_t), ms(comp_t), ms(comp_t - bf16_t)
+            );
+            eprintln!(
+                "           alloc-cycle alone {:7.2} ms | warm widen-copy alone {:7.2} ms",
+                ms(alloc_t), ms(copy_t)
+            );
         }
     }
 

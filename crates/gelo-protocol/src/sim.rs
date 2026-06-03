@@ -373,6 +373,21 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
         // multi-thread BLIS pool by the time the first GEMM runs.
         // Idempotent — OnceLock guards subsequent calls.
         crate::mask::ensure_blis_single_thread();
+        // glibc tuning (§17): the offload allocates large transient
+        // buffers (tens–hundreds of MB: unmask outputs, masked operands)
+        // every call. glibc serves blocks above its mmap threshold
+        // (dynamic cap 32 MiB) via fresh mmap and munmaps them on free,
+        // so each call re-pays ~20k page faults + kernel zeroing —
+        // measured ~26 ms per gate∥up-width unmask, ~2× the transform
+        // itself. Raising the mmap + trim thresholds keeps these blocks
+        // in the arena, faulted once and reused. Explicit
+        // `malloc_trim(0)` (the bench's `glibc_release_freed`) still
+        // reclaims when called. Idempotent; no-op on non-glibc.
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        unsafe {
+            libc::mallopt(libc::M_MMAP_THRESHOLD, 1 << 30);
+            libc::mallopt(libc::M_TRIM_THRESHOLD, 1 << 30);
+        }
         let shield_default = ShieldConfig::new(8, 4.0);
         let shield_rng = derive_shield_rng(&seed);
         Self {
@@ -1327,10 +1342,12 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
                         }
                     }
                     MaskFamily::Dct4(dct4) => {
-                        dct4.unapply_in_place_slice_bf16(in_block, d_out);
-                        for (o, i) in out_block.iter_mut().zip(in_block[..prefix_len].iter()) {
-                            *o = i.to_f32();
-                        }
+                        // Fused unapply (§17): cascade tiles write the
+                        // data rows straight into the f32 output — no
+                        // in-place bf16 narrow, no separate widen-copy
+                        // pass, pad/shield rows never stored, one bf16
+                        // rounding fewer per element.
+                        dct4.unapply_bf16_into_f32_rows(in_block, d_out, out_block, data_n);
                     }
                     MaskFamily::Haar(_) => {
                         // No bf16 Haar path — widen and use the dense
