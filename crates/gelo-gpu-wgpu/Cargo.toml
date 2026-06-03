@@ -14,14 +14,23 @@ license.workspace = true
 # cores), NOT the Vulkan dev path where cubek's BlackboxAccelerated kernel
 # is broken. Requires a CUDA toolkit (nvrtc) + driver.
 #
-# Non-CUDA hosts (the Strix Halo iGPU dev track, or any box without a CUDA
-# toolkit) must build with `--no-default-features --features blas` to fall
-# back to the wgpu/Vulkan engine.
+# To run the wgpu/Vulkan engine instead, enable the `vulkan` feature (below):
+# `--features vulkan` overrides the default CUDA backend at compile time even
+# though `cuda` stays in the default set. A box with no CUDA toolkit also drops
+# the cuda dep: `--no-default-features --features blas,vulkan`.
 default = ["blas", "cuda"]
 blas = ["gelo-protocol/blas"]
 # CUDA backend (Nvidia dGPU). Flips the engine's cubecl runtime from
 # wgpu/Vulkan to cubecl-cuda at compile time. Default-on on this box (above).
 cuda = ["dep:cubecl-cuda", "burn-backend/cubecl-cuda"]
+# `vulkan` — override `cuda` with the wgpu/Vulkan engine WITHOUT toggling
+# default features. The runtime-alias cfg prefers Vulkan whenever this feature
+# is present (`vulkan` wins over `cuda`), so `--features vulkan` selects the
+# Vulkan engine for the iGPU dev track / any non-CUDA box. cubecl-wgpu is an
+# unconditional dependency, so no extra deps are pulled. NOTE: the blackbox
+# (tensor-core) cubek kernel is NaN-broken on Vulkan, so under this feature the
+# cubek prefill-kernel default falls back to the portable Unit kernel.
+vulkan = []
 
 [dependencies]
 anyhow.workspace = true

@@ -43,18 +43,18 @@ use burn_tensor::{Tensor, TensorData, Transaction, activation};
 // scope under the cuda feature too (previously not-cuda-gated, which broke
 // the cuda build at the cubek profile barrier).
 use cubecl_common::future;
-#[cfg(not(feature = "cuda"))]
+#[cfg(any(feature = "vulkan", not(feature = "cuda")))]
 use cubecl_wgpu::{AutoGraphicsApi, RuntimeOptions, WgpuDevice, WgpuRuntime, init_setup_async};
-#[cfg(feature = "cuda")]
+#[cfg(all(feature = "cuda", not(feature = "vulkan")))]
 use cubecl_cuda::{CudaDevice, CudaRuntime};
 
-#[cfg(not(feature = "cuda"))]
+#[cfg(any(feature = "vulkan", not(feature = "cuda")))]
 type Rt = WgpuRuntime;
-#[cfg(not(feature = "cuda"))]
+#[cfg(any(feature = "vulkan", not(feature = "cuda")))]
 type Dev = WgpuDevice;
-#[cfg(feature = "cuda")]
+#[cfg(all(feature = "cuda", not(feature = "vulkan")))]
 type Rt = CudaRuntime;
-#[cfg(feature = "cuda")]
+#[cfg(all(feature = "cuda", not(feature = "vulkan")))]
 type Dev = CudaDevice;
 use half::slice::HalfFloatSliceExt;
 use half::{bf16, f16};
@@ -103,7 +103,7 @@ pub struct GpuContext {
 
 static GPU_CTX: OnceLock<GpuContext> = OnceLock::new();
 
-#[cfg(not(feature = "cuda"))]
+#[cfg(any(feature = "vulkan", not(feature = "cuda")))]
 fn gpu_ctx() -> &'static GpuContext {
     GPU_CTX.get_or_init(|| {
         let device = Dev::default();
@@ -112,11 +112,15 @@ fn gpu_ctx() -> &'static GpuContext {
             RuntimeOptions::default(),
         ));
         let info = setup.adapter.get_info();
-        let device_type = match info.device_type {
-            wgpu::DeviceType::DiscreteGpu => GpuDeviceType::Discrete,
-            wgpu::DeviceType::IntegratedGpu => GpuDeviceType::Integrated,
-            wgpu::DeviceType::VirtualGpu => GpuDeviceType::Virtual,
-            wgpu::DeviceType::Cpu => GpuDeviceType::Cpu,
+        // Match on the Debug string rather than `wgpu::DeviceType::*` so this
+        // compiles even when the `vulkan` feature is enabled alongside the
+        // default `cuda` (the two backends pull different `wgpu_types`
+        // versions; the direct-`wgpu` enum would then mismatch the adapter's).
+        let device_type = match format!("{:?}", info.device_type).as_str() {
+            "DiscreteGpu" => GpuDeviceType::Discrete,
+            "IntegratedGpu" => GpuDeviceType::Integrated,
+            "VirtualGpu" => GpuDeviceType::Virtual,
+            "Cpu" => GpuDeviceType::Cpu,
             _ => GpuDeviceType::Other,
         };
         GpuContext {
@@ -127,7 +131,7 @@ fn gpu_ctx() -> &'static GpuContext {
     })
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(all(feature = "cuda", not(feature = "vulkan")))]
 fn gpu_ctx() -> &'static GpuContext {
     // cubecl-cuda has no wgpu-style adapter enumeration; the CUDA context
     // is created lazily on the first `Backend::sync`. Report a fixed
@@ -1319,8 +1323,10 @@ fn cubek_strategy(n_kv: usize) -> (cubek_attention::launch::Strategy, bool) {
     let want_blackbox = match std::env::var("CUBEK_STRATEGY").as_deref() {
         Ok("blackbox") => true,
         Ok("unit") => false,
-        // Unset → production default: blackbox on CUDA, Unit on Vulkan/non-CUDA.
-        _ => cfg!(feature = "cuda"),
+        // Unset → production default: blackbox on CUDA, Unit on Vulkan/non-CUDA
+        // (the `vulkan` feature overrides the default `cuda`, matching the
+        // runtime-alias cfg, since blackbox is NaN-broken on Vulkan).
+        _ => cfg!(all(feature = "cuda", not(feature = "vulkan"))),
     };
     if want_blackbox && n_kv >= BLACKBOX_MIN_NKV {
         (
