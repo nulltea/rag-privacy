@@ -34,7 +34,20 @@ LIBRARY_PATH = { value = "vendor/aocl-install/lib", relative = true, force = fal
 #   * target/{debug,release}/deps/<bin>     (3 segments up — tests/examples)
 # `$ORIGIN` is a literal string the dynamic linker expands at load time
 # (not a shell variable), so it is written verbatim into the binary.
+# `target-cpu=native` enables the build machine's full ISA — critically
+# F16C (vcvtps2ph/vcvtph2ps) and AVX2/FMA, which the default `x86-64`
+# baseline lacks. The GPU-offload path does heavy host-side f32↔f16/bf16
+# conversions (activation upload + matmul read-back); on the baseline
+# build these ran scalar and dominated the `engine:matmul*` buckets.
+# Enabling native cut prefill ~10–18% and decode ~12% (dGPU chronicle §14).
+# ⚠ This pins binaries to the build host's ISA — an older CPU faults with
+# SIGILL. For a portable build (Haswell+/Zen+) swap to `x86-64-v3`, which
+# still carries F16C+AVX2 and captures nearly all the win on Zen4 (where
+# AVX-512 is double-pumped 256-bit, so native adds little here).
+# NOTE: setting the RUSTFLAGS *env* var overrides this whole array (incl.
+# the rpath args below → libblis won't load); change the flag here instead.
 rustflags = [
+    "-C", "target-cpu=native",
     "-C", "link-arg=-Wl,--enable-new-dtags",
     "-C", "link-arg=-Wl,-rpath,$ORIGIN/../../vendor/aocl-install/lib",
     "-C", "link-arg=-Wl,-rpath,$ORIGIN/../../../vendor/aocl-install/lib",
