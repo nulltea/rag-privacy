@@ -1236,3 +1236,63 @@ Conclusion: scheduling is nearly tapped out by the protocol's serial
 structure — the remaining large prefill levers are **FLOP reduction**
 (FFN-intermediate unmask elimination, security-gated; custom
 lane-parallel DCT-IV), not concurrency.
+
+## 20. Hot-path concurrency/SIMD audit (2026-06-03) — prefill −15.4%
+
+A systematic sweep for the §15-class bugs (degenerate parallelism axes,
+scalar reductions, bounds-checked copies). Five fixes, all exact:
+
+1. **`correct_unfold_into` — serial-at-B=1** (the §15 pattern): rayon
+   parallelised over *batch blocks* only, so at B=1 the 32 per-head
+   `(n,d)·(d,d)` GEMMs ran fully serial — the dominant share of the
+   1.15 s `prefill_cover:correct_tee` bucket. Now nested
+   (sequence × head) column-chunk parallelism.
+2. **`mean_row_norm` — scalar strict-FP reduction**: the sequential
+   `sum::<f32>()` cannot auto-vectorise, burning a scalar pass over
+   every offload input inside `gelo:shield_stack`. Now 4×`f32x8`
+   sum-of-squares + rayon over row chunks (work-gated). σ shifts ~1e-7
+   relative (reassociation) — the data-row round-trip is exact
+   regardless.
+3. **Shield data-row copy**: single-threaded 20–80 MB memcpy per
+   offload at B=1 (outer rayon axis is per block) → chunk-parallel,
+   row-gated.
+4. **`fold_heads_2d_batched`**: per-element ndarray-indexed copy
+   (bounds check per f32) → contiguous-slice memcpys.
+5. **Covered-prefix build**: split into a layer-parallel CPU half
+   (`build_covered_prefix_cpu`, chunks of 4 for bounded transient
+   memory) + serial engine upload — the per-layer head parallelism
+   alone (8 heads at B=1) under-filled the cores. 589 → **322 ms**.
+
+One **counter-finding**: a per-head work gate on `rotate_heads`
+(intended to serialise the tiny decode-shape rotations) **measured
+worse** — `cover:acc_uncover_tee` 122→246 ms; the 32-way tiny-GEMM
+fan-out beats serial there. Reverted to a total-work floor (256K flops).
+Measure, don't assume, the fork-join crossover.
+
+Measured (B=1, native, bf16-on, vs §17):
+
+| | before | after | Δ |
+|---|--:|--:|--:|
+| prefill n=2048 | 12.19 s | **10.31 s** | **−15.4%** |
+| prefill n=8192 | 88.80 s | **79.85 s** | **−10.1%** |
+| `tee:attn_prefill_offload` (n=2048) | 2470 ms | 1443 ms | −42% |
+| `gelo:shield_stack` (n=2048 prefill) | 1176 ms | 479 ms | −59% |
+| `cover:build_covered_prefix+upload` | 589 ms | 322 ms | −45% |
+| decode (both n) | 3.20 / 3.57 s | 3.18 / 3.56 s | flat ✓ |
+
+(A round-1 decode "−12%" evaporated in round-2 — `prefix_partial_gpu`
+run-variance, not the fixes. Decode is honestly flat; its remaining
+costs are the resident-cover GPU partial, the matmul round-trip floor,
+and shield RNG.)
+
+**Cumulative (n=2048, B=1, this session):** prefill **16.83 → 10.31 s
+(1.63×, 121 → 199 tok/s)** — vs the pre-bf16 SSE2 start 18.62 → 10.31 =
+**−44.6%**; decode **6.61 → 3.18 s (2.08×)**.
+
+**Audit verdicts on the §19 true-independence items:** (a) decode
+prefix∥tail overlap — **parked**: ceiling ~150 ms (≈5% decode) needs
+<50 µs/call async machinery; R4 measured ~40× that. (b) covered-prefix
+build — done (fix 5). (c) `shield_stack` — probed; was `mean_row_norm`
++ serial memcpy (fixes 2–3), no overlap needed.
+
+**Artefacts:** `bench-results/gelo-b1-audit{1,2}-native-n{2048,8192}-2026-06-03.log`.

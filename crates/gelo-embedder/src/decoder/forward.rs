@@ -424,8 +424,20 @@ fn fold_heads_2d_batched(
             let bi = fh / h;
             let hi = fh % h;
             for j in 0..n {
-                for c in 0..d {
-                    head[(j, c)] = x[(bi * n + j, hi * d + c)];
+                // Contiguous-slice memcpy per row (the per-element
+                // indexed copy paid an ndarray bounds check per f32).
+                let fast = if let (Some(src_row), Some(dst)) =
+                    (x.row(bi * n + j).to_slice(), head.row_mut(j).into_slice())
+                {
+                    dst.copy_from_slice(&src_row[hi * d..(hi + 1) * d]);
+                    true
+                } else {
+                    false
+                };
+                if !fast {
+                    for c in 0..d {
+                        head[(j, c)] = x[(bi * n + j, hi * d + c)];
+                    }
                 }
             }
         });
@@ -435,8 +447,12 @@ fn fold_heads_2d_batched(
 /// Fused `O_vᵀ` correction **+ unfold**: write `ctx_raw[b·Hq+qh] · O_vᵀ`
 /// directly into `ctx[b·n + .., qh·d ..]`, skipping the intermediate
 /// `(B·Hq, n, d)` array and the separate unfold copy (prefill offload, fuse
-/// lever). Parallelised over the B sequences (disjoint row blocks); the per-head
-/// `(n,d)·(d,d)` stays a BLAS `dot`. `o_vt` is `O_vᵀ`.
+/// lever). Parallelised over **(sequence, head)** — the per-head column
+/// chunks of each block are disjoint, so rayon fans out across heads
+/// inside a block. (Block-only parallelism was degenerate at B=1: one
+/// chunk → the Hq per-head GEMMs ran fully serial, the dominant share of
+/// the 1.15 s `prefill_cover:correct_tee` bucket at B=1 n=2048.) The
+/// per-head `(n,d)·(d,d)` stays a BLAS `dot`. `o_vt` is `O_vᵀ`.
 fn correct_unfold_into(
     ctx: &mut Array2<f32>,
     ctx_raw: ArrayView3<'_, f32>,
@@ -450,13 +466,14 @@ fn correct_unfold_into(
         .into_par_iter()
         .enumerate()
         .for_each(|(bi, mut block)| {
-            for qh in 0..hq {
-                let head = ctx_raw.index_axis(Axis(0), bi * hq + qh); // (n, d)
-                let cov = head.dot(&o_vt); // (n, d), BLAS
-                block
-                    .slice_mut(ndarray::s![.., qh * d..(qh + 1) * d])
-                    .assign(&cov);
-            }
+            block
+                .axis_chunks_iter_mut(Axis(1), d)
+                .into_par_iter()
+                .enumerate()
+                .for_each(|(qh, mut col)| {
+                    let head = ctx_raw.index_axis(Axis(0), bi * hq + qh); // (n, d)
+                    col.assign(&head.dot(&o_vt)); // (n, d), BLAS
+                });
         });
 }
 
@@ -625,16 +642,33 @@ fn sample_value_cover<R: rand::Rng>(d: usize, kappa: f32, rng: &mut R) -> (Array
 
 /// Per-head right-multiply `out[h] = x[h] · o` for `x (H, n, d)`,
 /// `o (d, d)` — applies a shared feature rotation to every stacked head.
+///
+/// Parallelises over heads when the call carries real total work. (A
+/// per-head gate was tried and **measured worse** at the decode shape —
+/// `cover:acc_uncover_tee` 122→246 ms — the 32-way tiny-GEMM fan-out
+/// still beats serial there; only truly tiny calls go serial.)
 fn rotate_heads(x: ArrayView3<'_, f32>, o: ArrayView2<'_, f32>) -> Array3<f32> {
-    use ndarray::parallel::prelude::*;
     let (h, n, d) = x.dim();
     let mut out = Array3::<f32>::zeros((h, n, d));
-    out.axis_iter_mut(Axis(0))
-        .into_par_iter()
-        .enumerate()
-        .for_each(|(hi, mut row)| {
+    // Total flops ≈ h·n·d·d; fork when ≥ ~256K.
+    if h >= 2
+        && h.saturating_mul(n)
+            .saturating_mul(d)
+            .saturating_mul(d)
+            >= (1 << 18)
+    {
+        use ndarray::parallel::prelude::*;
+        out.axis_iter_mut(Axis(0))
+            .into_par_iter()
+            .enumerate()
+            .for_each(|(hi, mut row)| {
+                row.assign(&x.index_axis(Axis(0), hi).dot(&o));
+            });
+    } else {
+        for (hi, mut row) in out.axis_iter_mut(Axis(0)).enumerate() {
             row.assign(&x.index_axis(Axis(0), hi).dot(&o));
-        });
+        }
+    }
     out
 }
 
@@ -687,6 +721,30 @@ fn build_covered_prefix_session(
     dh: usize,
     sigma: f32,
 ) -> Result<()> {
+    let (k_cov, v_cov, cover) =
+        build_covered_prefix_cpu(layer_idx, kv_cache, batch_size, nkvh, dh, sigma)?;
+    let cap = kv_cache.capacity();
+    let id = exec.resident_kv_create(k_cov.view(), v_cov.view(), cap)?;
+    kv_cache.set_gpu_session(layer_idx, id);
+    kv_cache.set_gpu_cover(layer_idx, cover);
+    Ok(())
+}
+
+/// CPU half of the covered-prefix build for one layer: sample the
+/// per-layer cover (seeded by `layer_idx` — layer-independent), stack +
+/// permute + σ-noise the frozen prefix, feature-rotate K/V. Reads
+/// `kv_cache` immutably so multiple layers can build **in parallel**
+/// (the prefill→decode handoff fans this out across layers); the upload
+/// half (`resident_kv_create` + cache bookkeeping) stays serial on the
+/// engine.
+fn build_covered_prefix_cpu(
+    layer_idx: usize,
+    kv_cache: &KvCache,
+    batch_size: usize,
+    nkvh: usize,
+    dh: usize,
+    sigma: f32,
+) -> Result<(Array3<f32>, Array3<f32>, DecodeCover)> {
     use rand::SeedableRng;
     use rand::seq::SliceRandom;
     use rand_chacha::ChaCha20Rng;
@@ -734,11 +792,7 @@ fn build_covered_prefix_session(
     // GQA-broadcast-consistent).
     let k_cov = rotate_heads(kp.view(), o_qk.view());
     let v_cov = rotate_heads(vp.view(), c_v.view());
-    let cap = kv_cache.capacity();
-    let id = exec.resident_kv_create(k_cov.view(), v_cov.view(), cap)?;
-    kv_cache.set_gpu_session(layer_idx, id);
-    kv_cache.set_gpu_cover(layer_idx, DecodeCover { prefix_len, o_qk, c_v, c_v_inv });
-    Ok(())
+    Ok((k_cov, v_cov, DecodeCover { prefix_len, o_qk, c_v, c_v_inv }))
 }
 
 /// Build covered resident prefixes for **all GLOBAL layers** at the
@@ -753,21 +807,39 @@ fn build_covered_prefix_all_global(
 ) -> Result<()> {
     let (nkvh, dh) = (cfg.num_key_value_heads, cfg.head_dim_value());
     let sigma = resident_cover_sigma();
-    for layer_idx in 0..cfg.num_hidden_layers {
-        if !matches!(
-            cfg.effective_attention_class(layer_idx),
-            AttentionClass::Global
-        ) {
-            continue;
+    let pending: Vec<usize> = (0..cfg.num_hidden_layers)
+        .filter(|&li| {
+            matches!(cfg.effective_attention_class(li), AttentionClass::Global)
+                && kv_cache.gpu_session(li).is_none()
+        })
+        .collect();
+    // Layers are independent (per-layer seed, per-layer K/V): par-build
+    // the CPU covers in bounded chunks (the transient covered K/V is
+    // ~130 MB/layer at n=8192 — chunking caps peak memory), then upload
+    // each chunk serially on the engine. The per-layer head parallelism
+    // alone (B·nkvh = 8 at B=1) under-fills the cores; cross-layer
+    // fan-out fixes that.
+    profile::time("cover:build_covered_prefix+upload", || -> Result<()> {
+        use rayon::prelude::*;
+        for chunk in pending.chunks(4) {
+            let built: Vec<(usize, (Array3<f32>, Array3<f32>, DecodeCover))> = chunk
+                .par_iter()
+                .map(|&li| {
+                    Ok((
+                        li,
+                        build_covered_prefix_cpu(li, kv_cache, batch_size, nkvh, dh, sigma)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            for (li, (k_cov, v_cov, cover)) in built {
+                let cap = kv_cache.capacity();
+                let id = exec.resident_kv_create(k_cov.view(), v_cov.view(), cap)?;
+                kv_cache.set_gpu_session(li, id);
+                kv_cache.set_gpu_cover(li, cover);
+            }
         }
-        if kv_cache.gpu_session(layer_idx).is_some() {
-            continue;
-        }
-        profile::time("cover:build_covered_prefix+upload", || {
-            build_covered_prefix_session(exec, layer_idx, kv_cache, batch_size, nkvh, dh, sigma)
-        })?;
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn decoder_block_cached_batched(

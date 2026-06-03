@@ -1154,10 +1154,28 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
                     } else {
                         scale * mean_norm / (d_in as f32).sqrt()
                     };
-                    // Place data rows.
-                    block_view
-                        .slice_mut(ndarray::s![..data_n, ..])
-                        .assign(&sub_in);
+                    // Place data rows. Chunk-parallel copy when there's
+                    // real volume — the outer rayon axis is per block
+                    // and degenerates at B=1, leaving a 20–80 MB memcpy
+                    // single-threaded per offload.
+                    if data_n >= 512 {
+                        block_view
+                            .slice_mut(ndarray::s![..data_n, ..])
+                            .axis_chunks_iter_mut(ndarray::Axis(0), 256)
+                            .into_par_iter()
+                            .enumerate()
+                            .for_each(|(ci, mut chunk)| {
+                                let r0 = ci * 256;
+                                chunk.assign(&sub_in.slice(ndarray::s![
+                                    r0..r0 + chunk.nrows(),
+                                    ..
+                                ]));
+                            });
+                    } else {
+                        block_view
+                            .slice_mut(ndarray::s![..data_n, ..])
+                            .assign(&sub_in);
+                    }
                     // Place shield rows.
                     let shield_end_local = (data_n + k).min(stacked_n);
                     if shield_end_local > data_n {
@@ -1637,16 +1655,56 @@ fn fill_shield_rows_inline<R: rand::RngCore>(
 
 /// Mean L2 norm of the rows of `m`. Mirrors `shield::mean_row_norm`,
 /// kept module-local to skip the export round-trip.
+/// Mean L2 row norm of `m` — scales the shield-row noise. SIMD
+/// sum-of-squares per row (4× `f32x8` accumulators) + rayon over row
+/// chunks above a work floor. The previous scalar sequential
+/// `sum::<f32>()` could not auto-vectorise (strict-FP forbids
+/// reassociation), burning a full scalar pass over every offload input
+/// (~0.4 s/prefill at n=2048 inside `gelo:shield_stack`). The summation
+/// order differs from the scalar version, shifting `sigma` at ~1e-7
+/// relative — irrelevant to the shield's energy heuristic (the data-row
+/// round-trip is exact regardless of sigma).
 fn mean_row_norm(m: ArrayView2<'_, f32>) -> f32 {
     let n = m.nrows();
     if n == 0 {
         return 0.0;
     }
-    let mut acc = 0.0_f32;
-    for row in m.rows() {
-        acc += row.iter().map(|v| v * v).sum::<f32>().sqrt();
+    fn row_norm(row: ndarray::ArrayView1<'_, f32>) -> f32 {
+        let ss = match row.to_slice() {
+            Some(s) => sum_squares_simd(s),
+            None => row.iter().map(|v| v * v).sum(),
+        };
+        ss.sqrt()
     }
-    acc / (n as f32)
+    // Parallelise only with real work behind each fork (decode-shape
+    // calls are a single row — the §15 granularity lesson).
+    let total: f32 = if n.saturating_mul(m.ncols()) >= (1 << 20) && n >= 128 {
+        use ndarray::parallel::prelude::*;
+        m.axis_chunks_iter(ndarray::Axis(0), 128)
+            .into_par_iter()
+            .map(|chunk| chunk.rows().into_iter().map(row_norm).sum::<f32>())
+            .sum()
+    } else {
+        m.rows().into_iter().map(row_norm).sum()
+    };
+    total / (n as f32)
+}
+
+/// 4-accumulator `f32x8` sum of squares — vectorises the strict-FP
+/// reduction `mean_row_norm` needs by explicit lane reassociation.
+fn sum_squares_simd(s: &[f32]) -> f32 {
+    use wide::f32x8;
+    let mut acc = [f32x8::ZERO; 4];
+    let mut it = s.chunks_exact(32);
+    for c in it.by_ref() {
+        for (k, a) in acc.iter_mut().enumerate() {
+            let lane: [f32; 8] = c[k * 8..(k + 1) * 8].try_into().expect("8-wide lane");
+            let v = f32x8::from(lane);
+            *a = v.mul_add(v, *a);
+        }
+    }
+    let tail: f32 = it.remainder().iter().map(|v| v * v).sum();
+    ((acc[0] + acc[1]) + (acc[2] + acc[3])).reduce_add() + tail
 }
 
 /// Whether the registered-linear offload reads its matmul outputs back as
