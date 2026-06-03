@@ -1362,3 +1362,34 @@ decode (top): `tee:attn_resident_cover` 2958 (20%) · `engine:matmul_many`
   diagnose; none of this session's CPU-side levers address it.
 
 **Artefacts:** `bench-results/gelo-b8-current-native-n2048-2026-06-03.log`.
+
+## 22. Decode-length scaling (2026-06-03) — flat fixed cost + a linearly growing in-TEE tail
+
+B=1, n=2048, K ∈ {32, 128, 512} (native, bf16-on, secure covers):
+
+| K | decode wall | ms/step mean | tok/s |
+|---|--:|--:|--:|
+| 32 | 3.19 s | ~100 | 10.0 |
+| 128 | 14.24 s | 111 | 9.0 |
+| 512 | 83.50 s | 163 | 6.1 |
+
+Per-step decomposition (bucket ÷ K): the matmul round-trip (~45 ms),
+`shield_stack` (~16), `prefix_partial_gpu` (~14, the **frozen GPU prefix
+is perfectly flat**), HD₃ mask + logits (~27) are all K-invariant; the
+growth is entirely **`cover:tail_build+partial`** — 16.4 ms/step at
+K=128 vs 67.0 at K=512 ≈ **0.26 ms × tokens-generated-so-far** per step
+(every new token accumulates in the in-TEE tail; no fold/re-permute is
+implemented — the §10.1 "prefill-only" optimistic case).
+
+The tail term crosses the ~100 ms fixed cost at **≈380 generated
+tokens**; a K=2048 generation projects to ~750 s (tail-dominated). The
+decode lever for long generations is therefore the deferred **periodic
+tail-fold**: rebuild the covered prefix including the accumulated tail
+every N tokens and reset the tail. At the current rebuild cost (~322 ms
+for all 36 layers, §20), N=128 amortises to ~2.5 ms/step and caps the
+tail at ~33 ms/step → flat ~120 ms/step indefinitely. Security-neutral
+or better — folding re-permutes *more* often than prefill-only (the
+σ-vs-N gate asked whether prefill-only suffices, not whether folding is
+allowed).
+
+**Artefacts:** `bench-results/gelo-b1-decscale-K{128,512}-n2048-2026-06-03.log`.
