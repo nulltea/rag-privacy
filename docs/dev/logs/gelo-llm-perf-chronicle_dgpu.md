@@ -918,3 +918,69 @@ server would see.
 `bench-results/gelo-b1-bf16dct4gate-n2048-2026-06-03.log`,
 `bench-results/humaneval-bf16on-2026-06-03.log`. Escape hatch
 `GELO_BF16_OFFLOAD=0`.
+
+## 14. Build target (2026-06-03) — the no-F16C baseline was the bigger lever
+
+Following the §13.4 spike (which found `target-cpu=native` ~13% on the
+isolated cascade), the full prefill/decode bench was re-run with
+`target-cpu=native` (Zen4 AVX-512/F16C) and compared to the **documented
+SSE2-baseline bf16-on numbers** (no SSE2 re-run). B=1 forced-batched,
+warmed, bf16-on, CUDA. The repo `.cargo/config.toml` sets **no
+`target-cpu`**, so production — and every measurement in §3–§13 — built at
+the plain `x86-64` baseline (SSE2, **no F16C, no AVX2**).
+
+### 14.1 Wall (SSE2 baseline → native)
+
+| cell | SSE2 | native | Δ | tok/s |
+|---|--:|--:|--:|--:|
+| prefill n=2048 | 16.83 s | 13.86 s | **−17.6%** | 121→148 |
+| prefill n=8192 | 108.91 s | 97.69 s | **−10.3%** | 75→84 |
+| decode n=2048 | 6.61 s | 5.77 s | **−12.7%** | 4.8→5.5 |
+| decode n=8192 | 7.02 s | 6.17 s | **−12.1%** | 4.6→5.2 |
+
+### 14.2 Where it comes from (◆ = GPU; rest CPU in-TEE)
+
+| bucket (prefill n=2048) | SSE2 | native | Δ |
+|---|--:|--:|--:|
+| ◆ `engine:matmul_many` | 3599 | 1159 | **−68%** |
+| ◆ `engine:matmul` | 1312 | 806 | **−39%** |
+| `gelo:mask_apply:dct4` | 1544 | 1416 | −8% |
+| `gelo:mask_unapply:dct4` | 4810 | 4602 | −4% |
+| `gelo:shield_stack` (decode bucket) | 825 | 620 | **−25%** |
+
+The win is **not** in the mask transform (−2 to −8%; rustfft already
+runtime-detects AVX, so it was vectorised even at the SSE2 build). It is
+overwhelmingly in the **`engine:matmul*` buckets (−34 to −68% across both
+phases)** — which wrap the GPU offload's host-side **f32↔f16/bf16
+conversions** (upload `array2_to_tensor_f16`, read-back
+`tensor_data_to_array_bf16_from_f16`). The baseline `x86-64` target lacks
+**F16C**, so those conversions ran **scalar**; native enables
+`vcvtps2ph`/`vcvtph2ps` and they vectorise. `shield_stack`'s Gaussian fill
+also picks up AVX/FMA (−25%). (Single-sample; ±~7% — but the
+`engine:matmul*` deltas and the walls are far above the floor.
+`prefill_cover:correct_tee` *rose* ~8–35%, a codegen/variance quirk worth a
+confirm re-run.)
+
+### 14.3 Finding + disposition
+
+**The §3–§13 `engine:matmul*` buckets were partly inflated by scalar
+half-precision conversions on a no-F16C build.** Enabling F16C+AVX2 is a
+one-line build-config change worth **~10–18% prefill / ~12% decode** —
+broader than the bf16 read-back lever (~9% prefill) it sits on top of, and
+**backend-invariant** (it speeds the host side of every GPU offload, not a
+single kernel).
+
+Recommended: add to `.cargo/config.toml [build] rustflags` either
+`target-cpu=x86-64-v3` (**portable** — Haswell+/Zen+; includes F16C, AVX2,
+FMA — captures the conversion win) or `target-cpu=native` (this box's
+AVX-512, **non-portable**, slightly more on the wide loops). Either pins
+the deployment ISA, so it's a portability call. ⚠ When set via the
+`RUSTFLAGS` *env* it **replaces** the config's rpath link-args (libblis
+won't load at runtime) — add `target-cpu` *inside* the config's `rustflags`
+array (keeping the rpath args), or carry the rpath args in `RUSTFLAGS` too.
+
+This now outranks the other levers: **build target (≈12–18%, free) >
+R4 async overlap > FLOP-reducing mask levers**; bf16 read-back stays as a
+landed ~9% on top.
+
+**Artefacts:** `bench-results/gelo-b1-bf16on-native-n{2048,8192}-2026-06-03.log`.
