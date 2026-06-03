@@ -192,8 +192,6 @@ its contention penalty does.
     the per-step K/V upload; the decode attention bucket is the target.
   - **GQA-aware single-pass WGSL kernel** (Item 2+3) — 4× less K/V
     motion + fused FlashAttention.
-  - **R4 async overlap** — on PCIe the CPU mask / GPU matmul overlap
-    that vanished on UMA reappears (roadmap §4.D disposition).
 - **Immediate measurement debt:** (a) warm re-run to isolate autotune
   from the upload tax in the GPU-matmul bucket; (b) sweep
   `GELO_BLIS_THREADS` (12 physical cores here); (c) re-profile after
@@ -256,7 +254,7 @@ bandwidth) makes the matmul only ~1.5× faster. The real picture:
 **Disposition (research phase).** CUDA delivers a real but modest ~13 %
 wall win at B=1 — far below the bar that would justify a production
 backend fork. The high-value lever is the **per-call readback/sync**
-(batched/streamed unmask, R4 async, persistent K/V) — backend-agnostic,
+(batched/streamed unmask, persistent K/V) — backend-agnostic,
 helps Vulkan too. The `cuda` feature is retained as a measurement tool +
 opt-in Nvidia path; it is not promoted. Next probes: (a) same warm A/B at
 B=8; (b) whether enabling cubecl-wgpu SPIR-V cooperative-matrix closes
@@ -724,11 +722,7 @@ trade-offs in the deferred-optimizations handoff):
    fp16 so accuracy impact is within the offload's existing fp16 floor
    (re-gate HumanEval). The single biggest lever; the documented
    prerequisite (forward-wire 3b/3c unbuilt).
-2. **R4 async overlap (X2).** On PCIe the CPU mask of matmul *k+1* can
-   overlap the GPU matmul of *k* (the engines are independent, unlike
-   UMA). Mask (~42%) and matmul (~32%) are comparable → projected
-   ~10–20% wall, exact (pure scheduling), compounds with #1.
-3. **Blackwell sm_120 CMMA verification (P4).** The super-linear matmul
+2. **Blackwell sm_120 CMMA verification (P4).** The super-linear matmul
    growth + §8's ~2 TFLOP/s say tensor cores are under-used; if CMMA
    engages, matmul 2–5× → ~15–25% prefill at long context (the win widens
    with n). Investigate first.
@@ -901,9 +895,9 @@ larger-eval re-test (full HumanEval-164 / MBPP) is owed to confirm the
 **Updated lever ranking (§12.4):** bf16's realised win is ~9% (read-back),
 not the projected ~20–25% (transform) — and the transform itself is
 FFT-bound (§13.4), so vectorising it is out. The top remaining levers are
-**R4 async overlap (X2)** (overlap CPU mask with GPU matmul), then the
-**FLOP-reducing mask levers** (cheaper HD₃-at-prefill transform; eliminate
-the FFN-intermediate unmask) — not further bf16 or kernel-vectorisation work.
+the **FLOP-reducing mask levers** (cheaper HD₃-at-prefill transform;
+eliminate the FFN-intermediate unmask) — not further bf16 or
+kernel-vectorisation work.
 
 **HumanEval gate batching:** the gate generator was switched from B=1
 per-prompt to **B=8, length-sorted** (`GELO_HE_BATCH`, default 8) to cut
@@ -980,8 +974,7 @@ won't load at runtime) — add `target-cpu` *inside* the config's `rustflags`
 array (keeping the rpath args), or carry the rpath args in `RUSTFLAGS` too.
 
 This now outranks the other levers: **build target (≈12–18%, free) >
-R4 async overlap > FLOP-reducing mask levers**; bf16 read-back stays as a
-landed ~9% on top.
+FLOP-reducing mask levers**; bf16 read-back stays as a landed ~9% on top.
 
 **Artefacts:** `bench-results/gelo-b1-bf16on-native-n{2048,8192}-2026-06-03.log`.
 
@@ -1056,7 +1049,7 @@ the extra rows**. The DCT-IV buckets are ~43% of native prefill →
 shield/zero cover, sliced off after unapply). **Not yet implemented** —
 needs smooth-size rounding in the stacked_n sizing + pad-row fill on the
 DCT-IV path (the HD₃ path already has the pad machinery). This is now the
-top prefill lever, ahead of R4 async overlap. Deeper variants if more is
+top prefill lever. Deeper variants if more is
 needed: batched DCT across columns (FFTW/AOCL-FFT `REDFT11` + `howmany` —
 attacks the 95%-FFT share, we already vendor AOCL) and a security-gated
 3→2 cascade-stage reduction (−33% FFT).
@@ -1100,7 +1093,7 @@ Cumulative this session (n=2048, B=1): prefill **16.83 → 13.20 s
 (−21.6%)**, decode **6.61 → ~3.2 s (2.05×, 4.8 → ~10 tok/s)**. Next
 levers: the unapply's now-dominant **conversion/copy overhead** (fuse the
 bf16 widen into the first cascade tile load — partially exists; audit the
-copy-out), **R4 async overlap**, and the **FLOP-reducing mask levers**
+copy-out) and the **FLOP-reducing mask levers**
 (FFN-intermediate unmask elimination; batched DCT via AOCL-FFT REDFT11).
 
 **Artefacts:** `bench-results/gelo-b1-smoothpad-native-n{2048,8192}-2026-06-03.log`;
@@ -1161,7 +1154,7 @@ decode **6.61 → 3.20 s (2.07×, ~10 tok/s)**. The prefill bucket order is
 now: unapply 23% · attention-offload prep 18% · matmul+shield+correct+apply
 ~8% each — the FFT transform itself is finally the unapply's dominant
 share, so further mask-side gains need the FLOP-reducing levers
-(batched/AOCL DCT, FFN-intermediate unmask elimination) or R4 overlap.
+(batched/AOCL DCT, FFN-intermediate unmask elimination).
 
 **Artefacts:** `bench-results/gelo-b1-fusedunmask-native-n{2048,8192}-2026-06-03.log`;
 spike `dct4_bf16_unapply_overhead_spike`, parity
@@ -1199,16 +1192,16 @@ What survives: a **custom lane-parallel DCT-IV** (vertical SIMD, 16
 columns in AVX-512 lanes — the argument FFTW doesn't implement for r2r).
 First-principles ceiling is still several-× over rustdct's 2.26 ns/elem,
 but it is a from-scratch, week-scale kernel with no library shortcut —
-**deprioritised below R4 async overlap** (exact, hides the ~31% mask
-behind the GPU matmul) and the security-gated FFN-intermediate unmask
-elimination.
+**deprioritised below the security-gated FFN-intermediate unmask
+elimination.**
 
 ## 19. Correction — R4 async overlap is dead on dGPU too; concurrency re-evaluated
 
-This chronicle (§6, §8, §14, §17) repeatedly ranked "R4 async overlap"
+Earlier revisions of this chronicle repeatedly ranked "R4 async overlap"
 as a top lever on the theory that *"on PCIe the CPU-mask/GPU-matmul
-overlap that died on UMA reappears."* **That framing misattributes the
-documented failure.** The roadmap §4.D record (tested 2026-05-26,
+overlap that died on UMA reappears."* **That framing misattributed the
+documented failure, and those recommendations have been removed from
+§6–§18.** The roadmap §4.D record (tested 2026-05-26,
 `feat/r4-async-overlap`):
 
 - The green-light spike measured 58% overlap on a mask buffer
@@ -1242,5 +1235,4 @@ lesson as the §15 FWHT fork-join cliff).
 Conclusion: scheduling is nearly tapped out by the protocol's serial
 structure — the remaining large prefill levers are **FLOP reduction**
 (FFN-intermediate unmask elimination, security-gated; custom
-lane-parallel DCT-IV), not concurrency. §18's "deprioritised below R4"
-ranking is superseded accordingly.
+lane-parallel DCT-IV), not concurrency.
