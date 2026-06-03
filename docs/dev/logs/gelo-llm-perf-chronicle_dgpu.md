@@ -1202,3 +1202,45 @@ but it is a from-scratch, week-scale kernel with no library shortcut —
 **deprioritised below R4 async overlap** (exact, hides the ~31% mask
 behind the GPU matmul) and the security-gated FFN-intermediate unmask
 elimination.
+
+## 19. Correction — R4 async overlap is dead on dGPU too; concurrency re-evaluated
+
+This chronicle (§6, §8, §14, §17) repeatedly ranked "R4 async overlap"
+as a top lever on the theory that *"on PCIe the CPU-mask/GPU-matmul
+overlap that died on UMA reappears."* **That framing misattributes the
+documented failure.** The roadmap §4.D record (tested 2026-05-26,
+`feat/r4-async-overlap`):
+
+- The green-light spike measured 58% overlap on a mask buffer
+  **unrelated** to the in-flight matmul — the dependency removed.
+- The full implementation measured **flat to +2.8% regression**
+  (`r4_async_minibench`: 1808.7→1802.7 ms noise; 1698.0→1745.6 ms
+  regression), with **~+2 ms/dispatch** of token/submit bookkeeping.
+- Root cause: a **protocol-inherent serial chain** — `apply M_{i+1}`
+  consumes the *unapplied output* of matmul `M_i`, within layers and
+  across them. Nothing to hide behind the in-flight matmul.
+
+PCIe changes neither the data dependency nor the dispatch overhead, so
+the "dGPU revival" hope is unfounded. **R4-as-designed is struck from
+the lever list.** Its overhead number also sets the bar for any future
+async: at 252 offloads/prefill and 1152+/decode, per-call overlap
+machinery must cost ~µs or it loses outright (the same granularity
+lesson as the §15 FWHT fork-join cliff).
+
+**What true-independence concurrency remains (post-§17 profile):**
+
+1. **Decode prefix-GPU ∥ tail-CPU** — independent given `q` (disjoint
+   K/V, online-merged): overlap ceiling ≈ min(`prefix_partial_gpu`
+   ~437 ms, tail ~150 ms) ≈ **−4–5% decode**, only with a ~zero-cost
+   submit/compute/read restructure.
+2. **Covered-prefix build** (600 ms, per-layer independent): parallelise
+   the CPU permute/rotate across layers ≈ **−2–3% prefill**.
+3. **`shield_stack` probe first** — 8.2 ms/call vs a ~3–5 ms
+   copy+norm+RNG back-of-envelope suggests a plain inefficiency; fix
+   serially before considering noise-pregeneration overlap.
+
+Conclusion: scheduling is nearly tapped out by the protocol's serial
+structure — the remaining large prefill levers are **FLOP reduction**
+(FFN-intermediate unmask elimination, security-gated; custom
+lane-parallel DCT-IV), not concurrency. §18's "deprioritised below R4"
+ranking is superseded accordingly.
