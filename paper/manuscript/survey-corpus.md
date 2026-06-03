@@ -51,12 +51,12 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | Cover | Scheme | Ref | Stage | Threat | Perf | Note |
 |:---:|---|---|---|---|---|---|
 | [x] | PermLLM ★ | Zheng et al. 2024, NeurIPS | generate | HbC/3-party | 3s/tok (6B WAN) | A-SS + permutation triples; broken by Hidden-No-More |
-| [x] | SecFormer ★ | 2024, ACL | embed,generate | HbC/MPC | 71s (BERT-base); 3.6× vs PUMA | 2Quad + Goldschmidt + Fourier-GELU |
+| [ ] | SecFormer ★ | 2024, ACL | embed,generate | HbC/MPC | 71s (BERT-base); 3.6× vs PUMA | 2Quad + Goldschmidt + Fourier-GELU → **deferred to Li et al. 2025 PTI survey** (crypto-inference; lineage) |
 | [x] | SHAFT | 2025, NDSS (ePrint 2025/2324) | embed,generate | HbC/2PC | best WAN (BERT-base) | first constant-round softmax; Fourier GELU |
 | [x] | CryptoMoE ★ | Zhou et al. 2026 | generate | HbC/MPC | 2.8–3.5× vs dense MoE | balanced-expert-routing private MoE |
 | [ ] | PUMA | 2023 (2307.12533) | embed,generate | HbC/3PC | ~200s/tok (7B); proto-design | polynomial softmax/GELU |
 | [ ] | BOLT | 2024, S&P | embed,generate | HbC/2PC | min-scale (BERT); token-prune | HE+ASS, Remez softmax |
-| [x] | BumbleBee | 2025, NDSS | embed,generate | HbC/2PC | ~8min/tok (7B) | HE+ASS, segmented-poly exp; **2PC SOTA — most robust trust (no dealer/3-party)** |
+| [ ] | BumbleBee | 2025, NDSS | embed,generate | HbC/2PC | ~8min/tok (7B) | HE+ASS, segmented-poly exp → **deferred to Li et al. 2025 PTI survey** (crypto-inference; lineage; SHAFT is the kept 2PC exemplar) |
 | [ ] | MPCFormer | 2023, ICLR | embed,generate | HbC/MPC | ~68s (BERT-base); quad approx | 2Quad + distillation |
 | [ ] | Nimbus | 2024, NeurIPS | embed,generate | HbC/2PC | ? | distribution-aware poly nonlinears |
 | [ ] | Ditto | 2024, ICML | embed,generate | HbC/3PC | ? | quantization-aware |
@@ -83,8 +83,8 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | Cover | Scheme | Ref | Stage | Threat | Perf | Note |
 |:---:|---|---|---|---|---|---|
 | [x] | Euston ★ | 2025 | embed,generate | HbC/none | ~NEXUS-class (non-interactive) | NEXUS-successor RNS-CKKS FHE |
-| [x] | NEXUS | 2024, CCS | embed,generate | HbC/none | 1.31s amortized (BERT, 256-batch) | non-interactive RNS-CKKS |
-| [x] | CipherFormer ★ | Wang et al. | embed | HbC/none | 7.7–11.9× vs HErBERT | FHE encoder, small classifiers |
+| [ ] | NEXUS | 2024/25, NDSS | embed,generate | HbC/none | 37.3s/inf, 164MB (BERT-base) | non-interactive RNS-CKKS → **deferred to Li et al. 2025** (crypto-inference); **retained as cited FHE / extrapolation anchor for Euston** |
+| [ ] | CipherFormer ★ | Wang et al. | embed | HbC/none | 7.7–11.9× vs HErBERT | FHE encoder, small classifiers → **deferred to Li et al. 2025 PTI survey** (crypto-inference; lineage) |
 | [ ] | THE-X | 2022, ACL | embed | HbC/none | min-scale (BERT-tiny) | FHE BERT |
 | [ ] | HE-LRM | (2506.18150) | embed | HbC/none | 56× lookup | pure-FHE large-vocab lookup |
 | [ ] | Panda | 2022, ePrint 2022/423 | embed | HbC/none | ? | poly inverse-sqrt CKKS (LayerNorm) |
@@ -283,7 +283,7 @@ Lattica · Javelin AI · Corvex (B200).
 
 Comparison-table sizes (after the practical-frontier reclassification):
 
-- Cryptographic (MPC/SS): 27 (+SHAFT, Pacmann, XorMM, FLASH, Veil, PeGraph; −SIGMA→lineage) · (FHE/HE): 19 (−GraSS→lineage)
+- Cryptographic (MPC/SS): 27 (+SHAFT, Pacmann, XorMM, FLASH, Veil, PeGraph; −SIGMA, −SecFormer, −BumbleBee → crypto-inference deferred to Li et al. 2025) · (FHE/HE): 19 (−GraSS→lineage; −NEXUS, −CipherFormer → crypto-inference deferred to Li et al. 2025, NEXUS retained as cited anchor)
 - TEE (baseline): 8 (+H₂O₂RAM) · Static obfuscation: 11 (+TransLinkGuard, −Collaborative Obfusc. = dup of AloePri) · DP: 9 (+DP-KSA) · Hybrid split: 8 (+Portcullis, −Amulet, −SecureInfer→on-device lineage)
 - Targeted verification: 10 (+ZKGraph, ZKIFV; full-ZK inference excluded — separate SoK) · Attacks: ~26 (+Depth-False-Privacy) · Surveys/SoK: 7
 - **Foundational/superseded (mention-only): ~22** (graph-analytics/GNN demoted here: CryptGNN, OblivGNN, Graphiti, MPC-PageRank/clustering; +GraSS, +Amulet, +SecureInfer, +SIGMA) · Supporting machinery: ~30 · Commercial: ~11

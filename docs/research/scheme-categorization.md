@@ -56,14 +56,12 @@ self-reported (cross-paper, indicative). **Threat-fit** = which adversary it rig
 
 | Scheme | Behavior | Trust anchor (Tier) | Knows | Protects | Residual leak | Basis | Flag |
 |---|---|---|---|---|---|---|---|
-| PermLLM | HbC | non-coll. 3PC (T1) | wb | input+model | shares; permuted plaintext (to user) | crypto+heur. | ★ |
-| SecFormer | HbC | non-coll. 2PC (T1) | wb | input+model | shares | crypto | ★ |
+| PermLLM | HbC | 2PC + s.h. dealer (non-coll., T1) | wb | input+model | shares; permuted plaintext (to user) | crypto+heur. | ★ |
 | CryptoMoE | HbC | non-coll. 2PC (T1) | wb | input+model+routing | shares | crypto | ★ |
 | p²RAG | HbC (+malicious-user defense) | non-coll. 2-server (T1) | — | query+database | shares; bounded DB leakage | crypto | ★ |
 | Panther | HbC | none / 1-server (T1) | — | query+access | access pat. | crypto | ★ |
 | Pacmann | HbC | none / 1-server PIR (T1) | — | query+access | none* (DB public) | crypto | ★ |
 | SHAFT | HbC | non-coll. 2PC (T1) | wb | input+model | shares | crypto | ★ |
-| BumbleBee | HbC | non-coll. 2PC (T1) | wb | input+model | shares+ct | crypto | † |
 | Fission | HbC (extends to malicious) | non-coll. MPC + evaluators (T1) | wb | input+model | shares; shuffled+split act. to evaluators (leak ↓ w/ #evaluators) | crypto+heur. | ★ |
 | PIR-RAG | HbC | none / 1-server PIR (T1) | — | query (target cluster) | access pat. (cluster-level only) | crypto (LWE-PIR) | ★ |
 | XorMM | HbC (VXorMM: malicious) | none / SSE (T1) | — | corpus+volume | access/search pat. | crypto | ★ |
@@ -76,12 +74,10 @@ self-reported (cross-paper, indicative). **Threat-fit** = which adversary it rig
 | Scheme | Behavior | Trust anchor (Tier) | Knows | Protects | Residual leak | Basis | Flag |
 |---|---|---|---|---|---|---|---|
 | Euston | HbC | none (T1) | wb | input+model | ct (RNS-CKKS) | crypto | ★ |
-| CipherFormer | HbC | none (T1) | wb | input+model | ct (HE)+GC | crypto | ★ |
 | Compass | **Malicious** | none (T1; client-side ORAM) | — | query+corpus+results+access | op-type only (search vs ins/del) | crypto | ★ |
 | SAP / ADCPE (DCPE) | HbC | none (T1) | — | doc content (vectors) | ct+dist | crypto* | ★ |
 | CAPRISE | HbC | none (T1) | — | doc content+query | ct+dist (query)+ap | crypto*+DP | ★ |
 | RAGtime-PIANO | HbC | none / 1-server PIR (T1) | — | query+access+distances | none* (ct only) | crypto | ★ |
-| NEXUS | HbC | none (T1) | wb | input+model | ct (RNS-CKKS) | crypto | ★ |
 | TRSE | HbC | none (T1) | — | doc content+query | ct+access pat. (user-side ranking) | crypto | ★ |
 
 ## A.3 Trusted Execution Environments (§3)
@@ -164,8 +160,8 @@ were all retrieval-pipeline numbers reused), so it is an **open gap** (note afte
 
 | Scheme | Target model(s) | Hardware | ×-overhead vs plaintext | Comm | Preprocessing/offline | Fidelity | Flag |
 |---|---|---|---|---|---|---|---|
-| PermLLM | ChatGLM-6B | 3×L20-class GPU; WAN 10 ms/1 Gbps | — (only relative: "orders faster than MPC"; abs 3 s/tok) | ~20 Mb/tok | MPC offline: Beaver + permutation triples (dealer) | exact | ★ |
-| CryptoMoE | DeepSeek/OLMoE/QwenMoE 6.9–16.4B | Xeon 8468 (48-core, 2.1 GHz); 2PC LAN 3 Gbps/0.2 ms, WAN 400 Mbps/40 ms | — (only relative: 1.7–5.9× vs dense-MPC; matches insecure baseline in some cases via batched MatMul; +18% for secure dispatch/combine) | 3.1–6.1× < dense-MPC (rel.; Table 2 per-token) | MPC offline (HE+SS) | task-acc 99.2% (≈−0.8%) | ★ |
+| PermLLM | ChatGLM-6B | 3×L20 GPU; WAN 10 ms/1 Gbps (also 20 ms/100 Mbps); 2PC+s.h. dealer | abs 3 s/tok (1 Gbps) / 7 s/tok (100 Mbps); vs-plaintext n/r (≈10²× order est.) | ~20 Mb/tok (≈2.5 MB) | MPC offline: Beaver + permutation triples (s.h. dealer) | exact | ★ |
+| CryptoMoE | DeepSeek/OLMoE/QwenMoE 6.9–16.4B | Xeon 8468 (48-core, 2.1 GHz); 2PC LAN 3 Gbps/0.2 ms, WAN 400 Mbps/40 ms | e2e abs (LAN): ≈22 s/tok (OLMoE-6.9B, 0.36 min) – ≈46 s/tok (DeepSeek-16.4B, 0.76 min); single MoE layer 0.73–1.06 s/tok LAN / 7.7–9.9 s/tok WAN; vs-plaintext n/r (insecure-HE baseline 0.34–0.83 min/tok); 2.8–3.5× < dense-MPC LAN (ar5iv Tab 2/3) | e2e 2.81 GB/tok (OLMoE) – 4.81 GB/tok (DeepSeek); single layer 47.7–75.0 MB/tok | MPC offline (HE+SS) | task-acc 99.2% (≈−0.8%) | ★ |
 | GELO | Llama-2-7B | confidential GPU (H200) + untrusted GPU (L40S) | **1.2–1.3×** (20–30% vs insecure offload) | — (TEE-local mixing) | per-batch fresh invertible matrix (cheap, online) | exact (float32) | ★ |
 | TwinShield | vision/language Transformers (BERT/ViT/CLIP/LLaMA-8bit) | Xeon Gold 6342 (2.8 GHz, 512 GB) + A40 48 GB; SGX (FPGA/TPU also tested) | — (only relative: 5.4× vs TEE-only, 4.0–6.1× vs prior verifiable; 87% offload) | masked act. (⚠ abs n/r) | offline precompute of mask products (RW) | exact | ★ |
 | ObfuscaTune | GPT-2 small→XL | 2 GPUs (1 simulates TEE); "middle-range" (model n/r); 1–8 GPU-h/exp | **1.5–4.3×** (vs unprotected) | — | one-time obfusc-matrix setup (<10 s/GPT2-XL on mid GPU; low-cond.-number) | exact-ish (numerical err ↑ w/ cond.) | ★ |
@@ -174,11 +170,9 @@ were all retrieval-pipeline numbers reused), so it is an **open gap** (note afte
 | AloePri | Qwen/Llama/DeepSeek (≤671B) | client 2×Xeon 8457C; server GPU cluster (vLLM) | **~1×** (near-plaintext) | — | one-time covariant obfusc of weights (offline matrix transforms) | 0–3.5% acc loss; <5% token recovery | ★ |
 | SGT (Stained Glass) | Llama-1B, Qwen3 | transform-training: 1×A100 80GB (small) → up to 64×8 A100 80GB (large); inference client-side | **~1×** (≈0 ms client transform) | obf. embeddings (> token IDs) | **offline training of SGT transformer** (MI-loss; ~6 GPU-h small → ~2 days large, FSDP2+TP) | −0.29–0.5 pp util (⚠ AloePri reports broken by IMA, E #9) | ★ |
 | OSNIP | Llama-3.2-1B/3B, Qwen3-14B/32B | ⚠ not reported (confirmed via full MD; client-side encryptor) | **~1×** (0.96 ms) | obf. embeddings | **offline training of encryption network** (gradient access to server LLM) | near-lossless; KNN-ASR ≈ 0 | ★ |
-| BumbleBee | LLaMA-7B | CPU (⚠ machine n/r); 2PC | — (only relative; abs ~8 min/tok) | 0.1× < BOLT (rel.) | HE (RLWE) + OT offline | exact | † |
-| SHAFT | BERT / GPT / ViT | 2×NVIDIA A40, 256 GB, Xeon Gold 5318Y; 2PC LAN | — (only relative: 1.3× vs SIGMA on BERT; 4.6–5.3× LAN / 2.9–4.4× WAN vs BumbleBee — *verified, E #17*) | 25–41% < SIGMA (rel.) | 2PC offline (SS triples) | acc ≈ plaintext (QNLI 90.4 vs 90.8) | ★ |
-| Fission | BERT/ModernBERT/Llama-3-1B | 80 vCPU + 2×H100 | — (only relative: >8× vs CrypTen; abs ~s/inf @1B) | 8× < CrypTen (rel.) | MPC offline (triples) | exact-ish (acc ≈ PyTorch) | ★ |
-| Euston | GPT-2-1.5B, LLaMA-3-8B | AMD EPYC 7542 (32-thread) + RTX 6000 Ada; LAN | — (only relative: 5.5–8.8× vs NEXUS) | 2.8–4.4× < NEXUS (rel.) | FHE (RNS-CKKS) keygen + offline SVD mask | approx. (poly GELU/Softmax/LN; Δ n/r) | ★ |
-| NEXUS | BERT-base (128 tok) | CPU (GPU variant 42.3×); WAN 100 Mbps/80 ms | — (abs 37.3 s/inf; vs-plaintext × n/r) | 164 MB/inf | FHE (RNS-CKKS) keygen | approx. (Δ n/r) | ★ |
+| SHAFT | BERT / GPT / ViT | 2×NVIDIA A40, 256 GB, Xeon Gold 5318Y; 2PC LAN | ≈1.4 s/inf BERT-base (extrap., see B.2); 4.6–5.3× LAN / 2.9–4.4× WAN vs BumbleBee — *verified, E #17* | ≈0.6–0.74 GB BERT-base (extrap.; 25–41% < SIGMA) | 2PC offline (SS triples) | acc ≈ plaintext (QNLI 90.4 vs 90.8) | ★ |
+| Fission | BERT/ModernBERT/Llama-3-1B | 80 vCPU + 2×H100; 9 Gbps | abs: ModernBERT <5 s/inf, BERT <20 s/inf; up to 8× faster vs CrypTen; vs-plaintext n/r (paper: plaintext "multiple tok/s" → Fission "seconds") | ModernBERT <3 GB, BERT <20 GB; 8× < CrypTen | MPC offline (triples) | exact-ish (acc ≈ PyTorch) | ★ |
+| Euston | GPT-2-1.5B, LLaMA-3-8B | EPYC 7542 + RTX 6000 Ada (48 GB); 3 Gbps | — (only relative: 5.5–8.8× vs NEXUS system-wide; 90× HMM, 165.7× HNE; 3100× less user preproc); no same-regime absolute anchor (NEXUS=BERT-base only) → not extrapolated | 2.8–4.4× < NEXUS (rel.) | FHE (RNS-CKKS) keygen + offline SVD mask | approx. (poly GELU/Softmax/LN; Δ n/r) | ★ |
 | PipeLLM | OPT 13B–175B | H100-SXM (CVM + GPU-TEE) | **~1.2×** (<19.6% throughput vs w/o-CC) | PCIe (internal) | none (runtime pipelining) | exact | ★ |
 | H100 CC baseline | Llama2 7/13/70B | H100 CC; Intel TDX·SGX | **1.04–1.08×** (4–8% GPU); CPU-TEE <10% thr / <20% lat | PCIe AES-GCM | none | exact | ★ |
 | Portcullis | gateway LLaMA-2-7B; LLM = GPT-4o-mini/Mistral | Intel TDX (Sapphire Rapids, 16 vCPU) | **~1.01×** (1.33% vs raw LLM) | — | none (NER masks) | response cosine-sim >0.7 (GPT-4o-mini) | ★ |
@@ -188,11 +182,8 @@ were all retrieval-pipeline numbers reused), so it is an **open gap** (note afte
 
 | Scheme | Target model(s) | Hardware | ×-overhead vs plaintext | Comm | Preprocessing/offline | Fidelity | Flag |
 |---|---|---|---|---|---|---|---|
-| SecFormer | BERT-base (512 tok) | 3×V100; LAN 10 GB/s | — (only relative: 3.57× vs PUMA; abs 71 s/sample) | ⚠ abs n/r (SS) | MPC offline (2Quad approx.) | task-acc −0.9–1.3% vs PUMA | ★ |
-| CipherFormer | text-class. encoder (L≤128) | 2-thread VM; 128-bit | — (only relative: 7.7–11.9× vs HErBERT) | ⚠ abs n/r (HE+GC) | HE keygen | approx. (+3–11% acc vs HErBERT; Δ vs plaintext n/r) | ★ |
-| Euston | BERT-Base | AMD EPYC 7542 + RTX 6000 Ada; LAN | — (only relative: 3.5× vs NEXUS) | 4.4× < NEXUS (rel.) | FHE keygen + offline SVD mask | approx. (Δ n/r) | ★ |
-| NEXUS | BERT-base (128 tok) | CPU (GPU variant 42.3×); WAN 100 Mbps/80 ms | — (abs 37.3 s/inf) | 164 MB/inf | FHE (RNS-CKKS) keygen | approx. (Δ n/r) | ★ |
-| SHAFT | BERT-base | 2×NVIDIA A40, 256 GB, Xeon Gold 5318Y; 2PC LAN | — (only relative: 1.3× vs SIGMA on BERT — *verified, E #17*) | 25–41% < SIGMA (rel.) | 2PC offline (SS triples) | acc ≈ plaintext (QNLI 90.4 vs 90.8) | ★ |
+| Euston | BERT-Base | EPYC 7542 + RTX 6000 Ada (48 GB); 3 Gbps | ≈10.7 s/inf (extrap. 1-hop via NEXUS 37.3 s; Euston 3.5× on BERT-base) | ≈37 MB (extrap.; 4.4× < NEXUS 164 MB) | FHE keygen + offline SVD mask | approx. (Δ n/r) | ★ |
+| SHAFT | BERT-base | 2×NVIDIA A40, 256 GB, Xeon Gold 5318Y; 2PC LAN | ≈1.4 s/inf (extrap. 1-hop via SIGMA 1.84 s @9.4 Gbps, Li et al.; SHAFT 1.3×) — *E #17* | ≈0.6–0.74 GB (extrap.; 25–41% < SIGMA 0.99 GB) | 2PC offline (SS triples) | acc ≈ plaintext (QNLI 90.4 vs 90.8) | ★ |
 | TwinShield | BERT / ViT | Xeon Gold 6342 (2.8 GHz, 512 GB) + A40 48 GB; SGX | — (only relative: 4.0–6.1× vs prior verifiable) | masked act. (⚠ abs n/r) | offline mask-product precompute | exact | ★ |
 | DP-Forward | BERT encoders (SST-2/QQP) | Tesla P100 GPU cluster | **~1×** (≈ non-private; ~3× less than DP-SGD) | — | none (forward-pass matrix-Gaussian noise; optional noisy pretrain) | task-acc Δ per ε (−1.7 pp @ε≈3 w/ label privacy) | ★ |
 | SPARSE | GTR-base/Sentence-T5/SBERT | ⚠ not reported (confirmed via full MD) | **~1×** (≈0 inference overhead) | — | **offline differentiable mask-learning per privacy concept** | util 65% @ε=10 (STS12); leakage 60→19%; Vec2Text −92% @ε=5 | ★ |
@@ -419,6 +410,33 @@ highest-value corrections for the manuscript and `refs.bib`.
     By contrast, vs-plaintext *overhead* for crypto schemes is usually a genuine absence (they
     report vs prior scheme, not vs plaintext) — those `— (only relative)` cells are correct.
 
+21. **Crypto-inference exemplar cost numbers recovered + extrapolated (2026-06-03).** For the five
+    §3.1 contrast exemplars (PermLLM, SHAFT, Euston, CryptoMoE, Fission) pulled abs/comm via full MD
+    + ar5iv. **Key finding: no crypto-inference paper reports overhead vs plaintext** — all benchmark
+    against prior *secure* schemes (SHAFT/SIGMA+BumbleBee, Euston/NEXUS, CryptoMoE/dense+insecure-MPC,
+    Fission/CrypTen, PermLLM/MPCFormer+PUMA). The one-hop relative→absolute extrapolation recovers
+    **absolute** figures (SHAFT ≈1.4 s & ≈0.6–0.74 GB via SIGMA 1.84 s/0.99 GB; Euston-BERT ≈10.7 s &
+    ≈37 MB via NEXUS 37.3 s/164 MB) but **not** a vs-plaintext ratio — the baseline chains terminate at
+    other crypto schemes, never plaintext (so vs-plaintext is only an order-of-magnitude estimate vs a
+    stated plaintext reference). CryptoMoE absolutes recovered from **ar5iv Tab 2/3** (table-dropping-bug
+    workaround): e2e ≈22–46 s/tok LAN, 2.81–4.81 GB/tok. Fission abs: ModernBERT <5 s/<3 GB, BERT
+    <20 s/<20 GB. PermLLM 3 s/tok (1 Gbps) / 7 s/tok (100 Mbps), ~20 Mb/tok. **PermLLM threat-model
+    correction:** the paper states a *two-party setting with a semi-honest third party* (offline dealer
+    for Beaver/permutation triples) — it is **2PC + s.h. dealer, not 3PC**. Part A trust anchor updated;
+    §2 `tab:threat-taxonomy` `non-coll. 3PC` cell should follow. Extrapolation technique to be documented
+    in §2.2 methodology.
+
+22. **Crypto-inference non-exemplars deferred to Li et al. 2025 + removed from tables (2026-06-03).**
+    Decision (grilled): the SoK defers MPC/FHE *inference* protocol depth to Li et al. 2025 (*Private
+    Transformer Inference in MLaaS*, arXiv 2505.10315 — MPC+HE-only, inference-only, semi-honest-only)
+    and keeps five frontier exemplars for the right-sizing contrast (SHAFT, Euston, CryptoMoE, Fission,
+    PermLLM). The non-exemplar crypto-*inference* schemes **SecFormer, BumbleBee, CipherFormer, NEXUS**
+    are removed from Part A/B tables (demoted in `survey-corpus.md`). **NEXUS is retained as a cited
+    extrapolation anchor / FHE baseline only** (its 37.3 s/164 MB anchors Euston), not as a surveyed row.
+    Crypto-*retrieval/storage* (PIR/ORAM/SSE/DCPE: Pacmann, Compass, PIR-RAG, p²RAG, Panther, CAPRISE,
+    RAGtime-PIANO, XorMM, FLASH, PeGraph, GORAM, TRSE) is **unaffected** — Li et al. does not cover it,
+    it is our distinctive territory.
+
 > **Doc-ID note:** during grounding the EdgeQuake doc IDs for Compass (`7b372edb`) and
 > Fuchsbauer SAP/ADCPE (`887283e3`) were each grounded by their actual content, not by label.
 
@@ -426,8 +444,10 @@ highest-value corrections for the manuscript and `refs.bib`.
 
 ## Coverage check
 
-- **Security rows (Part A):** 14 MPC/SS · 8 FHE/HE · 4 TEE · 5 obfuscation · 4 DP · 6 hybrid = **41**
-  (dropped: GraSS #1, Amulet #3, SecureInfer #15, SIGMA #16; Collaborative Obfuscation = AloePri dup).
+- **Security rows (Part A):** 12 MPC/SS · 6 FHE/HE · 4 TEE · 5 obfuscation · 4 DP · 6 hybrid = **37**
+  (crypto-inference non-exemplars deferred to Li et al. 2025 — SecFormer, BumbleBee, CipherFormer,
+  NEXUS removed from tables 2026-06-03, E #22; earlier drops: GraSS #1, Amulet #3, SecureInfer #15,
+  SIGMA #16; Collaborative Obfuscation = AloePri dup).
 - **§7 composable integrity (Part C):** 10.
 - **Grounded ★ (~40):** Round 1 (orig. EdgeQuake corpus) — PermLLM, SecFormer, CryptoMoE,
   Pacmann (MPC); Euston, CipherFormer, Compass, SAP/DCPE, CAPRISE (FHE); Opal (TEE); AloePri,
