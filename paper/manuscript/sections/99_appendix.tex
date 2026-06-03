@@ -11,3 +11,56 @@ coding procedure for \cref{tab:threat-taxonomy} and \cref{tab:gapmap}}
 \label{app:classification}
 % The full per-paper table behind the five-axis taxonomy and the gap-map.
 \needswork{full classification table for all ~40-50 surveyed schemes}
+
+\section{Attack Validation of Deployment-Ready Schemes}
+\label{app:validation}
+% Decoupled from §5 and generalized from AloePri-only to the heuristic-basis deployment-ready
+% set. FINDING + reproduction protocol only; the novel attack method (ArrowMatch/Sequence-IMA)
+% and the defense are claimed in the companion paper, not here.
+The deployment-readiness lens (\cref{sec:intro}) favors the schemes with the best
+performance-to-threat ratio, and these are overwhelmingly \emph{heuristic-basis} schemes---static
+obfuscation and obfuscation-hybrids---whose security is shown experimentally rather than proven.
+For exactly those schemes, \emph{reported} resistance can exceed \emph{real} resistance: the
+obfuscation is fixed and white-box, so an adversary can analyze it in advance and mount attacks
+the original evaluation did not run. We therefore validate the most deployment-ready heuristic
+schemes against a common attacker, as a data point for the gap-map (\cref{sec:synthesis}).
+Cryptographic and pure-TEE schemes are excluded by construction: their guarantees are provable or
+hardware-rooted, so there is no reported-vs-real gap to validate.
+
+\paragraph{Reproduction protocol.} The adversary is a single, deliberately modest point in the
+security space (\cref{sec:threat}): an honest-but-curious cloud operator, white-box on the public
+model and the obfuscation method, denied only the ephemeral per-session secret, observing the
+obfuscated service I/O, with side channels out of scope and a constrained, realistic budget
+(\cref{sec:threat-budget}); its goal is to recover the input prompt. Each scheme is attacked
+\emph{within its own reported regime}, with the attack family matched to its leakage surface
+(\cref{tab:validation}); a break under these conditions is a break by the victim's own standard,
+not an artefact of an inflated adversary.
+
+\begin{table}[H]
+  \centering \footnotesize
+  \caption{Attack validation of the deployment-ready heuristic-basis schemes. ``Recovery'' is the
+    fraction of input tokens an in-regime attacker recovers (higher = weaker protection);
+    ``\emph{comp.}'' marks figures reported in the companion paper.}
+  \label{tab:validation}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Scheme & Leakage surface / attack family & Recovery (reported $\to$ found) \\
+    \midrule
+    AloePri~\cite{lin_aloepri}            & obf.\ I/O+weights; weight/IMA inversion & $<$15\% claimed $\to$ \emph{comp.} \\
+    SGT~\cite{roberts_sgt}                & obf.\ embeddings; IMA                   & claimed secure $\to$ $>$90\% TTRSR~\cite{lin_aloepri} \\
+    OSNIP~\cite{cao_osnip}                & obf.\ embeddings; embedding inversion   & KNN-ASR$\approx$0 $\to$ \emph{comp.} \\
+    GELO~\cite{belikov_gelo}              & mixed activations; Gram-matrix / BSS    & per-batch claim $\to$ \emph{comp.} \\
+    ObfuscaTune~\cite{frikha_obfuscatune} & obf.\ activations+weights; inversion    & --- $\to$ \emph{comp.} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Finding.} Across the set, reported resistance overstates real protection: the
+obfuscation surface each scheme treats as its defence is precisely what an in-regime attack
+targets, and several published inversions already recover substantially more plaintext than the
+original evaluations report~\citep{lin_inversion,hnm,arrowmatch,tsqp,depth_false_privacy}. The
+novel attack methodology (ArrowMatch / Sequence-IMA) and a defense that closes the gap are the
+subject of the companion paper; here we report only the finding and the reproduction protocol,
+as evidence for the deployment-readiness assessment of \cref{sec:synthesis}.
+\needswork{insert the companion-paper headline recovery figures into \cref{tab:validation}
+(AloePri, OSNIP, GELO, ObfuscaTune) and the forward citation to the companion paper}

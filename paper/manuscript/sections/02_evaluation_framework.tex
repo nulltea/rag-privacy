@@ -4,7 +4,7 @@
 % UNIFIED framework section (grill #5): ONE framing for how we compare schemes, split into
 % Security (categorical taxonomy) and Cost (quantitative perf+fidelity). The categorical/
 % quantitative split is stated ONCE here; nothing downstream re-derives it. Side-channel
-% finding lives in §\ref{sec:synthesis}; the vignette adversary in §\ref{sec:obfuscation}.
+% finding lives in §\ref{sec:synthesis}; the validation case study in \cref{app:validation}.
 
 We compare confidential Transformer-inference and RAG schemes along two kinds of
 dimension: \emph{security}---categorical properties of who the adversary is and what
@@ -25,7 +25,7 @@ scheme along five \emph{categorical} axes (\cref{sec:threat-axes}), place a
 representative set of schemes on them (\cref{sec:threat-landscape}), and treat the
 attacker's \emph{capability budget} as a cross-cutting concern (\cref{sec:threat-budget}).
 A field-wide side-channel blind spot emerges from the exercise (\cref{ssec:sidechannel}),
-and the one empirical vignette in this SoK (\cref{ssec:vignette}) instantiates a single
+and the one empirical case study in this SoK (\cref{app:validation}) instantiates a single
 point in this space.
 
 \subsubsection{Axes}
@@ -99,8 +99,8 @@ nothing at all. Microarchitectural, cache, timing, and power
 side channels are a residual-leakage category that \emph{every} surveyed scheme
 places out of scope---a uniformity we elevate to a finding
 (\cref{ssec:sidechannel}) rather than carry as a per-scheme cell. Two schemes
-that agree on every other axis can diverge sharply here, and as the vignette
-(\cref{ssec:vignette}) shows, it is the residual leakage---not the stated
+that agree on every other axis can diverge sharply here, and as the validation case study
+(\cref{app:validation}) shows, it is the residual leakage---not the stated
 protection goal---that an attack ultimately exploits.
 
 \paragraph{5. Security basis.}
@@ -117,7 +117,7 @@ schemes the others cannot: an FHE scheme and a static-obfuscation scheme can
 share an identical row on axes~1--4---trust anchor \emph{none},
 honest-but-curious, white-box, protecting the input---yet the former offers
 cryptographic indistinguishability while the latter offers only an empirically
-measured resistance that the vignette (\cref{ssec:vignette}) shows can be far
+measured resistance that the case study (\cref{app:validation}) shows can be far
 weaker than its authors report. Security basis is thus the sharpest predictor of
 whether a confidentiality claim survives scrutiny, and it is the axis the
 deployment-readiness criterion of \emph{threat-model fit} (\cref{sec:intro})
@@ -127,7 +127,8 @@ reads most heavily.
 \label{sec:threat-landscape}
 
 \cref{tab:threat-taxonomy} places a representative scheme from each of the five
-mechanism families on the five axes. Four patterns stand out. First, the
+mechanism families on the five axes; the full per-family rosters appear in
+\cref{sec:crypto}--\cref{sec:hybrid}. Four patterns stand out. First, the
 obfuscation family clusters tightly at \emph{HbC + white-box}: these schemes
 explicitly assume the attacker knows the open-source model and the method, and
 stake everything on an ephemeral secret. Second, the trust anchor varies more
@@ -143,7 +144,7 @@ experimentally-measured resistance, while PermLLM and the cryptographic-retrieva
 schemes rest on hardness assumptions and the TEE designs on hardware. Several
 heuristic and cryptographic schemes alike anchor trust in \emph{nothing}
 (trust anchor \emph{none}), so this distinction is invisible without the basis
-axis---yet it is exactly what the vignette (\cref{ssec:vignette}) turns on.
+axis---yet it is exactly what the case study (\cref{app:validation}) turns on.
 
 \begin{table*}[t]
   \centering
@@ -220,14 +221,11 @@ is \emph{calibrated} to the deployment---an argument that right-sizes security r
 than relaxing it, and that we apply when scoring families in \cref{sec:synthesis}.
 
 We treat the budget as an explicit, per-scheme parameter rather than a hidden
-constant. Crucially, the ``what breaks'' vignette of \cref{ssec:vignette} is
-conducted \emph{strictly within AloePri's own constrained-attacker regime}: the
-attacker is white-box on weights and method, is denied the secret permutation,
-and operates under the same compute and observation horizon AloePri's own
-evaluation permits. A break under those conditions is a break by the victim's
-own standard, not an artefact of an inflated adversary. \needswork{state the
-exact observation horizon and compute of ArrowMatch / Sequence-IMA from the
-parent-repo evals, and confirm each stays within AloePri's reported regime}
+constant. Crucially, the ``what breaks'' case study of \cref{app:validation} attacks each
+scheme \emph{strictly within its own constrained-attacker regime}: the attacker is white-box
+on weights and method, is denied the per-session secret, and operates under the same compute
+and observation horizon the scheme's own evaluation permits. A break under those conditions is
+a break by the victim's own standard, not an artefact of an inflated adversary.
 
 \subsection{Cost: Performance and Fidelity}
 \label{sec:comparison}

@@ -25,8 +25,8 @@ attestation, a hardware-specific space systematized separately~\citep{accel_tee_
 That Tier-3 hardware requirement---not the performance---is what motivates the Tier-2
 commodity-GPU hybrid split (\cref{sec:hybrid}). The strongest adversary in our corpus
 appears here: Opal~\cite{kaviani_opal} assumes a \emph{malicious host} and additionally
-hides access patterns with ORAM. On the deployment-readiness criteria of
-\cref{sec:intro}, pure TEE scores highest on performance and fidelity, but its Tier-3
+hides access patterns with ORAM. On the deployment-readiness criteria, pure TEE scores
+highest on performance and fidelity, but its Tier-3
 hardware dependence is the binding deployability constraint (\cref{sec:synthesis}).
 
 \subsection{Approach}
@@ -37,7 +37,7 @@ hardware dependence is the binding deployability constraint (\cref{sec:synthesis
 \needswork{describe TEE/CVM model, attestation, the trust shift to the silicon vendor}
 
 \subsection{Representative Schemes}
-\begin{table}[t]
+\begin{table}[H]
   \centering \footnotesize
   \caption{TEE-based schemes.}
   \label{tab:tee}

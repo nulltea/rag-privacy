@@ -19,7 +19,7 @@ today. Because MPC/FHE inference protocols are the subject of dedicated recent
 surveys~\citep{li_pti_survey,pti_survey_2024}, we treat that sub-family briefly---through a few
 frontier exemplars---and focus on cryptographic retrieval and storage,
 which those surveys do not cover.
-On the deployment-readiness criteria of \cref{sec:intro}, cryptography scores highest on
+On the deployment-readiness criteria, cryptography scores highest on
 threat-model fit and fidelity (exact computation under a TCB of none or non-collusion)
 but lowest on performance for inference; its retrieval variants fare materially better
 (\cref{sec:synthesis}).
@@ -40,7 +40,7 @@ above plaintext in latency and exchanges hundreds of MB to GBs per token or infe
 (MPC) or near-exact (FHE) fidelity. None of these papers reports overhead against plaintext---they
 benchmark against prior \emph{secure} schemes---so the absolute figures in \cref{tab:crypto-inf} are paper-reported
 where available and otherwise recovered by one-hop extrapolation (\cref{sec:comparison}).
-\begin{table}[t]
+\begin{table}[H]
   \centering \footnotesize
   \caption{Cryptographic-inference exemplars. Latency and communication are paper-reported where
     available and \emph{extrapolated} ($\dagger$; 1-hop via the cited baseline, \cref{sec:comparison})

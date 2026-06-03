@@ -40,8 +40,20 @@ Legend: ✅ done · 🟡 partial · ⏳ pending (staged) · ℹ️ answered, no 
 | 31 | §6 | DP intro misses retrained-model factor | ✅ | Added the embedding-DP retraining divide. |
 | + | §3 | **NEW:** Table 6 drifted off Table 5's page | ✅ | `[H]` (float package) pins both consecutively. |
 
-## Still open (the staged structural items)
-- **Vignette restructure** → appendix (covers #9, #16, #19-residual, #30, and the "vignette" term rename).
-- **Table-placement pass** (#24) — §4 TEE table + a general sweep.
-- **AloePri/STIP "only two?"** (#13) — representative-table clarification.
-- **Broad retroactive-ref reduction** (#15, #23).
+## Resolution — all four structural items now done
+
+- **Vignette restructure** (#9, #16, #19-residual, #30): moved §5 vignette → appendix
+  `\section{Attack Validation of Deployment-Ready Schemes}` (`app:validation`), generalized to the
+  heuristic-basis deployment-ready set (AloePri, SGT, OSNIP, GELO, ObfuscaTune) with a reproduction
+  protocol + `tab:validation`; recovery figures `\needswork` (companion-owned). "vignette"→"case
+  study" everywhere; verbose surface paragraph removed; all cross-refs → `app:validation`.
+- **Table-placement** (#24): per-family scheme tables pinned with `[H]` (float pkg) so none float
+  ahead of their section; full-width `table*` summaries left as `[t]`.
+- **AloePri/STIP "only two?"** (#13): §2 landscape now notes the table is representative, full
+  rosters in §3–§7.
+- **Retroactive-ref reduction** (#15, #23): trimmed the recurring "deployment-readiness criteria of
+  §1" backward cite in §3/§4/§5/§6 framings (kept the load-bearing §8 scoring-table ref).
+
+Build after all items: 22 pp, 0 undefined refs/cites; only the pre-existing ~43 pt `tab:refmetrics`
+overfull. Recovery figures in `tab:validation` and the companion-paper forward citation remain the
+sole `\needswork` for this review round.

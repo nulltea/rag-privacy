@@ -9,9 +9,9 @@ transforms, covariant (data+weight) masking, null-space projection.
 It is the cheapest family in our taxonomy (near-plaintext cost, no trusted hardware---Tier~1),
 which is precisely why its privacy claims deserve the most scrutiny: the obfuscation
 is \emph{fixed}, so a white-box adversary can analyze it in advance. We make that scrutiny
-concrete in \cref{ssec:vignette}, and the published inversions in
+concrete in \cref{app:validation}, and the published inversions in
 \cref{sec:synthesis} show several static schemes recover far more plaintext than
-their authors report. On the deployment-readiness criteria of \cref{sec:intro},
+their authors report. On the deployment-readiness criteria,
 obfuscation leads on performance and fidelity, but \emph{threat-model fit} is its weak
 axis: because the transform is fixed, a white-box adversary can analyze it in advance, so its
 real protection is often weaker than reported (\cref{sec:synthesis}). A second deployment
@@ -27,7 +27,7 @@ which require a bespoke serving path.
 \needswork{describe the obfuscation family and the privacy-vs-accuracy tension}
 
 \subsection{Representative Schemes}
-\begin{table}[t]
+\begin{table}[H]
   \centering \footnotesize
   \caption{Static-obfuscation schemes.}
   \label{tab:obfusc}
@@ -63,33 +63,5 @@ permutation~\citep{hnm}, ArrowMatch/TSQP weight recovery~\citep{arrowmatch,tsqp}
 deeper-layer inversion~\citep{depth_false_privacy}, and GELO's Gram-matrix
 leak~\citep{belikov_gelo}}
 
-\subsection{Vignette: Static Obfuscation Under the Realistic Threat Model}
-\label{ssec:vignette}
-% PARTITION RULE (decision 3.5): the SoK claims the FINDING ONLY --- the
-% vulnerability EXISTS and its magnitude --- as a data point for the gap-map.
-% The attack METHODOLOGY (ArrowMatch/Sequence-IMA) and the DEFENSE (hybrid
-% design) are claimed in the companion paper, NOT here. Do not include method
-% detail beyond what is needed to state the finding.
-\label{sec:threat-ours}%
-The adversary here is a single, deliberately modest point in the security space
-(\cref{sec:threat}): an honest-but-curious cloud operator, white-box on the public model
-and the obfuscation method, denied only the ephemeral secret, observing the obfuscated
-service I/O, with side channels out of scope and a constrained, realistic budget; its
-goal is to recover the input prompt. One subtlety, from the confidentiality-scope axis,
-recurs throughout the taxonomy: two schemes can face the same adversary yet expose
-entirely different residual-leakage surfaces---a full-model obfuscation scheme exposes
-obfuscated I/O and weights, whereas a hybrid-split design (\cref{sec:hybrid}) exposes
-obfuscated \emph{activations} on an untrusted accelerator. The surface is not
-incidental---it \emph{is} the defence, and it is what an attack ultimately targets. A
-fair comparison therefore fixes the adversary, the goal, and the attack family while
-letting the surface vary by architecture; the head-to-head evaluation built on this
-principle, and the defense it motivates, are the subject of the companion paper.
-
-AloePri reports $<$15\% token recovery against the attack suite it evaluates
-(ISA/IMA/NN/VMA/IA). We find that, \emph{within AloePri's own constrained-%
-attacker regime} (\cref{sec:threat-budget}), attacks it did not run recover
-substantially more, so its reported resistance overstates real protection.
-\dnote{state the headline recovery number only; cite the companion paper for the
-attack method + a defense. This is the one original empirical result in the SoK.}
-\needswork{insert the headline recovery figure from the companion-paper evals;
-add the forward citation to the companion paper}
+% Validation moved to App.~\ref{app:validation}: decoupled from static-obfuscation-only and
+% generalized to the heuristic-basis deployment-ready set. The §5 framing above forward-refs it.
