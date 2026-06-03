@@ -84,6 +84,26 @@ pub use crate::rng::MaskSeed;
 /// amortises spawn cost.
 pub(crate) const FWHT_RAYON_WORK_THRESHOLD: usize = 65_536;
 
+/// Minimum number of rayon chunks a stage must split into before the
+/// parallel path engages. The element-count threshold alone misfires at
+/// **short-n, wide-d** shapes — the decode mask is n=16, where the first
+/// radix-8 stage has 2 chunks and the radix-2 tail has **one** — so
+/// `par_chunks_mut` paid a fork-join for ≤2-way parallelism on ~µs of
+/// work. Measured (hd3_decode_shape_spike, n=16): d=4095 serial
+/// 22 µs/call vs d=4096 rayon 347 µs/call — a 15.7× cliff at the
+/// threshold. Requiring ≥4 chunks keeps the parallel path for the
+/// tall prefill-era shapes (n ≥ 2048 → ≥ 64 chunks at h=1) and runs
+/// short-n stages (and the final 1-chunk tails of any n) serially.
+const FWHT_MIN_PAR_CHUNKS: usize = 4;
+
+/// Row-count floor for parallelising the **diagonal** passes
+/// (`apply_diag_*_inplace_slice`), which chunk per row. Same short-n
+/// misfire as the FWHT gate: at the decode shape (n=16) a diag pass is
+/// a ~µs streaming negate over ≤16 trivial chunks, so the fork-join
+/// dominates. Tall shapes (≥ 64 rows — the shapes the element threshold
+/// was originally tuned on) keep the parallel path unchanged.
+const FWHT_MIN_PAR_ROWS: usize = 64;
+
 /// When `h * 8 <= n`, `fwht_rows_inplace` fuses three radix-2 stages
 /// (at distances `h`, `2h`, `4h`) into one radix-8 pass. The fused
 /// butterfly takes 8 rows, runs three levels of add/sub in registers,
@@ -308,6 +328,30 @@ impl Hd3Mask {
         fwht_rows_inplace_slice(buf, self.n, cols);
     }
 
+    /// **Spike microbench** — HD₃ unapply at the **decode shape**
+    /// (stacked_n = 16, the per-sequence decode mask) across the real
+    /// offload output widths, straddling `FWHT_RAYON_WORK_THRESHOLD`
+    /// (65 536 elements = d 4096 at n=16). At n=16 the FWHT has at most
+    /// 2 chunks per stage, so the rayon path buys ≤2-way parallelism per
+    /// ~µs-scale stage while paying a fork-join per pass — this bench
+    /// measures the discontinuity at the threshold to quantify the
+    /// misfire. Run:
+    /// `cargo test --release -p gelo-protocol --lib hd3_decode_shape_spike -- --ignored --nocapture`
+    #[cfg(test)]
+    pub(crate) fn spike_unapply_rate(&self, d: usize, reps: usize) -> f64 {
+        use rand::SeedableRng;
+        use rand_distr::{Distribution, StandardNormal};
+        let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(42);
+        let normal = StandardNormal;
+        let mut buf: Vec<f32> = (0..self.n * d).map(|_| normal.sample(&mut rng)).collect();
+        self.unapply_in_place_slice(&mut buf, d); // warmup
+        let t = std::time::Instant::now();
+        for _ in 0..reps {
+            self.unapply_in_place_slice(&mut buf, d);
+        }
+        t.elapsed().as_secs_f64() / reps as f64
+    }
+
     /// bf16 in/out variant of [`Self::apply_in_place_slice`] — phase 3a
     /// of the bf16 activation pipeline.
     ///
@@ -425,7 +469,12 @@ fn fwht_rows_inplace_slice(slice: &mut [f32], n: usize, d: usize) {
             // Across groups (different `j`), the row-index sets are
             // pairwise disjoint. Across chunks, `par_chunks_mut`
             // guarantees disjointness.
-            if use_rayon {
+            //
+            // Parallelise only when this stage actually splits into
+            // enough chunks to amortise the fork-join — the decode
+            // shape (n=16) has ≤2 chunks and the rayon path is a
+            // measured ~15× regression there (FWHT_MIN_PAR_CHUNKS).
+            if use_rayon && slice.len() / chunk_size >= FWHT_MIN_PAR_CHUNKS {
                 slice.par_chunks_mut(chunk_size).for_each(|chunk| {
                     process_stage_chunk_radix8(chunk, h, d, use_avx512, use_avx2);
                 });
@@ -446,7 +495,10 @@ fn fwht_rows_inplace_slice(slice: &mut [f32], n: usize, d: usize) {
         // butterflies within a stage the slices are also disjoint
         // (different `(i + j)` ranges). `par_chunks_mut` guarantees
         // disjoint chunks across rayon threads.
-        if use_rayon {
+        //
+        // Same chunk-parallelism gate as the radix-8 branch: the last
+        // tail stage of *any* n has 1–2 chunks and never benefits.
+        if use_rayon && slice.len() / chunk_size >= FWHT_MIN_PAR_CHUNKS {
             slice.par_chunks_mut(chunk_size).for_each(|chunk| {
                 process_stage_chunk(chunk, h, d, use_avx512, use_avx2);
             });
@@ -955,7 +1007,7 @@ fn apply_diag_inplace_slice(slice: &mut [f32], d: &[f32], cols: usize) {
         return;
     }
     let total_work = n_rows.saturating_mul(cols);
-    if total_work >= FWHT_RAYON_WORK_THRESHOLD {
+    if total_work >= FWHT_RAYON_WORK_THRESHOLD && n_rows >= FWHT_MIN_PAR_ROWS {
         slice
             .par_chunks_mut(cols)
             .zip(d.par_iter())
@@ -1007,7 +1059,7 @@ fn apply_diag_scaled_inplace_slice(slice: &mut [f32], d: &[f32], cols: usize, fa
         return;
     }
     let total_work = n_rows.saturating_mul(cols);
-    if total_work >= FWHT_RAYON_WORK_THRESHOLD {
+    if total_work >= FWHT_RAYON_WORK_THRESHOLD && n_rows >= FWHT_MIN_PAR_ROWS {
         slice
             .par_chunks_mut(cols)
             .zip(d.par_iter())
@@ -1307,5 +1359,24 @@ mod tests {
             "hd3 bf16 round-trip relative rms at long-n: {:.3e}",
             err_rms / target_rms
         );
+    }
+
+    /// Decode-shape HD₃ spike: per-call unapply cost at stacked_n=16
+    /// across the real offload widths, straddling the rayon threshold
+    /// (d=4096 ⇒ 65 536 elements). A discontinuity at d≈4096 confirms
+    /// the fork-join misfire (chronicle §13 follow-up).
+    #[test]
+    #[ignore = "perf microbench: HD₃ unapply at the decode shape (n=16), rayon-threshold discontinuity"]
+    fn hd3_decode_shape_spike() {
+        let mut rng = ChaCha20Rng::from_seed([5u8; 32]);
+        let mask = Hd3Mask::fresh(16, &mut rng);
+        eprintln!("=== HD₃ decode-shape spike (n=16, threshold at d=4096) ===");
+        eprintln!("{:>7}  {:>10}  {:>9}  {}", "d", "per-call", "ns/elem", "path");
+        for &d in &[1024usize, 2560, 4095, 4096, 4097, 8192, 9728] {
+            let per = mask.spike_unapply_rate(d, 200);
+            let ns = per * 1e9 / (16 * d) as f64;
+            let path = if 16 * d >= crate::hd3::FWHT_RAYON_WORK_THRESHOLD { "rayon" } else { "serial" };
+            eprintln!("{:>7}  {:>8.1} µs  {:>7.2}  {}", d, per * 1e6, ns, path);
+        }
     }
 }

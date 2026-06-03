@@ -984,3 +984,83 @@ R4 async overlap > FLOP-reducing mask levers**; bf16 read-back stays as a
 landed ~9% on top.
 
 **Artefacts:** `bench-results/gelo-b1-bf16on-native-n{2048,8192}-2026-06-03.log`.
+
+## 15. HD₃ rayon misfire fix (2026-06-03) — decode −45%, and the DCT-IV size finding
+
+Investigating "what did we miss in the mask transforms" surfaced two
+shape-sensitivity bugs/levers, one now fixed:
+
+### 15.1 The decode HD₃ cost was fork-join overhead, not transform
+
+The decode mask is HD₃ at **stacked_n=16** (1+k, pow2). The FWHT and the
+diagonal passes gated rayon on **total elements** (≥65 536), tuned for
+tall prefill-era shapes — but at n=16 the first radix-8 stage splits into
+**2 chunks** and the radix-2 tail into **one**, and a diag pass is ≤16
+trivial row-negates. So the wide decode outputs (gate/up 16×9728, Q
+16×4096) paid ~6 fork-joins per unapply for ≤2-way parallelism on ~µs of
+work. Measured discontinuity (`hd3_decode_shape_spike`, n=16):
+
+| d | before | after fix | path before |
+|---|--:|--:|---|
+| 4095 | 22.1 µs (0.34 ns/elem) | 23.7 µs | serial |
+| **4096** | **347.3 µs (5.30 ns/elem)** | **22.7 µs** | rayon (**15.7× cliff**) |
+| 9728 | 506.7 µs | **53.4 µs** | rayon (~10×) |
+
+**Fix:** per-stage chunk-parallelism gate (`FWHT_MIN_PAR_CHUNKS = 4`) on
+the FWHT stages + a row floor (`FWHT_MIN_PAR_ROWS = 64`) on the diag
+passes. Tall shapes (≥64 rows) keep the parallel path bit-for-bit; the
+change is dispatch-only (no numerics). All HD₃ round-trip/parity tests
+pass unchanged.
+
+**Production impact (n=2048 B=1, native, bf16-on):**
+
+| | before | after | Δ |
+|---|--:|--:|--:|
+| `gelo:mask_unapply:hd3` (8096 calls) | 1710 ms | **206 ms** | **−88%** |
+| `gelo:mask_apply:hd3` (4640 calls) | 947 ms | **108 ms** | **−89%** |
+| **decode wall** | 5.77 s | **3.18 s** | **−45%** |
+| decode tok/s | 5.5 | **10.1** | 1.8× |
+| prefill wall | 13.86 s | 13.88 s | unchanged ✓ |
+
+Cumulative decode this session: 6.61 s (SSE2) → 5.77 s (native) →
+**3.18 s** (FWHT fix) = **2.1×**. The decode bottleneck is now the
+resident-cover attention (21%) + GPU matmul round-trip (34%) + shield
+(13%); the HD₃ mask is down to ~8%.
+
+**Verdict on bf16-native HD₃ (§4.E.1):** retired. The HD₃ cost was
+neither compute- nor memory-bound but **overhead-bound**; after the fix
+the FWHT is an L2-resident streaming add/sub kernel at ~0.34 ns/elem
+where bf16 storage would trade halved bytes for per-stage widen/narrow
+ops — at best a wash on a now-~300 ms bucket, with extra per-stage
+rounding. Not worth pursuing.
+
+### 15.2 DCT-IV is size-pathological — smooth-size padding is worth ~−18% prefill
+
+`stacked_n = n_data + k` lands on whatever factorisation chance gives.
+The production prefill size **2064 = 2⁴·3·43** is the worst in its
+neighbourhood (rustdct hits the 43-prime path). Size sweep
+(`DCT4_BENCH_N`, full unapply, native, ns/elem at d=9728):
+
+| stacked_n | factors | ns/elem | vs 2064 |
+|---|---|--:|--:|
+| 2048 | 2¹¹ | 0.974 | 1.32× |
+| **2064 (current)** | 2⁴·3·**43** | **1.285** | — |
+| 2080 | 2⁵·5·13 | 1.050 | 1.22× |
+| **2112** | 2⁶·3·11 | **0.748** | **1.72×** |
+| 2160 | 2⁴·3³·5 | 0.733 | 1.75× |
+| 2304 | 2⁸·3² | 0.701 | 1.83× |
+
+Padding 2064 → 2112 (+2.3% rows) is **1.68× faster per call including
+the extra rows**. The DCT-IV buckets are ~43% of native prefill →
+**≈ −18% prefill wall**, exact and security-neutral (pad rows are extra
+shield/zero cover, sliced off after unapply). **Not yet implemented** —
+needs smooth-size rounding in the stacked_n sizing + pad-row fill on the
+DCT-IV path (the HD₃ path already has the pad machinery). This is now the
+top prefill lever, ahead of R4 async overlap. Deeper variants if more is
+needed: batched DCT across columns (FFTW/AOCL-FFT `REDFT11` + `howmany` —
+attacks the 95%-FFT share, we already vendor AOCL) and a security-gated
+3→2 cascade-stage reduction (−33% FFT).
+
+**Artefacts:** `bench-results/gelo-b1-fwhtfix-native-n2048-2026-06-03.log`;
+spikes `hd3_decode_shape_spike` (hd3.rs), `dct4_cascade_vectorize_spike`
+(`DCT4_BENCH_N` sweep).
