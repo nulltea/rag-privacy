@@ -91,9 +91,12 @@ additionally shield a proprietary model from the cloud); or the access pattern
 over a corpus (Opal and the RAG-storage schemes). Its dual is the \emph{residual
 leakage}---what the adversary still observes despite the scheme: obfuscated
 service I/O (AloePri), mixed activations in untrusted VRAM (GELO, ObfuscaTune,
-the TEE-split designs), storage access patterns (Caprise \citep{ye_caprise},
-RemoteRAG \citep{cheng2025remoterag}, Opal, Pacmann), or ciphertexts plus
-distance structure (Caprise's DCPE). Microarchitectural, cache, timing, and power
+the TEE-split designs), bounded storage access patterns (RemoteRAG
+\citep{cheng2025remoterag}), or ciphertexts plus distance structure (Caprise's
+DCPE \citep{ye_caprise}). The access-pattern-hiding schemes (Opal, Pacmann,
+Compass) sit on the protection side of this dual, not the leakage side: ORAM and
+PIR are precisely what reduce their residual leak to an operation type or
+nothing at all. Microarchitectural, cache, timing, and power
 side channels are a residual-leakage category that \emph{every} surveyed scheme
 places out of scope---a uniformity we elevate to a finding
 (\cref{ssec:sidechannel}) rather than carry as a per-scheme cell. Two schemes
@@ -162,20 +165,20 @@ axis---yet it is exactly what the vignette (\cref{ssec:vignette}) turns on.
     \midrule
     \multicolumn{7}{@{}l}{\textit{Static obfuscation}}\\
     AloePri      & HbC        & none           & wb+s & in+out      & obf.\ I/O+wts & heur. \\
-    GELO         & HbC        & GPU-TEE        & wb   & input       & activations   & heur. \\
     STIP         & HbC        & none (3-party) & wb   & input       & activations   & heur. \\
-    ObfuscaTune  & HbC        & CPU/GPU-TEE    & wb   & data+model  & activations   & heur.+HW \\
     \midrule
     \multicolumn{7}{@{}l}{\textit{TEE / hybrid}}\\
+    GELO         & HbC        & GPU-TEE        & wb   & input       & activations   & heur.+HW \\
+    ObfuscaTune  & HbC        & CPU/GPU-TEE    & wb   & data+model  & activations   & heur.+HW \\
     TwinShield   & HbC+verif. & CPU-TEE + SS   & wb   & data+model  & activations   & crypto+HW \\
-    Opal         & malicious  & TDX + GPU-TEE  & ---  & data+access & access pat.   & HW \\
+    Opal         & malicious  & TDX + GPU-TEE  & ---  & data+access & op-type only  & crypto+HW \\
     PipeLLM      & HbC        & GPU-TEE        & ---  & data+model  & PCIe act.     & HW \\
     \midrule
     \multicolumn{7}{@{}l}{\textit{Cryptographic / DP / RAG}}\\
-    PermLLM      & HbC (non-coll.) & none      & wb   & input        & shares       & crypto \\
+    PermLLM      & HbC        & non-coll.\ 3PC & wb   & input        & shares       & crypto+heur. \\
     RemoteRAG    & HbC        & none           & ---  & query        & query+ap     & DP \\
-    Caprise      & HbC        & none           & ---  & doc content  & ct+dist      & crypto* \\
-    Pacmann      & HbC        & none (PIR)     & ---  & query+access & access pat.  & crypto \\
+    Caprise      & HbC        & none           & ---  & doc+query    & ct+dist      & crypto*+DP \\
+    Pacmann      & HbC        & none (PIR)     & ---  & query+access & none (pub.\ DB) & crypto \\
     Compass      & malicious  & none (clt.\ ORAM) & --- & query+access & op-type only  & crypto \\
     \bottomrule
   \end{tabular}
