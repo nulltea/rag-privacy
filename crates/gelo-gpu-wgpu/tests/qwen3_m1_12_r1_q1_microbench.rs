@@ -303,6 +303,23 @@ fn batch_size_from_env() -> usize {
         .unwrap_or(8)
 }
 
+/// Force the **batched** forward path (`run_prefill_batched` /
+/// `run_decode_step_batched`) even at B=1. The single-stream path
+/// (`run_prefill` / `run_decode_step`, used by default when B=1) runs
+/// Global attention **in-TEE** (`tee:attn_permuted_cached` /
+/// `tee:attn_cached`); only the batched path carries the secure
+/// GPU-offloaded attention (`tee:attn_prefill_offload` +
+/// `prefill_cover:*` for prefill, `tee:attn_resident_cover` +
+/// `cover:*` for decode). Set `GELO_BENCH_FORCE_BATCHED=1` to measure a
+/// single sequence (B=1) *through* the offload path — a batch of one
+/// driven by the batched machinery. No effect when B>1 (already
+/// batched).
+fn force_batched_from_env() -> bool {
+    std::env::var("GELO_BENCH_FORCE_BATCHED")
+        .map(|v| v != "0" && !v.is_empty())
+        .unwrap_or(false)
+}
+
 /// Replica of the in-TEE `compute_logits` loop, wrapped in the same
 /// `profile::time("tee:compute_logits", …)` bucket the library uses.
 /// Inlined here so the bench can drive prefill and decode loops
@@ -605,10 +622,16 @@ fn gelo_llm_prefill_decode_breakdown() -> Result<()> {
     let n_prompt = prompt_size_from_env();
     let max_tokens = max_tokens_from_env();
     let batch_size = batch_size_from_env();
+    // Route through the batched forward path (which carries the secure
+    // GPU-offloaded attention) whenever B>1 OR the force knob is set.
+    // At B=1 with the knob, this measures a single sequence *through*
+    // the offload — the single-stream path would otherwise run
+    // attention in-TEE. See `force_batched_from_env`.
+    let use_batched = batch_size > 1 || force_batched_from_env();
 
     eprintln!("=== Gelo-LLM per-op breakdown — prefill + decode (R3 LM-head GPU offload) ===");
     eprintln!(
-        "variant: {:?} ({})  B: {batch_size}  n_prompt: {n_prompt}  max_tokens: {max_tokens}",
+        "variant: {:?} ({})  B: {batch_size}  n_prompt: {n_prompt}  max_tokens: {max_tokens}  batched_path: {use_batched}",
         variant,
         variant.hf_model_id(),
     );
@@ -645,7 +668,7 @@ fn gelo_llm_prefill_decode_breakdown() -> Result<()> {
     // the decode-step autotune (autotune keys on shape, not token count).
     if std::env::var("GELO_BENCH_WARMUP").is_ok() {
         eprintln!("[warmup] discarded forward to populate autotune cache…");
-        let _ = if batch_size == 1 {
+        let _ = if !use_batched {
             run_prefill_decode(
                 "warmup", &cfg, &weights, &rope, &mut exec, &single_prompt, 2, true,
             )?
@@ -660,7 +683,7 @@ fn gelo_llm_prefill_decode_breakdown() -> Result<()> {
     // R3 (LM-head GPU offload) is the production default; this bench
     // profiles that single path — one prefill of `n`, then `K` decode
     // steps.
-    let (prefill, decode) = if batch_size == 1 {
+    let (prefill, decode) = if !use_batched {
         run_prefill_decode(
             "R3", &cfg, &weights, &rope, &mut exec, &single_prompt, max_tokens, true,
         )?
@@ -807,32 +830,66 @@ fn humaneval_gate_generate() -> Result<()> {
     let mut prompt_lens: Vec<usize> = Vec::new();
     let mut gen_lens: Vec<usize> = Vec::new();
 
+    // Batch size for generation. GELO decode is per-row (mask-cover)
+    // bound, not weight-bound, so batching amortises only the small
+    // fixed per-step cost (~1.3× throughput ceiling, not B×); and
+    // `generate_batched` has no continuous batching (a batch runs until
+    // its *longest* generator finishes — finished sequences idle).
+    // B=8 (the canonical production shape) captures the fixed-cost
+    // amortisation; **length-sorting** the prompts keeps each batch's
+    // generation durations similar to limit the idle-slot waste.
+    let he_batch: usize = std::env::var("GELO_HE_BATCH")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8)
+        .max(1);
+
+    // Collect + tokenise all prompts first, then sort by prompt length
+    // so each fixed-size batch groups similar-length sequences.
+    let mut items: Vec<(u64, String, Vec<u32>)> = Vec::new();
     for line in subset_txt.lines().filter(|l| !l.trim().is_empty()).take(limit) {
         let v: serde_json::Value = serde_json::from_str(line)?;
         let idx = v["idx"].as_u64().unwrap_or(0);
         let task_id = v["task_id"].as_str().unwrap_or("").to_string();
         let prompt = v["prompt"].as_str().unwrap_or("").to_string();
-
         let ids = tokenizer.encode(&prompt, 2048)?;
-        let n_prompt = ids.len();
+        items.push((idx, task_id, ids));
+    }
+    let mut order: Vec<usize> = (0..items.len()).collect();
+    order.sort_by_key(|&i| items[i].2.len());
+    eprintln!("[humaneval] B={he_batch}, {} prompts → {} batches (length-sorted)",
+        items.len(), items.len().div_ceil(he_batch));
 
+    // (idx, task_id, completion, n_prompt, gen_len, eos) — written in idx order.
+    let mut results: Vec<(u64, String, String, usize, usize, bool)> = Vec::new();
+    for chunk in order.chunks(he_batch) {
+        let prompts: Vec<Vec<u32>> = chunk.iter().map(|&i| items[i].2.clone()).collect();
         profile::reset_all();
-        let outs = generation::generate_batched(&cfg, &weights, &rope, &mut exec, &[ids], &gen_cfg)?;
+        let outs = generation::generate_batched(&cfg, &weights, &rope, &mut exec, &prompts, &gen_cfg)?;
         profile::aggregate_threads();
         let snap = profile::snapshot();
         cum.merge(&snap);
+        for (k, &i) in chunk.iter().enumerate() {
+            let (idx, task_id, ids) = &items[i];
+            let completion = tokenizer.decode(&outs[k].tokens, true)?;
+            prompt_lens.push(ids.len());
+            gen_lens.push(outs[k].tokens.len());
+            results.push((*idx, task_id.clone(), completion, ids.len(), outs[k].tokens.len(), outs[k].stopped_on_eos));
+        }
+        if profile_each {
+            snap.dump(&format!("HumanEval batch of {} (prompt lens {}..{})",
+                chunk.len(), items[chunk[0]].2.len(), items[*chunk.last().unwrap()].2.len()));
+        }
+    }
 
-        let completion = tokenizer.decode(&outs[0].tokens, true)?;
-        prompt_lens.push(n_prompt);
-        gen_lens.push(outs[0].tokens.len());
-
+    // Write completions + log in idx order (score.py keys on idx/task_id,
+    // but idx order keeps the file diffable against earlier runs).
+    results.sort_by_key(|r| r.0);
+    for (idx, task_id, completion, n_prompt, gen_len, eos) in &results {
         let rec = serde_json::json!({ "idx": idx, "task_id": task_id, "completion": completion });
         writeln!(out, "{}", serde_json::to_string(&rec)?)?;
-        eprintln!("[humaneval] {idx:>2} {task_id} prompt={n_prompt} tok → {} tok{}", outs[0].tokens.len(),
-            if outs[0].stopped_on_eos { " (eos)" } else { "" });
-        if profile_each {
-            snap.dump(&format!("HumanEval idx={idx} (prompt={n_prompt} tok, gen={} tok)", outs[0].tokens.len()));
-        }
+        eprintln!("[humaneval] {idx:>2} {task_id} prompt={n_prompt} tok → {gen_len} tok{}",
+            if *eos { " (eos)" } else { "" });
     }
 
     // Synthesised per-op table over the run + prompt-length distribution (so the

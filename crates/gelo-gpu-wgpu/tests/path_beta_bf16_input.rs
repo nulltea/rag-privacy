@@ -120,3 +120,55 @@ fn matmul_many_bf16_input_matches_matmul_many_at_bf16_floor() {
         eprintln!("Path β matmul_many[{i}] parity: max_abs_delta = {d:.6} (tol {tol})");
     }
 }
+
+/// **bf16-output** path: `matmul_many_bf16_out` (f32 input, bf16
+/// outputs) must match the f32-output `matmul_many` within bf16-floor.
+/// Both run the same f16 GPU matmul; the only difference is whether the
+/// read-back is narrowed to f32 or bf16 — so the delta is the f16→bf16
+/// host narrowing on the result, bounded by bf16's 8-bit mantissa.
+#[test]
+#[ignore]
+fn matmul_many_bf16_out_matches_matmul_many_at_bf16_floor() {
+    let m = 64;
+    let k = 768;
+    let n = 768;
+    let weights = [
+        (WeightHandle::new(0, WeightKind::Q), make_input(k, n, 1)),
+        (WeightHandle::new(0, WeightKind::K), make_input(k, n, 2)),
+        (WeightHandle::new(0, WeightKind::V), make_input(k, n, 3)),
+    ];
+    let input_f32 = make_input(m, k, 7);
+
+    let mut engine = WgpuVulkanEngine::new_fp16().expect("Vulkan adapter (fp16)");
+    for (h, w) in &weights {
+        engine.register_weight(*h, w.view()).expect("register weight");
+    }
+    let handles: Vec<WeightHandle> = weights.iter().map(|(h, _)| *h).collect();
+    assert!(engine.prefers_bf16_output(), "fp16 engine should prefer bf16 output");
+
+    let out_f32 = engine
+        .matmul_many(&handles, input_f32.view())
+        .expect("matmul_many f32-output path");
+    let out_bf16 = engine
+        .matmul_many_bf16_out(&handles, input_f32.view())
+        .expect("matmul_many_bf16_out path");
+
+    assert_eq!(out_f32.len(), out_bf16.len(), "output count mismatch");
+    // The output is narrowed f32→bf16, so the error is *relative* to the
+    // output magnitude (bf16 has 8 effective mantissa bits → relative
+    // rounding ≤ 2⁻⁸ ≈ 0.004). Use a 1% relative bound vs the max output
+    // magnitude (an absolute bound would falsely fail on large logits).
+    let rel_tol = 1e-2;
+    for (i, (a, b)) in out_f32.iter().zip(out_bf16.iter()).enumerate() {
+        assert_eq!(a.dim(), b.dim(), "output {i} shape mismatch");
+        let b_f32 = b.mapv(|v| v.to_f32());
+        let d = max_abs_delta(a, &b_f32);
+        let max_mag = a.iter().fold(0.0_f32, |m, &v| m.max(v.abs())).max(1e-6);
+        let rel = d / max_mag;
+        assert!(
+            rel < rel_tol,
+            "matmul_many_bf16_out vs matmul_many output {i}: max abs delta {d} (rel {rel}) exceeds rel tolerance {rel_tol} (max_mag {max_mag})"
+        );
+        eprintln!("bf16-out matmul_many[{i}] parity: max_abs_delta = {d:.6}, rel = {rel:.6} (rel tol {rel_tol})");
+    }
+}

@@ -1276,4 +1276,103 @@ mod tests {
             err_rms / target_rms
         );
     }
+
+    /// **Spike microbench** (chronicle §13.3 follow-up): is the DCT-IV
+    /// cascade unapply worth vectorising? Reports (1) the full
+    /// `unapply_in_place_slice` rate at the three real offload output
+    /// widths, and (2) a per-tile attribution across the three cost
+    /// centres — the rustdct FFT (already SIMD), our diagonal multiplies
+    /// (`apply_{sign,scaled}_diag_in_tile`), and the tile transpose
+    /// (`copy_tile_in/out`, scalar gather/scatter). The split tells us
+    /// how much headroom vectorising *our* glue can recover vs the
+    /// FFT-bound floor.
+    ///
+    /// Run: `cargo test --release -p gelo-protocol --lib dct4_cascade_vectorize_spike -- --ignored --nocapture`
+    #[test]
+    #[ignore = "perf microbench: DCT-IV cascade unapply rate + FFT/diag/transpose attribution"]
+    fn dct4_cascade_vectorize_spike() {
+        use std::time::Instant;
+        let mut rng = ChaCha20Rng::from_seed([7u8; 32]);
+        let n: usize = std::env::var("DCT4_BENCH_N")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2064);
+        let mask = Dct4Mask::fresh(n, &mut rng);
+        eprintln!("=== DCT-IV cascade unapply spike (n={n}) ===");
+
+        // --- (1) full unapply rate at the real offload output widths ---
+        // 1024 = kv_dim (K, V), 4096 = q_dim (Q), 9728 = intermediate
+        // (gate, up). These are the per-output unapply widths at Qwen3-4B.
+        for &d in &[1024usize, 4096, 9728] {
+            let mut buf: Vec<f32> = (0..n * d)
+                .map(|_| StandardNormal.sample(&mut rng))
+                .collect();
+            mask.unapply_in_place_slice(&mut buf, d); // warmup
+            let t0 = Instant::now();
+            mask.unapply_in_place_slice(&mut buf, d);
+            let one = t0.elapsed().as_secs_f64();
+            let reps = ((1.0 / one).round() as usize).clamp(3, 2000);
+            let t = Instant::now();
+            for _ in 0..reps {
+                mask.unapply_in_place_slice(&mut buf, d);
+            }
+            let el = t.elapsed().as_secs_f64();
+            let per_ms = el * 1000.0 / reps as f64;
+            let ns_elem = el * 1e9 / (reps as f64 * (n * d) as f64);
+            eprintln!("  full unapply d={d:5}: {per_ms:8.3} ms/call  {ns_elem:6.3} ns/elem  ({reps} reps)");
+        }
+
+        // --- (2) per-tile attribution: FFT vs diag vs transpose ---
+        let tile = DCT4_CASCADE_TILE;
+        let dct = mask.dct4.as_ref();
+        let mut dct_scratch = vec![0f32; dct.get_scratch_len()];
+        let mut tile_buf: Vec<f32> = (0..tile * n)
+            .map(|_| StandardNormal.sample(&mut rng))
+            .collect();
+        // Backing (n × tile) slice for the transpose round-trip.
+        let mut slice: Vec<f32> = (0..n * tile)
+            .map(|_| StandardNormal.sample(&mut rng))
+            .collect();
+        let reps = 2000usize;
+
+        // FFT: the 3 cascade DCT-IV passes (3 × tile column-DCTs).
+        let t = Instant::now();
+        for _ in 0..reps {
+            for _ in 0..3 {
+                for j in 0..tile {
+                    dct.process_dct4_with_scratch(&mut tile_buf[j * n..j * n + n], &mut dct_scratch);
+                }
+            }
+        }
+        let fft = t.elapsed().as_secs_f64() / reps as f64;
+
+        // Diag: the 3 cascade diagonal multiplies (D₁, D₂ sign + D₃·norm).
+        let t = Instant::now();
+        for _ in 0..reps {
+            apply_sign_diag_in_tile(&mut tile_buf, tile, n, &mask.d1);
+            apply_sign_diag_in_tile(&mut tile_buf, tile, n, &mask.d2);
+            apply_scaled_diag_in_tile(&mut tile_buf, tile, n, &mask.d3, mask.inv_norm);
+        }
+        let diag = t.elapsed().as_secs_f64() / reps as f64;
+
+        // Transpose: copy_tile_in + copy_tile_out (one round-trip).
+        let sptr_const = slice.as_ptr();
+        let sptr_mut = slice.as_mut_ptr();
+        let t = Instant::now();
+        for _ in 0..reps {
+            unsafe {
+                copy_tile_in(sptr_const, n, tile, 0, tile, &mut tile_buf);
+                copy_tile_out(&tile_buf, tile, n, sptr_mut, tile, 0);
+            }
+        }
+        let transpose = t.elapsed().as_secs_f64() / reps as f64;
+
+        let total = fft + diag + transpose;
+        let us = |s: f64| s * 1e6;
+        eprintln!("  per-tile (tile={tile}, n={n}) attribution:");
+        eprintln!("    FFT (3× DCT-IV, rustdct/SIMD): {:8.2} µs  {:5.1}%", us(fft), 100.0 * fft / total);
+        eprintln!("    diag (D1/D2/D3, our glue):     {:8.2} µs  {:5.1}%", us(diag), 100.0 * diag / total);
+        eprintln!("    transpose (copy_tile_in/out):  {:8.2} µs  {:5.1}%", us(transpose), 100.0 * transpose / total);
+        eprintln!("    --> our-glue (diag+transpose): {:5.1}% of cascade compute", 100.0 * (diag + transpose) / total);
+    }
 }

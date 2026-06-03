@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
+use half::bf16;
 use ndarray::{Array2, Array3, ArrayView2, ArrayView3};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -1276,6 +1277,185 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
         output
     }
 
+    /// **bf16-output** sibling of [`Self::unmask_per_sequence`]. The
+    /// engine returns each projection as a **bf16** host array; the
+    /// per-block unapply runs on bf16 storage
+    /// (`{Hd3,Dct4}Mask::unapply_in_place_slice_bf16`) — halving the
+    /// DRAM traffic of the dominant `mask_unapply` bucket for DCT-IV
+    /// (tiled bf16 cascade) — then narrows the data-row prefix to the
+    /// f32 the forward pass consumes. Haar has no bf16 slice path and is
+    /// gated out upstream (`dispatch_unmask_per_sequence`); the Haar arm
+    /// here is a defensive widen-then-dense-unapply fallback.
+    fn unmask_per_sequence_bf16(
+        &self,
+        mut concat_out: Array2<bf16>,
+        masks: &[MaskFamily],
+        batch_size: usize,
+        data_n: usize,
+    ) -> Array2<f32> {
+        let stacked_n = masks[0].n();
+        let d_out = concat_out.ncols();
+        let mut output = Array2::<f32>::zeros((batch_size * data_n, d_out));
+        profile::time(masks[0].unapply_profile_category(), || {
+            use rayon::prelude::*;
+            let in_chunk_len = stacked_n.saturating_mul(d_out);
+            let out_chunk_len = data_n.saturating_mul(d_out);
+            let prefix_len = out_chunk_len; // data_n * d_out f32s
+            let in_slice = concat_out
+                .as_slice_mut()
+                .expect("concat_out must be row-major contiguous");
+            let out_slice = output.as_slice_mut().expect("fresh Array2 is contiguous");
+            in_slice
+                .par_chunks_mut(in_chunk_len)
+                .zip(out_slice.par_chunks_mut(out_chunk_len))
+                .enumerate()
+                .for_each(|(b, (in_block, out_block))| match &masks[b] {
+                    MaskFamily::Hd3(hd3) => {
+                        hd3.unapply_in_place_slice_bf16(in_block, d_out);
+                        for (o, i) in out_block.iter_mut().zip(in_block[..prefix_len].iter()) {
+                            *o = i.to_f32();
+                        }
+                    }
+                    MaskFamily::Dct4(dct4) => {
+                        dct4.unapply_in_place_slice_bf16(in_block, d_out);
+                        for (o, i) in out_block.iter_mut().zip(in_block[..prefix_len].iter()) {
+                            *o = i.to_f32();
+                        }
+                    }
+                    MaskFamily::Haar(_) => {
+                        // No bf16 Haar path — widen and use the dense
+                        // `Aᵀ · M` unapply. Defensive: Haar is gated to
+                        // the f32 path in `dispatch_unmask_per_sequence`.
+                        let widened: Vec<f32> = in_block.iter().map(|x| x.to_f32()).collect();
+                        let view = ndarray::ArrayView2::from_shape((stacked_n, d_out), &widened)
+                            .expect("chunk has the right shape");
+                        let unmasked = masks[b].unapply(view);
+                        out_block.copy_from_slice(
+                            unmasked
+                                .slice(ndarray::s![..data_n, ..])
+                                .to_owned()
+                                .as_slice()
+                                .expect("contiguous"),
+                        );
+                    }
+                });
+        });
+        output
+    }
+
+    /// Shared engine-dispatch + snapshot/verify + unmask tail for the
+    /// three per-sequence offload entry points. Chooses the **bf16**
+    /// round-trip (bf16 matmul outputs + `unmask_per_sequence_bf16`)
+    /// when [`bf16_offload_enabled`] and the mask family is non-Haar;
+    /// otherwise the f32 path verbatim. The f32 masked operand
+    /// (`concat_masked`) is unchanged either way (apply side stays f32);
+    /// only the read-back + unapply move to bf16. Consumes
+    /// `concat_masked` and returns it to the scratch pool.
+    fn dispatch_unmask_per_sequence(
+        &mut self,
+        handles: &[WeightHandle],
+        concat_masked: Array2<f32>,
+        masks: &[MaskFamily],
+        batch_size: usize,
+        data_n: usize,
+    ) -> Result<Vec<Array2<f32>>> {
+        // bf16 read-back only when (a) globally enabled, (b) the engine
+        // already produces 16-bit outputs (the fp16 GPU — so CPU/sim/f32
+        // executors keep their exact-f32 parity fixtures), and (c) the
+        // mask family is **DCT-IV**.
+        //
+        // The DCT-IV gate (not "non-Haar") is empirical (chronicle §13
+        // A/B): the bf16 win is the read-back narrowing (f16→bf16 host
+        // write, concentrated in the wide FFN outputs), which lands in
+        // the `engine:matmul*` bucket and nets ~9% off prefill wall. The
+        // mask transform itself is compute-bound, so bf16 storage barely
+        // moves it. For **HD₃** (the decode-shape mask) the bf16 slice
+        // path is widen-narrow (no DRAM win) and the decode outputs are
+        // tiny (n_q=1, no read-back win to offset) → bf16 *regressed*
+        // decode ~5%. So bf16 is a prefill (DCT-IV) lever only; HD₃ and
+        // Haar keep the exact f32 path.
+        let use_bf16 = bf16_offload_enabled()
+            && self.engine.prefers_bf16_output()
+            && matches!(masks[0], MaskFamily::Dct4(_));
+        if use_bf16 {
+            let outs = self.engine.run_registered_linear_bf16_out(RegisteredLinearBatch {
+                handles,
+                input: RegisteredLinearInput::F32(concat_masked.view()),
+            })?;
+            anyhow::ensure!(
+                outs.len() == handles.len(),
+                "run_registered_linear_bf16_out returned {} results; expected {}",
+                outs.len(),
+                handles.len(),
+            );
+            // Snapshot / U-Verify only when active — convert the bf16
+            // output to f32 for the harness (off by default, so the hot
+            // path pays nothing).
+            if self.snapshot_capture.is_some() || self.verify_probes > 0 {
+                for (h, out) in handles.iter().zip(outs.iter()) {
+                    let out_f32 = out.mapv(|v| v.to_f32());
+                    self.record_snapshot(*h, &concat_masked, Some(&out_f32));
+                    if self.verify_probes > 0 {
+                        let w = self.weights.get(h).ok_or_else(|| {
+                            anyhow!("verify_probes>0 but weight {h:?} not cached in TEE")
+                        })?;
+                        profile::time("uverify:linear", || {
+                            verify_offload(
+                                self.verify_probes,
+                                concat_masked.view(),
+                                w.view(),
+                                out_f32.view(),
+                                &mut self.rng,
+                            )
+                        })?;
+                    }
+                }
+            }
+            let outputs: Vec<Array2<f32>> = outs
+                .into_iter()
+                .map(|m| self.unmask_per_sequence_bf16(m, masks, batch_size, data_n))
+                .collect();
+            self.return_per_seq_apply_scratch(concat_masked);
+            Ok(outputs)
+        } else {
+            let outs = self.engine.run_registered_linear(RegisteredLinearBatch {
+                handles,
+                input: RegisteredLinearInput::F32(concat_masked.view()),
+            })?;
+            anyhow::ensure!(
+                outs.len() == handles.len(),
+                "run_registered_linear returned {} results; expected {}",
+                outs.len(),
+                handles.len(),
+            );
+            for (h, out) in handles.iter().zip(outs.iter()) {
+                self.record_snapshot(*h, &concat_masked, Some(out));
+            }
+            if self.verify_probes > 0 {
+                for (h, out) in handles.iter().zip(outs.iter()) {
+                    let w = self.weights.get(h).ok_or_else(|| {
+                        anyhow!("verify_probes>0 but weight {h:?} not cached in TEE")
+                    })?;
+                    profile::time("uverify:linear", || {
+                        verify_offload(
+                            self.verify_probes,
+                            concat_masked.view(),
+                            w.view(),
+                            out.view(),
+                            &mut self.rng,
+                        )
+                    })?;
+                }
+            }
+            let outputs: Vec<Array2<f32>> = outs
+                .into_iter()
+                .map(|m| self.unmask_per_sequence(m, masks, batch_size, data_n))
+                .collect();
+            self.return_per_seq_apply_scratch(concat_masked);
+            Ok(outputs)
+        }
+    }
+
     /// **M1.11 R1.2** — batched per-sequence offload_linear path.
     ///
     /// Called from `offload_linear` when the session is
@@ -1316,35 +1496,14 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
         let concat_masked = self.build_per_sequence_masked(hidden, &masks, batch_size, data_n);
 
         let handles = [handle];
-        let mut concat_outs = self.engine.run_registered_linear(RegisteredLinearBatch {
-            handles: &handles,
-            input: RegisteredLinearInput::F32(concat_masked.view()),
-        })?;
+        let mut outs =
+            self.dispatch_unmask_per_sequence(&handles, concat_masked, &masks, batch_size, data_n)?;
         anyhow::ensure!(
-            concat_outs.len() == 1,
-            "engine.run_registered_linear returned {} results; expected 1",
-            concat_outs.len()
+            outs.len() == 1,
+            "dispatch_unmask_per_sequence returned {} results; expected 1",
+            outs.len()
         );
-        let concat_out = concat_outs.pop().expect("len checked above");
-        self.record_snapshot(handle, &concat_masked, Some(&concat_out));
-        if self.verify_probes > 0 {
-            let weight = self.weights.get(&handle).ok_or_else(|| {
-                anyhow!("verify_probes>0 but weight {handle:?} not cached in TEE")
-            })?;
-            profile::time("uverify:linear", || {
-                verify_offload(
-                    self.verify_probes,
-                    concat_masked.view(),
-                    weight.view(),
-                    concat_out.view(),
-                    &mut self.rng,
-                )
-            })?;
-        }
-
-        let result = self.unmask_per_sequence(concat_out, &masks, batch_size, data_n);
-        self.return_per_seq_apply_scratch(concat_masked);
-        Ok(result)
+        Ok(outs.pop().expect("len checked above"))
     }
 
     /// **M1.11 R1.6** — batched per-sequence offload_qkv path. Builds
@@ -1371,64 +1530,17 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
             WeightHandle::new(layer, WeightKind::K),
             WeightHandle::new(layer, WeightKind::V),
         ];
-        let qkv_out = self.engine.run_registered_linear(RegisteredLinearBatch {
-            handles: &handles,
-            input: RegisteredLinearInput::F32(concat_masked.view()),
-        })?;
+        let outs =
+            self.dispatch_unmask_per_sequence(&handles, concat_masked, &masks, batch_size, data_n)?;
         anyhow::ensure!(
-            qkv_out.len() == 3,
-            "engine.matmul_many returned {} results; expected 3",
-            qkv_out.len()
+            outs.len() == 3,
+            "dispatch_unmask_per_sequence returned {} results; expected 3",
+            outs.len()
         );
-        let mut it = qkv_out.into_iter();
-        let mq = it.next().expect("len checked above");
-        let mk = it.next().expect("len checked above");
-        let mv = it.next().expect("len checked above");
-
-        // Snapshot + U-Verify per output kind (same masked operand
-        // drives all three).
-        self.record_snapshot(
-            WeightHandle::new(layer, WeightKind::Q),
-            &concat_masked,
-            Some(&mq),
-        );
-        self.record_snapshot(
-            WeightHandle::new(layer, WeightKind::K),
-            &concat_masked,
-            Some(&mk),
-        );
-        self.record_snapshot(
-            WeightHandle::new(layer, WeightKind::V),
-            &concat_masked,
-            Some(&mv),
-        );
-        if self.verify_probes > 0 {
-            for (kind, observed) in [
-                (WeightKind::Q, &mq),
-                (WeightKind::K, &mk),
-                (WeightKind::V, &mv),
-            ] {
-                let h = WeightHandle::new(layer, kind);
-                let w = self
-                    .weights
-                    .get(&h)
-                    .ok_or_else(|| anyhow!("verify_probes>0 but weight {h:?} not cached in TEE"))?;
-                profile::time("uverify:linear", || {
-                    verify_offload(
-                        self.verify_probes,
-                        concat_masked.view(),
-                        w.view(),
-                        observed.view(),
-                        &mut self.rng,
-                    )
-                })?;
-            }
-        }
-
-        let q = self.unmask_per_sequence(mq, &masks, batch_size, data_n);
-        let k_out = self.unmask_per_sequence(mk, &masks, batch_size, data_n);
-        let v_out = self.unmask_per_sequence(mv, &masks, batch_size, data_n);
-        self.return_per_seq_apply_scratch(concat_masked);
+        let mut it = outs.into_iter();
+        let q = it.next().expect("len checked above");
+        let k_out = it.next().expect("len checked above");
+        let v_out = it.next().expect("len checked above");
         Ok((q, k_out, v_out))
     }
 
@@ -1451,45 +1563,7 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
             _ => unreachable!("offload_linear_many_per_sequence called outside PerSequence"),
         };
         let concat_masked = self.build_per_sequence_masked(hidden, &masks, batch_size, data_n);
-
-        let masked_outs = self.engine.run_registered_linear(RegisteredLinearBatch {
-            handles,
-            input: RegisteredLinearInput::F32(concat_masked.view()),
-        })?;
-        anyhow::ensure!(
-            masked_outs.len() == handles.len(),
-            "engine.matmul_many returned {} results; expected {}",
-            masked_outs.len(),
-            handles.len()
-        );
-
-        for (h, out) in handles.iter().zip(masked_outs.iter()) {
-            self.record_snapshot(*h, &concat_masked, Some(out));
-        }
-        if self.verify_probes > 0 {
-            for (h, observed) in handles.iter().zip(masked_outs.iter()) {
-                let w = self
-                    .weights
-                    .get(h)
-                    .ok_or_else(|| anyhow!("verify_probes>0 but weight {h:?} not cached in TEE"))?;
-                profile::time("uverify:linear", || {
-                    verify_offload(
-                        self.verify_probes,
-                        concat_masked.view(),
-                        w.view(),
-                        observed.view(),
-                        &mut self.rng,
-                    )
-                })?;
-            }
-        }
-
-        let outputs: Vec<Array2<f32>> = masked_outs
-            .into_iter()
-            .map(|m| self.unmask_per_sequence(m, &masks, batch_size, data_n))
-            .collect();
-        self.return_per_seq_apply_scratch(concat_masked);
-        Ok(outputs)
+        self.dispatch_unmask_per_sequence(handles, concat_masked, &masks, batch_size, data_n)
     }
 }
 
@@ -1546,6 +1620,19 @@ fn mean_row_norm(m: ArrayView2<'_, f32>) -> f32 {
         acc += row.iter().map(|v| v * v).sum::<f32>().sqrt();
     }
     acc / (n as f32)
+}
+
+/// Whether the registered-linear offload reads its matmul outputs back as
+/// **bf16** and runs the mask unapply on bf16 storage (halving the DRAM
+/// traffic of the dominant `mask_unapply` bucket). **Default on**; the
+/// escape hatch `GELO_BF16_OFFLOAD=0` forces the f32 read-back (for the
+/// perf A/B and as a safety toggle). Only engages for HD₃/DCT-IV masks —
+/// Haar has no bf16 slice transform and stays f32 (gated at the call
+/// site in `dispatch_unmask_per_sequence`).
+fn bf16_offload_enabled() -> bool {
+    std::env::var("GELO_BF16_OFFLOAD")
+        .map(|v| v != "0" && !v.is_empty())
+        .unwrap_or(true)
 }
 
 impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {

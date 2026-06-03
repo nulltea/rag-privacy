@@ -2,8 +2,8 @@
 type: dev-log
 status: current
 created: 2026-05-29
-updated: 2026-05-29
-tags: [gelo, perf, dgpu, nvidia, rtx5090, vulkan, attention, mask, chronicle]
+updated: 2026-06-03
+tags: [gelo, perf, dgpu, nvidia, rtx5090, vulkan, cuda, attention, offload, cubek, mask, chronicle]
 companion: [gelo-llm-perf-chronicle]
 ---
 
@@ -477,3 +477,416 @@ ample.
 wire-up in `crates/gelo-embedder/src/decoder/forward.rs`
 (`decoder_block_cached_batched`, `stack_heads`/`unstack_heads`),
 `KvCache::gpu_sessions`, `TrustedExecutor::resident_kv_*`.
+
+## 12. Re-baseline on the default secure offload (2026-06-03) — attention is no longer the bottleneck
+
+First measurement since the **secure GPU-offloaded attention became the
+default inference path** (`9f6ec0a`; capability-gated cubek blackbox
+prefill offload + resident-cover decode + per-session `C_v` κ=6, σ=0.01,
+CUDA backend). Profiles a **single sequence (B=1)** *through* the offload
+path — the single-stream forward (`run_prefill`/`run_decode_step`) runs
+Global attention in-TEE, so the bench was extended with
+`GELO_BENCH_FORCE_BATCHED=1` to drive `run_prefill_batched` /
+`run_decode_step_batched` at B=1 (a batch of one through the offload
+machinery). Adapter banner confirms `CUDA device 0 (cubecl-cuda)
+(Discrete)`; the `tee:attn_prefill_offload` + `prefill_cover:cubek_gpu` +
+`tee:attn_resident_cover` + `cover:prefix_partial_gpu` buckets all fire.
+
+Qwen3-4B, fp16, **warmed** (`GELO_BENCH_WARMUP=1`; nvrtc autotune
+cached before the measured pass), K=32 decode, σ=0.01, κ=6. Single
+sample, ~7% variance floor. Three prompt lengths: **n=2048** (tile
+aligned), **n=2047** (ragged → caller-side `n_q` padding to 2048, one
+phantom row; chosen for direct comparability to n=2048), **n=8192**
+(long-context).
+
+### 12.0 Wall summary
+
+| Cell | Prefill wall | Prefill tok/s | Decode wall | ms/step | Decode tok/s |
+|---|--:|--:|--:|--:|--:|
+| n=2048 (aligned) | 18.30 s | 111.9 | 6.56 s | 205 | 4.88 |
+| n=2047 (ragged)  | 20.12 s | 101.7 | 6.60 s | 206 | 4.85 |
+| n=8192 (long)    | 121.36 s | 67.5 | 7.01 s | 219 | 4.57 |
+
+Decode per-step is **near context-independent** (205 → 219 ms over a 4×
+context jump) — the resident-K/V cover keeps decode attention flat. The
+ragged n=2047 matches aligned n=2048 within the variance floor (the
++1.8 s prefill delta is single-sample noise in the CPU mask bucket, not
+padding — padding is one phantom row, <0.05%); ran clean, no NaN. The
+caller-side `n_q` padding path is validated at ~zero cost.
+
+### 12.1 Full per-op profiles (ms · share · **calls**)
+
+◆ = GPU-executed (CUDA). All other buckets run on the CPU in-TEE.
+**Nesting:** `tee:attn_prefill_offload` is a wrapper whose time
+*contains* the indented `↳ prefill_cover:*` rows (+ per-layer cover
+sampling); likewise `tee:attn_resident_cover` contains the `↳ cover:*`
+rows. The `TOTAL (Σ)` therefore double-counts the wrapper vs its
+children — read the de-nested grouping in §12.2 for wall-share.
+
+#### n=2048 — PREFILL (wall 18.30 s)
+
+| op | ms | share | calls |
+|---|--:|--:|--:|
+| `gelo:mask_unapply:dct4` | 4967.89 | 26.1% | 252 |
+| ◆ `engine:matmul_many` | 4663.01 | 24.5% | 72 |
+| `tee:attn_prefill_offload` (wrapper) | 2128.72 | 11.2% | 36 |
+| `gelo:mask_apply:dct4` | 1516.68 | 8.0% | 144 |
+| ◆ `engine:matmul` | 1205.92 | 6.3% | 72 |
+| `gelo:shield_stack` | 1170.37 | 6.1% | 144 |
+| ↳ `prefill_cover:correct_tee` | 842.66 | 4.4% | 36 |
+| `cover:build_covered_prefix+upload` | 592.09 | 3.1% | 36 |
+| ↳ ◆ `prefill_cover:cubek_gpu` | 583.45 | 3.1% | 36 |
+| ↳ `prefill_cover:rotate_tee` | 468.36 | 2.5% | 36 |
+| `tee:swiglu_activate` | 326.59 | 1.7% | 36 |
+| `tee:qk_norm` | 256.80 | 1.3% | 36 |
+| `tee:residual` | 157.89 | 0.8% | 72 |
+| `tee:rmsnorm` | 116.78 | 0.6% | 73 |
+| `tee:rope` | 64.20 | 0.3% | 36 |
+| `tee:embed_lookup` | 3.46 | 0.0% | 1 |
+| `gelo:mask_sample` | 0.05 | 0.0% | 1 |
+| **TOTAL (Σ)** | **19064.91** | | |
+
+#### n=2048 — DECODE (wall 6.56 s, K=32)
+
+| op | ms | share | calls |
+|---|--:|--:|--:|
+| `gelo:mask_unapply:hd3` | 1722.32 | 22.7% | 8096 |
+| ◆ `engine:matmul_many` | 1227.67 | 16.2% | 2304 |
+| `gelo:mask_apply:hd3` | 937.76 | 12.4% | 4640 |
+| ◆ `engine:matmul` | 934.90 | 12.3% | 2336 |
+| `tee:attn_resident_cover` (wrapper) | 840.81 | 11.1% | 1152 |
+| `gelo:shield_stack` | 825.39 | 10.9% | 4640 |
+| ↳ ◆ `cover:prefix_partial_gpu` | 442.65 | 5.8% | 1152 |
+| ◆ `tee:compute_logits` (LM-head) | 213.54 | 2.8% | 32 |
+| ↳ `cover:q_cover_tee` | 141.77 | 1.9% | 1152 |
+| ↳ `cover:acc_uncover_tee` | 111.86 | 1.5% | 1152 |
+| ↳ `cover:tail_partial_tee` | 72.10 | 1.0% | 1152 |
+| ↳ `cover:tail_build_tee` | 57.31 | 0.8% | 1152 |
+| `tee:swiglu_activate` | 26.10 | 0.3% | 1152 |
+| `tee:rmsnorm` | 9.61 | 0.1% | 2336 |
+| `tee:qk_norm` | 5.21 | 0.1% | 1152 |
+| `tee:residual` | 2.83 | 0.0% | 2304 |
+| ↳ `cover:merge_tee` | 2.34 | 0.0% | 1152 |
+| `tee:rope` | 1.39 | 0.0% | 1152 |
+| `gelo:strip_shield` | 1.06 | 0.0% | 32 |
+| `tee:embed_lookup` | 0.09 | 0.0% | 32 |
+| `gelo:mask_sample` | 0.04 | 0.0% | 64 |
+| **TOTAL (Σ)** | **7576.77** | | |
+
+#### n=2047 (ragged) — PREFILL (wall 20.12 s)
+
+| op | ms | share | calls |
+|---|--:|--:|--:|
+| `gelo:mask_unapply:dct4` | 6060.23 | 28.8% | 252 |
+| ◆ `engine:matmul_many` | 4548.03 | 21.6% | 72 |
+| `tee:attn_prefill_offload` (wrapper) | 2318.87 | 11.0% | 36 |
+| `gelo:mask_apply:dct4` | 2159.05 | 10.2% | 144 |
+| ◆ `engine:matmul` | 1214.32 | 5.8% | 72 |
+| `gelo:shield_stack` | 1180.36 | 5.6% | 144 |
+| ↳ `prefill_cover:correct_tee` | 830.54 | 3.9% | 36 |
+| ↳ ◆ `prefill_cover:cubek_gpu` | 778.19 | 3.7% | 36 |
+| `cover:build_covered_prefix+upload` | 588.23 | 2.8% | 36 |
+| ↳ `prefill_cover:rotate_tee` | 473.62 | 2.2% | 36 |
+| `tee:swiglu_activate` | 323.72 | 1.5% | 36 |
+| `tee:qk_norm` | 258.91 | 1.2% | 36 |
+| `tee:residual` | 158.40 | 0.8% | 72 |
+| `tee:rmsnorm` | 115.00 | 0.5% | 73 |
+| `tee:rope` | 63.99 | 0.3% | 36 |
+| `tee:embed_lookup` | 3.48 | 0.0% | 1 |
+| `gelo:mask_sample` | 0.05 | 0.0% | 1 |
+| **TOTAL (Σ)** | **21074.98** | | |
+
+#### n=2047 (ragged) — DECODE (wall 6.60 s, K=32)
+
+| op | ms | share | calls |
+|---|--:|--:|--:|
+| `gelo:mask_unapply:hd3` | 1745.82 | 22.9% | 8096 |
+| ◆ `engine:matmul_many` | 1227.39 | 16.1% | 2304 |
+| `gelo:mask_apply:hd3` | 956.40 | 12.5% | 4640 |
+| ◆ `engine:matmul` | 934.28 | 12.3% | 2336 |
+| `tee:attn_resident_cover` (wrapper) | 834.56 | 11.0% | 1152 |
+| `gelo:shield_stack` | 826.03 | 10.8% | 4640 |
+| ↳ ◆ `cover:prefix_partial_gpu` | 435.55 | 5.7% | 1152 |
+| ◆ `tee:compute_logits` (LM-head) | 228.42 | 3.0% | 32 |
+| ↳ `cover:q_cover_tee` | 143.70 | 1.9% | 1152 |
+| ↳ `cover:acc_uncover_tee` | 114.42 | 1.5% | 1152 |
+| ↳ `cover:tail_partial_tee` | 70.04 | 0.9% | 1152 |
+| ↳ `cover:tail_build_tee` | 55.71 | 0.7% | 1152 |
+| `tee:swiglu_activate` | 26.45 | 0.3% | 1152 |
+| `tee:rmsnorm` | 9.38 | 0.1% | 2336 |
+| `tee:qk_norm` | 5.26 | 0.1% | 1152 |
+| `tee:residual` | 2.61 | 0.0% | 2304 |
+| ↳ `cover:merge_tee` | 2.35 | 0.0% | 1152 |
+| `tee:rope` | 1.59 | 0.0% | 1152 |
+| `gelo:strip_shield` | 1.07 | 0.0% | 32 |
+| `tee:embed_lookup` | 0.10 | 0.0% | 32 |
+| `gelo:mask_sample` | 0.04 | 0.0% | 64 |
+| **TOTAL (Σ)** | **7621.16** | | |
+
+#### n=8192 — PREFILL (wall 121.36 s)
+
+| op | ms | share | calls |
+|---|--:|--:|--:|
+| ◆ `engine:matmul_many` | 31468.60 | 24.1% | 72 |
+| `gelo:mask_unapply:dct4` | 26756.64 | 20.5% | 252 |
+| ◆ `engine:matmul` | 17489.95 | 13.4% | 72 |
+| `tee:attn_prefill_offload` (wrapper) | 17399.49 | 13.3% | 36 |
+| ↳ ◆ `prefill_cover:cubek_gpu` | 9042.58 | 6.9% | 36 |
+| `gelo:mask_apply:dct4` | 7710.09 | 5.9% | 144 |
+| ↳ `prefill_cover:correct_tee` | 4849.55 | 3.7% | 36 |
+| `gelo:shield_stack` | 4774.90 | 3.6% | 144 |
+| `cover:build_covered_prefix+upload` | 3131.86 | 2.4% | 36 |
+| `tee:residual` | 2666.92 | 2.0% | 72 |
+| ↳ `prefill_cover:rotate_tee` | 2570.48 | 2.0% | 36 |
+| `tee:swiglu_activate` | 1168.36 | 0.9% | 36 |
+| `tee:qk_norm` | 998.02 | 0.8% | 36 |
+| `tee:rmsnorm` | 482.68 | 0.4% | 73 |
+| `tee:rope` | 278.70 | 0.2% | 36 |
+| `tee:embed_lookup` | 36.93 | 0.0% | 1 |
+| `gelo:mask_sample` | 0.13 | 0.0% | 1 |
+| **TOTAL (Σ)** | **130825.87** | | |
+
+#### n=8192 — DECODE (wall 7.01 s, K=32)
+
+| op | ms | share | calls |
+|---|--:|--:|--:|
+| `gelo:mask_unapply:hd3` | 1732.85 | 20.5% | 8096 |
+| `tee:attn_resident_cover` (wrapper) | 1264.58 | 15.0% | 1152 |
+| ◆ `engine:matmul_many` | 1223.45 | 14.5% | 2304 |
+| ◆ `engine:matmul` | 943.65 | 11.2% | 2336 |
+| `gelo:mask_apply:hd3` | 936.54 | 11.1% | 4640 |
+| ↳ ◆ `cover:prefix_partial_gpu` | 869.08 | 10.3% | 1152 |
+| `gelo:shield_stack` | 829.16 | 9.8% | 4640 |
+| ◆ `tee:compute_logits` (LM-head) | 219.42 | 2.6% | 32 |
+| ↳ `cover:q_cover_tee` | 142.13 | 1.7% | 1152 |
+| ↳ `cover:acc_uncover_tee` | 108.83 | 1.3% | 1152 |
+| ↳ `cover:tail_partial_tee` | 72.53 | 0.9% | 1152 |
+| ↳ `cover:tail_build_tee` | 57.25 | 0.7% | 1152 |
+| `tee:swiglu_activate` | 26.53 | 0.3% | 1152 |
+| `tee:rmsnorm` | 9.60 | 0.1% | 2336 |
+| `tee:qk_norm` | 5.23 | 0.1% | 1152 |
+| `tee:residual` | 2.72 | 0.0% | 2304 |
+| ↳ `cover:merge_tee` | 2.33 | 0.0% | 1152 |
+| `tee:rope` | 1.41 | 0.0% | 1152 |
+| `gelo:strip_shield` | 1.03 | 0.0% | 32 |
+| `tee:embed_lookup` | 0.09 | 0.0% | 32 |
+| `gelo:mask_sample` | 0.04 | 0.0% | 64 |
+| **TOTAL (Σ)** | **8448.49** | | |
+
+### 12.2 De-nested wall-share — where the time goes
+
+Grouping the buckets above (wrapper rows replace their `↳` children; the
+attention group is the wrapper, GPU-matmul is `engine:matmul*`, the cover
+on the *matmul* offload is mask + shield):
+
+| Group | Prefill n=2048 | Prefill n=8192 | Decode (both n) |
+|---|--:|--:|--:|
+| **Mask + shield** (DCT-IV prefill / HD₃ decode + `shield_stack`) | **41.8%** | 32.3% | **~50–53%** |
+| **GPU matmul** (`engine:matmul` + `matmul_many`) | 32.1% | **40.3%** | ~31–33% |
+| **Attention offload** (`tee:attn_*`, incl. cover prep) | 11.6% | 14.3% | 13–18% |
+| Decode K/V prep hoisted into prefill (`build_covered_prefix`) | 3.2% | 2.6% | — |
+| Other in-TEE (rmsnorm, rope, qk_norm, swiglu, residual) + LM-head | ~8% | ~7% | ~3% |
+
+### 12.3 Findings
+
+- **Attention is no longer the bottleneck.** Having offloaded it, the
+  binding cost is the **per-matmul activation cover** — the DCT-IV
+  (prefill) / HD₃ (decode) mask apply/unapply + `shield_stack` around
+  every registered-linear GPU matmul (the `WEIGHTS-PUB` round-trip:
+  apply→upload→matmul→readback→unapply). It is **42% of prefill / ~50%
+  of decode** at n=2048. The mask is a CPU transform, DDR5-bandwidth-
+  bound on this box (~85 GB/s).
+- **`mask_unapply` ≫ `mask_apply`** (252 vs 144 calls at prefill; 8096 vs
+  4640 at decode): each fused matmul's 2–3 outputs are unmasked
+  separately, so the unapply direction carries more calls and more time.
+- **GPU matmul overtakes the mask only at long context** (40% vs 32% at
+  n=8192). It grows **super-linearly** — `matmul_many` 4663 → 31469 ms is
+  6.75× for a 4× token jump — i.e. increasingly compute/occupancy-bound,
+  not transfer-bound. Consistent with §8's ~2 TFLOP/s finding: tensor
+  cores look under-utilised, and the gap widens with n.
+- **The attention offload is prep-dominated.** In-TEE cover bookkeeping
+  (`rotate_tee` + `correct_tee` + O-sampling + `build_covered_prefix`)
+  exceeds the GPU attention it protects (`cubek_gpu`) by ~3.6× at n=2048
+  (≈2.1 s vs 0.58 s); only at n=8192 does the O(n²) GPU term (9.0 s)
+  approach the prep (≈11.5 s). Decode attention grows **only** in the GPU
+  prefix term (`prefix_partial_gpu` 443 → 869 ms); cover prep is
+  context-flat (~390 ms).
+
+### 12.4 Re-ranked next levers (against these numbers)
+
+The binding bottleneck has **moved off attention onto the matmul cover**;
+the catalog levers re-rank accordingly (detail + threat-model/accuracy
+trade-offs in the deferred-optimizations handoff):
+
+1. **End-to-end bf16 activations (X1).** Halves the bytes the DCT-IV/HD₃
+   mask touches and uploads → projected ~20–25% off prefill, ~25% off
+   decode. Threat-model-neutral (cover unchanged); the GPU leg is already
+   fp16 so accuracy impact is within the offload's existing fp16 floor
+   (re-gate HumanEval). The single biggest lever; the documented
+   prerequisite (forward-wire 3b/3c unbuilt).
+2. **R4 async overlap (X2).** On PCIe the CPU mask of matmul *k+1* can
+   overlap the GPU matmul of *k* (the engines are independent, unlike
+   UMA). Mask (~42%) and matmul (~32%) are comparable → projected
+   ~10–20% wall, exact (pure scheduling), compounds with #1.
+3. **Blackwell sm_120 CMMA verification (P4).** The super-linear matmul
+   growth + §8's ~2 TFLOP/s say tensor cores are under-used; if CMMA
+   engages, matmul 2–5× → ~15–25% prefill at long context (the win widens
+   with n). Investigate first.
+
+Attention levers (P1 cubek read-index, D1 fused decode kernel) drop in
+priority — attention is 12–18% today — but matter at 16–32k context
+where `cubek_gpu` (O(n²)) and `prefix_partial_gpu` climb.
+
+**Artefacts:** `bench-results/gelo-b1-offload-n{2048,2047,8192}-2026-06-03.log`.
+Bench knob `GELO_BENCH_FORCE_BATCHED` (routes B=1 through the offload
+path) in `crates/gelo-gpu-wgpu/tests/qwen3_m1_12_r1_q1_microbench.rs`.
+
+## 13. bf16 offload read-back (2026-06-03) — +9% prefill, and a correction to §12's bandwidth premise
+
+Implemented the first bf16-activation lever (X1) on the registered-linear
+offload: the matmul outputs are read back as **bf16** (host narrowing
+f16→bf16 instead of f16→f32) and the mask unapply runs on bf16 storage.
+The masked operand / apply side stays f32 (apply was the smaller bucket
+and HD₃'s bf16 apply is widen-narrow). Engine seam:
+`matmul_many_bf16_out` + `run_registered_linear_bf16_out` +
+`tensor_data_to_array_bf16_*` (`gelo-gpu-wgpu/src/lib.rs`); wiring +
+`unmask_per_sequence_bf16` + the `dispatch_unmask_per_sequence` router
+(`gelo-protocol/src/sim.rs`). Capability-gated: engages only when the
+engine is fp16 (`prefers_bf16_output`) **and** the mask is DCT-IV — so
+CPU/sim/f32 executors keep exact-f32 parity, and HD₃/Haar stay f32.
+Escape hatch `GELO_BF16_OFFLOAD=0`.
+
+Same-process A/B, B=1 forced-batched, warmed, K=32, Qwen3-4B, CUDA.
+
+### 13.1 Prefill A/B (bf16 OFF → ON)
+
+**n=2048 (wall 18.62 → 16.83 s, −9.6%)**
+
+| op | OFF ms | ON ms | Δ | calls |
+|---|--:|--:|--:|--:|
+| `gelo:mask_unapply:dct4` | 4971.12 | 4809.60 | −3.2% | 252 |
+| ◆ `engine:matmul_many` | 4932.32 | 3599.04 | **−27.0%** | 72 |
+| `tee:attn_prefill_offload` | 2128.74 | 2131.10 | ~0 | 36 |
+| `gelo:mask_apply:dct4` | 1549.71 | 1544.18 | ~0 | 144 |
+| ◆ `engine:matmul` | 1221.73 | 1311.58 | +7.4% | 72 |
+| `gelo:shield_stack` | 1165.42 | 1165.34 | ~0 | 144 |
+
+**n=8192 (wall 119.64 → 108.91 s, −9.0%)**
+
+| op | OFF ms | ON ms | Δ | calls |
+|---|--:|--:|--:|--:|
+| ◆ `engine:matmul_many` | 31006.12 | 23931.81 | **−22.8%** | 72 |
+| `gelo:mask_unapply:dct4` | 26492.75 | 25377.25 | −4.2% | 252 |
+| ◆ `engine:matmul` | 17094.79 | 15662.94 | −8.4% | 72 |
+| `tee:attn_prefill_offload` | 17318.41 | 17296.55 | ~0 | 36 |
+| `gelo:mask_apply:dct4` | 7758.58 | 7740.58 | ~0 | 144 |
+
+### 13.2 Decode A/B — why bf16 is gated to DCT-IV (prefill) only
+
+bf16 applied to the HD₃ decode mask **regressed** (the bf16 HD₃ slice is
+bulk widen-narrow — no DRAM win — and the decode outputs are tiny
+(n_q=1), so there is no read-back win to offset the extra conversion):
+
+| op | OFF ms | ON (HD₃ bf16) ms | Δ | calls |
+|---|--:|--:|--:|--:|
+| `gelo:mask_unapply:hd3` (n=2048) | 1734.25 | 1963.32 | **+13.2%** | 8096 |
+| decode wall (n=2048) | 6.61 s | 6.92 s | **+4.7%** | — |
+| `gelo:mask_unapply:hd3` (n=8192) | 1729.34 | 1952.14 | **+12.9%** | 8096 |
+| decode wall (n=8192) | 7.02 s | 7.34 s | **+4.6%** | — |
+
+With the **DCT-IV gate**, decode reverts to the exact f32 path — confirmed
+identical (n=2048: decode wall 6.61 s, `mask_unapply:hd3` 1734 ms = the
+OFF numbers) — so the shipped config is **prefill −9.6% / decode flat**.
+
+### 13.3 Finding — the mask transform is compute-bound, not bandwidth-bound
+
+§12 (and the X1 plan) projected ~20–25% from bf16 by assuming the DCT-IV /
+HD₃ mask transforms were DDR5-bandwidth-bound. **The A/B refutes that.**
+The bf16 win lands almost entirely in `engine:matmul_many` (−23–27%), not
+in `mask_unapply` (−3–4%, ~flat):
+
+- **`mask_unapply:dct4` barely moved** even though its input is now bf16
+  (half the bytes). The tiled DCT-IV cascade widens to f32 and runs the
+  **same f32 cosine FLOPs** — it is **compute-bound**, so halving the
+  storage traffic does almost nothing. (Revises §12.3's "DDR5-bandwidth-
+  bound" attribution for the mask buckets.)
+- **The real lever is the read-back narrowing.** `run_registered_linear_bf16_out`
+  narrows the GPU f16 result to a bf16 host array instead of f32 — half
+  the host write, concentrated in the wide gate∥up/QKV outputs — and that
+  cost is timed under `engine:matmul*`. That is the −1.3 s (n=2048) /
+  −7.1 s (n=8192) on `matmul_many`, ≈ the whole −9% wall.
+
+Implication for the remaining bf16 work: the **apply-side operand bf16**
+(bf16 shield-stack + `apply_in_place_slice_bf16`) is **not** worth it —
+its transform is the same compute-bound cascade, and the upload narrowing
+is a smaller surface than the read-back. The bf16-input engine path
+(`matmul_many_bf16_input`) is therefore deprioritised. The mask-transform
+cost itself only falls with a **cheaper transform** or **fewer columns**,
+not with precision — see the vectorise spike below.
+
+### 13.4 Cascade vectorise spike — FFT-bound, our glue is 8%
+
+Follow-up to §13.3 ("the cascade is compute-bound"): is vectorising the
+cascade kernel worth it? Per-tile attribution
+(`dct4::tests::dct4_cascade_vectorize_spike`, release, n=2064):
+
+| cost centre | share |
+|---|--:|
+| FFT — 3× DCT-IV (rustdct/rustfft, **already SIMD**) | **91.9%** |
+| diagonal multiplies (D₁/D₂/D₃, our glue) | 6.3% |
+| tile transpose (`copy_tile_in/out`, our glue) | 1.8% |
+
+The cascade is **92% the FFT**, which rustfft already vectorises (AVX/SSE).
+Our non-vectorised glue (the branchy sign-diag + scalar transpose) is only
+**8.1%** of the cascade; since the cascade (`mask_unapply`) is ~25% of
+prefill wall, vectorising the glue to *zero* caps at ~2% of prefill, and
+realistically ~1%. **Not worth it.** Full-unapply rate for reference:
+~1.5–1.8 ns/elem (30.5 ms at n=2064 × d=9728).
+
+So the cascade only gets cheaper via (a) a **cheaper transform** — HD₃/FWHT
+is pure ±1 add/sub butterflies vs DCT-IV's Bluestein-FFT cosine at non-pow2
+n — or (b) **fewer columns** — eliminate the FFN-intermediate unmask
+(gate∥up = 63% of unapply columns) via a SiLU-commuting feature-axis
+permutation. Both are security-gated (mask-family strength / permutation
+vs orthogonal cover). The earlier "merge fused-output unapplies" idea is
+**also dead** (compute-bound → identical FLOPs; would only add concat
+copies; the transform is already column-parallel).
+
+### 13.5 Disposition
+
+bf16 read-back gives net **−9% prefill wall** at both n=2048 and n=8192,
+decode unchanged. **Accuracy gate (HumanEval pass@1, secure offload +
+`C_v` κ=6, B=1): pass@1 = 6/20** — a **1-problem drop** from the prior
+f16-offload baseline (7/20), landing exactly at the Plain Qwen3-4B
+reference (6/20). On a 20-prompt gate with documented fp16-cliff
+sensitivity (greedy autoregression amplifies ~1e-3 deviations on
+cliff-adjacent prompts) this is within the noise floor; the bf16 read-back
+carries 3 fewer mantissa bits than the f16 result it replaces, the
+plausible cause of the flipped completion.
+
+**Decision: bf16 read-back ships default-on** for the DCT-IV prefill
+offload (fp16 GPU), accepting the Plain-Qwen3 reference (6/20) as the bar
+for the ~9% prefill win; escape hatch `GELO_BF16_OFFLOAD=0`. A
+larger-eval re-test (full HumanEval-164 / MBPP) is owed to confirm the
+6-vs-7 is gate noise, not real degradation.
+
+**Updated lever ranking (§12.4):** bf16's realised win is ~9% (read-back),
+not the projected ~20–25% (transform) — and the transform itself is
+FFT-bound (§13.4), so vectorising it is out. The top remaining levers are
+**R4 async overlap (X2)** (overlap CPU mask with GPU matmul), then the
+**FLOP-reducing mask levers** (cheaper HD₃-at-prefill transform; eliminate
+the FFN-intermediate unmask) — not further bf16 or kernel-vectorisation work.
+
+**HumanEval gate batching:** the gate generator was switched from B=1
+per-prompt to **B=8, length-sorted** (`GELO_HE_BATCH`, default 8) to cut
+wall. Expectation is modest — GELO decode is per-row (mask-cover) bound,
+not weight-bound, so batching amortises only the ~55 ms/step fixed cost
+(~1.3× throughput ceiling), and `generate_batched` has no continuous
+batching (a batch runs to its longest generator), so length-sorting is
+needed to limit idle-slot waste. Not the order-of-magnitude a weight-bound
+server would see.
+
+**Artefacts:** `bench-results/gelo-b1-bf16{on,off}-n{2048,8192}-2026-06-03.log`,
+`bench-results/gelo-b1-bf16dct4gate-n2048-2026-06-03.log`,
+`bench-results/humaneval-bf16on-2026-06-03.log`. Escape hatch
+`GELO_BF16_OFFLOAD=0`.

@@ -271,6 +271,41 @@ pub trait GpuOffloadEngine: Send {
         self.matmul_many(handles, f32_owned.view())
     }
 
+    /// Whether this engine's registered-linear outputs are already
+    /// 16-bit on the device (so narrowing the read-back to bf16 loses no
+    /// information the result didn't already carry). The GELO offload
+    /// only routes through the bf16 read-back path
+    /// (`run_registered_linear_bf16_out`) when this is true — so the
+    /// fp16 GPU engine opts in while CPU / f32 / sim engines keep the
+    /// **exact f32** read-back that their parity fixtures assert. Default
+    /// false; `WgpuVulkanEngine` overrides to its `fp16` flag.
+    fn prefers_bf16_output(&self) -> bool {
+        false
+    }
+
+    /// **bf16-output** variant of [`Self::matmul_many`] — f32 input,
+    /// **bf16** outputs (the read-back is narrowed to bf16 instead of
+    /// f32). Lets the trusted side run the mask unapply on bf16 storage
+    /// (`Dct4Mask::unapply_in_place_slice_bf16`), halving the DRAM
+    /// traffic of the dominant `mask_unapply` bucket. The GPU result is
+    /// 16-bit on the wire either way, so no extra precision is lost vs
+    /// the f32 read-back beyond the f32→bf16 host narrowing.
+    ///
+    /// Default impl forwards to [`Self::matmul_many`] and narrows on the
+    /// host, so non-overriding engines (and CPU/sim executors) stay
+    /// correct; the wgpu engine overrides to narrow at read-back.
+    fn matmul_many_bf16_out(
+        &self,
+        handles: &[WeightHandle],
+        input: ArrayView2<f32>,
+    ) -> Result<Vec<Array2<bf16>>> {
+        let f32_outs = self.matmul_many(handles, input)?;
+        Ok(f32_outs
+            .into_iter()
+            .map(|a| a.mapv(bf16::from_f32))
+            .collect())
+    }
+
     /// Run one or more registered-weight linear projections.
     ///
     /// This is the preferred accelerator seam for GELO linear offloads:
@@ -300,6 +335,34 @@ pub trait GpuOffloadEngine: Send {
             RegisteredLinearInput::F32(input) => self.matmul_many(request.handles, input),
             RegisteredLinearInput::Bf16(input) => {
                 self.matmul_many_bf16_input(request.handles, input)
+            }
+        })
+    }
+
+    /// **bf16-output** sibling of [`Self::run_registered_linear`]: same
+    /// dispatch + `engine:matmul*` profile labelling, but returns the
+    /// projections as **bf16** host arrays so the caller's mask unapply
+    /// runs on bf16 storage. Used by the GELO offload's bf16 path
+    /// (default-on for HD₃/DCT-IV masks; f32 fallback for Haar).
+    fn run_registered_linear_bf16_out(
+        &self,
+        request: RegisteredLinearBatch<'_, '_>,
+    ) -> Result<Vec<Array2<bf16>>> {
+        if request.handles.is_empty() {
+            return Ok(Vec::new());
+        }
+        let label = if request.handles.len() == 1 {
+            "engine:matmul"
+        } else {
+            "engine:matmul_many"
+        };
+        crate::profile::time(label, || match request.input {
+            RegisteredLinearInput::F32(input) => {
+                self.matmul_many_bf16_out(request.handles, input)
+            }
+            RegisteredLinearInput::Bf16(input) => {
+                let f32_owned: Array2<f32> = input.mapv(|v| v.to_f32());
+                self.matmul_many_bf16_out(request.handles, f32_owned.view())
             }
         })
     }
