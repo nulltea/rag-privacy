@@ -43,8 +43,9 @@ schemes were excluded as off-target for retrieval-style graph-RAG.}
 Following \cref{sec:comparison}, we compare \emph{by use case}---the unit of a deployment
 decision---rather than by family, putting the mechanisms that actually compete for a given
 stage side by side. Figures are normalized to the canonical metrics of
-\cref{tab:yardstick} and are indicative (self-reported across hardware/models/datasets)
-unless marked head-to-head; the non-comparability caveat of \cref{sec:comparison} stands.
+\cref{tab:yardstick} and are indicative (each from its own paper's testbed---different
+hardware, model, dataset) unless marked \emph{co-measured} (benchmarked together in one
+paper); the non-comparability caveat of \cref{sec:comparison} stands.
 \emph{Reranking} is absent from \cref{tab:performance} by design: although it is a pipeline
 stage in the gap-map above, no surveyed scheme reports a standalone private cross-encoder
 reranking measurement---the few schemes with a scoring step (p\textsuperscript{2}RAG, TRSE,
@@ -54,7 +55,7 @@ private reranking stands as an \emph{open gap} rather than a comparable cost.
   \centering \footnotesize
   \caption{Performance and fidelity by use case (indicative; normalized to
     \cref{tab:yardstick}). ``$\times$'' = overhead vs.\ plaintext; ``exact'' = computes the
-    true function. Cross-paper figures are self-reported, not head-to-head.}
+    true function. Cross-paper figures are indicative, not co-measured.}
   \label{tab:performance}
   \begin{tabular}{@{}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}p{6.3cm}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{3.6cm}@{}}
     \toprule
@@ -76,7 +77,7 @@ private reranking stands as an \emph{open gap} rather than a comparable cost.
   \end{tabular}
 \end{table*}
 \needswork{fill cells with specific cited, normalized figures (\cref{tab:yardstick}); mark
-each head-to-head vs self-reported; this performance axis is the dimension Bodea
+each co-measured vs indicative; this performance axis is the dimension Bodea
 \cite{bodea_sok} explicitly omits}
 
 \subsection{Deployment Readiness}
@@ -96,7 +97,7 @@ stage}---together they answer ``what should I deploy for my use case?''
 \begin{table*}[t]
   \centering \scriptsize
   \caption{Deployment readiness by family, on the three criteria of \cref{sec:intro}.
-    Ratings are qualitative (H/M/L) and indicative, not head-to-head; see
+    Ratings are qualitative (H/M/L) and indicative, not co-measured; see
     \cref{tab:performance} for the underlying performance basis.}
   \label{tab:deployment}
   \begin{tabular}{@{}lllll@{}}

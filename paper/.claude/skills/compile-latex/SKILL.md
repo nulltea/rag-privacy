@@ -1,56 +1,46 @@
 ---
 name: compile-latex
-description: Compile a Beamer LaTeX slide deck with XeLaTeX (3 passes + bibtex). Use when user says "compile", "build the slides", "rebuild the PDF", "run latex", "render the tex", or asks why a `.tex` file isn't producing a PDF. Operates on `Slides/*.tex`.
-argument-hint: "[filename without .tex extension]"
+description: Compile the arXiv manuscript with pdflatex + bibtex (via the manuscript Makefile, NOT XeLaTeX). Use when the user says "compile", "build the PDF", "rebuild the manuscript", "run latex", "render the tex", or asks why a `.tex` isn't producing a PDF. Operates on `manuscript/main.tex` → `main.pdf`.
+argument-hint: "[make target: all (default) | quick | clean]"
 allowed-tools: ["Read", "Bash", "Glob"]
 ---
 
-# Compile Beamer LaTeX Slides
+# Compile the Manuscript
 
-Compile a Beamer slide deck using XeLaTeX with full citation resolution.
+The manuscript builds with **pdflatex + bibtex** through `manuscript/Makefile` — **not** XeLaTeX,
+no `Slides/`, no `Preambles/`/`TEXINPUTS`. `refs.bib` lives in `manuscript/` (local, not repo root).
+Biber is **not** used.
 
-## Steps
-
-1. **Navigate to Slides/ directory** and compile with 3-pass sequence:
+## Quick start
 
 ```bash
-cd Slides
-TEXINPUTS=../Preambles:$TEXINPUTS xelatex -interaction=nonstopmode $ARGUMENTS.tex
-BIBINPUTS=..:$BIBINPUTS bibtex $ARGUMENTS
-TEXINPUTS=../Preambles:$TEXINPUTS xelatex -interaction=nonstopmode $ARGUMENTS.tex
-TEXINPUTS=../Preambles:$TEXINPUTS xelatex -interaction=nonstopmode $ARGUMENTS.tex
+cd manuscript && make            # full build: pdflatex, bibtex, pdflatex x2
 ```
 
-**Alternative (latexmk):**
-```bash
-cd Slides
-TEXINPUTS=../Preambles:$TEXINPUTS BIBINPUTS=..:$BIBINPUTS latexmk -xelatex -interaction=nonstopmode $ARGUMENTS.tex
-```
+Targets: `make quick` (one pass, refs may be stale), `make clean` (remove artifacts),
+`make watch` (rebuild on change; needs `entr`). The harness resets cwd between commands, so
+always `cd manuscript && …` in one command.
 
-2. **Check for warnings:**
-   - Grep output for `Overfull \\hbox` warnings
-   - Grep for `undefined citations` or `Label(s) may have changed`
-   - Report any issues found
+`make` is incremental: if no source changed it prints *"Nothing to be done for `all'"*. To force
+a rebuild, `touch main.tex` first or run `make clean && make`.
 
-3. **Open the PDF** for visual verification:
-   ```bash
-   open Slides/$ARGUMENTS.pdf          # macOS
-   # xdg-open Slides/$ARGUMENTS.pdf    # Linux
-   ```
+## Workflow
 
-4. **Report results:**
-   - Compilation success/failure
-   - Number of overfull hbox warnings
-   - Any undefined citations
-   - PDF page count
+1. **Build** — `cd manuscript && make` (capture output).
+2. **Check the LaTeX log** (`manuscript/main.log`, not just make's stdout):
+   - Undefined refs/cites: `grep -ciE "undefined" main.log` (expect 0); also grep `Citation .* undefined` / `Reference .* undefined` / `Label(s) may have changed` (the last means another pass is needed).
+   - Overfull boxes: `grep -c "Overfull \\hbox" main.log`; list any `>20pt` (small ones are cosmetic).
+   - Page count: `grep "Output written on main.pdf" main.log` → `(N pages, …)`.
+3. **Report** — success/failure, undefined count, overfull count (+ any >20pt and which table/section), page count. Don't `open` the PDF yourself (can't view it); suggest `open manuscript/main.pdf` for the user.
 
-## Why 3 passes?
-1. First xelatex: Creates `.aux` file with citation keys
-2. bibtex: Reads `.aux`, generates `.bbl` with formatted references
-3. Second xelatex: Incorporates bibliography
-4. Third xelatex: Resolves all cross-references with final page numbers
+## Why the 4-step cycle
 
-## Important
-- **Always use XeLaTeX**, never pdflatex
-- **TEXINPUTS** is required: your Beamer theme lives in `Preambles/`
-- **BIBINPUTS** is required: your `.bib` file lives in the repo root
+pdflatex (writes `.aux` with cite keys) → bibtex (reads `.aux`, writes `.bbl`) → pdflatex
+(pulls in bibliography) → pdflatex (resolves cross-references + final page numbers).
+
+## Notes
+
+- **Always pdflatex**, never XeLaTeX, never biber — `bibtex` only.
+- A known cosmetic ~43pt overfull at `tab:refmetrics` is pre-existing; flag it, don't chase it.
+- If the build hard-fails, `-halt-on-error` stops at the first error — read the last ~20 lines
+  of make output for the offending file/line.

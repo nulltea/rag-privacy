@@ -17,7 +17,7 @@ GELU, LayerNorm). We separate \emph{private inference} (\cref{ssec:crypto-inf}) 
 and storage} (\cref{ssec:crypto-retrieval})---the RAG-side use that is closest to deployable
 today. Because MPC/FHE inference protocols are the subject of dedicated recent
 surveys~\citep{li_pti_survey,pti_survey_2024}, we treat that sub-family briefly---through a few
-frontier exemplars---and place this section's weight on cryptographic retrieval and storage,
+frontier exemplars---and focus on cryptographic retrieval and storage,
 which those surveys do not cover.
 On the deployment-readiness criteria of \cref{sec:intro}, cryptography scores highest on
 threat-model fit and fidelity (exact computation under a TCB of none or non-collusion)
@@ -38,7 +38,7 @@ locate cryptography on our deployment-cost frontier. The pattern is uniform and 
 subsection's takeaway: even the fastest secure inference sits one-to-three orders of magnitude
 above plaintext in latency and exchanges hundreds of MB to GBs per token or inference, at exact
 (MPC) or near-exact (FHE) fidelity. None of these papers reports overhead against plaintext---they
-benchmark against prior \emph{secure} schemes---so the absolute figures below are paper-reported
+benchmark against prior \emph{secure} schemes---so the absolute figures in \cref{tab:crypto-inf} are paper-reported
 where available and otherwise recovered by one-hop extrapolation (\cref{sec:comparison}).
 \begin{table}[t]
   \centering \footnotesize
@@ -65,30 +65,46 @@ where available and otherwise recovered by one-hop extrapolation (\cref{sec:comp
 
 \subsection{Cryptographic Retrieval and Storage}
 \label{ssec:crypto-retrieval}
-% MPC + FHE TOGETHER here (decision: retrieval/storage is its own grouping, all
-% cryptographic). This is the RAG-side crypto that is closest to practical.
-\begin{table}[t]
+% MPC + FHE together (retrieval/storage is its own grouping, all cryptographic).
+% Split by index structure: vector (flat/IVF) vs graph --- not directly comparable.
+Retrieval and storage divide by index structure, and the two are \emph{not} directly
+comparable: \emph{vector} retrieval over a flat/IVF index (\cref{tab:crypto-vec}) and
+\emph{graph} retrieval over a graph-structured index or knowledge graph
+(\cref{tab:crypto-graph}) impose different cost profiles and leakage surfaces, so we
+tabulate them separately. This is the RAG-side crypto closest to practical deployment.
+\begin{table}[H]
   \centering \footnotesize
-  \caption{Cryptographic schemes for private retrieval and vector storage
-    (MPC/SS and FHE/HE together). ``gt'' = graph traversal.}
-  \label{tab:crypto-retrieval}
+  \caption{Cryptographic \emph{vector} retrieval and storage (flat/IVF ANN; MPC/SS and FHE/HE).}
+  \label{tab:crypto-vec}
   \begin{tabular}{@{}llll@{}}
     \toprule
     Scheme & Stage & Primitive & Reported cost \\
     \midrule
-    p\textsuperscript{2}RAG~\cite{p2rag}        & retrieve,rerank & 2-server SS              & 3--300$\times$ vs PRAG \\
-    Panther~\cite{panther}                       & retrieve        & PIR+SS+GC+HE (ANN)       & 18\,s @10M \\
-    PIR-RAG~\cite{pirrag}                         & retrieve        & classical PIR            & 16.8\,s @5K \\
-    Pacmann~\cite{pacmann}                        & retrieve,gt     & batched PIR (graph-ANN)  & 90\% quality; $-$22\% lat @100M \\
-    XorMM~\cite{xormm}                            & retrieve,gt     & volume-hiding EMM (SSE)  & 1.5--2$\times$ storage \\
-    FLASH~\cite{flash_emm}                        & retrieve,gt     & conjunctive VH-EMM       & 2--3$\times$ storage \\
-    PeGraph~\cite{pegraph}                        & store,retrieve,gt & SSE + secret sharing   & $<$1\,s/query @multi-M \\
-    GORAM~\cite{goram}                            & retrieve,gt     & 3PC sqrt-ORAM (reserve)  & billion-edge \\
-    RAGtime-PIANO~\cite{ragtime_piano}            & retrieve,e2e    & CKKS cluster + lattice PIR & 40$\times$ vs PIR-RAG \\
-    Compass~\cite{zhu_compass}                    & retrieve,gt     & encrypted HNSW + ORAM    & sub-second LAN \\
-    TRSE~\cite{trse}                              & retrieve,rerank & 2-round SE + HE scoring  & $\sim$100s\,ms ($k'$=100) \\
-    SAP/DCPE~\cite{fuchsbauer_sap}                & store,retrieve  & distance-cmp.-preserving enc & $\sim$0\,ms (deployed) \\
-    CAPRISE~\cite{ye_caprise}                     & store,retrieve  & conditional dist.-preserving enc & 2339 vec/s \\
+    p\textsuperscript{2}RAG~\cite{p2rag}    & retrieve,rerank & 2-server SS                      & 3--300$\times$ vs PRAG \\
+    Panther~\cite{panther}                   & retrieve        & PIR+SS+GC+HE (ANN)               & 18\,s @10M \\
+    PIR-RAG~\cite{pirrag}                     & retrieve        & classical PIR                    & 16.8\,s @5K \\
+    RAGtime-PIANO~\cite{ragtime_piano}        & retrieve,e2e    & CKKS cluster + lattice PIR       & 40$\times$ vs PIR-RAG \\
+    TRSE~\cite{trse}                          & retrieve,rerank & 2-round SE + HE scoring          & $\sim$100s\,ms ($k'$=100) \\
+    SAP/DCPE~\cite{fuchsbauer_sap}            & store,retrieve  & distance-cmp.-preserving enc     & $\sim$0\,ms (deployed) \\
+    CAPRISE~\cite{ye_caprise}                 & store,retrieve  & conditional dist.-preserving enc & 2339 vec/s \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\begin{table}[H]
+  \centering \footnotesize
+  \caption{Cryptographic \emph{graph} retrieval and storage (graph-indexed ANN and graph
+    traversal; MPC/SS and FHE/HE). ``gt'' = graph traversal.}
+  \label{tab:crypto-graph}
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    Scheme & Stage & Primitive & Reported cost \\
+    \midrule
+    Pacmann~\cite{pacmann}     & retrieve,gt       & batched PIR (graph-ANN)  & 90\% quality; $-$22\% lat @100M \\
+    Compass~\cite{zhu_compass} & retrieve,gt       & encrypted HNSW + ORAM    & sub-second LAN \\
+    XorMM~\cite{xormm}         & retrieve,gt       & volume-hiding EMM (SSE)  & 1.5--2$\times$ storage \\
+    FLASH~\cite{flash_emm}     & retrieve,gt       & conjunctive VH-EMM       & 2--3$\times$ storage \\
+    PeGraph~\cite{pegraph}     & store,retrieve,gt & SSE + secret sharing     & $<$1\,s/query @multi-M \\
+    GORAM~\cite{goram}         & retrieve,gt       & 3PC sqrt-ORAM (reserve)  & billion-edge \\
     \bottomrule
   \end{tabular}
 \end{table}

@@ -32,8 +32,8 @@ a cost axis.
 
 We are \emph{complementary} to all of these, not competing. No prior survey places all five mechanism
 families on one threat-model and deployment-cost frame, and none covers private RAG retrieval,
-storage, or graph-RAG. We therefore \emph{defer} the fine-grained systematization of MPC/FHE
-inference protocols to Li et al.~\citep{li_pti_survey}, keeping only enough crypto-inference depth---a
+storage, or graph-RAG. For the fine-grained systematization of MPC/FHE inference protocols we
+\emph{refer the reader to} Li et al.~\citep{li_pti_survey}, keeping only enough crypto-inference depth---a
 few frontier exemplars (\cref{sec:crypto})---to locate cryptography on our cross-family cost frontier;
 our distinctive contribution is the breadth across mechanisms, the retrieval and graph-RAG dimension,
 and the deployment-readiness lens.
@@ -77,7 +77,7 @@ scheme is to be adopted in a real deployment, on three criteria---\textbf{perfor
 maximal in a purely academic sense). The aim is not to crown a winning family but to
 make this trade explicit; which schemes sit near the deployable frontier is a
 \emph{finding} of the synthesis (\cref{sec:synthesis}), not an assumption. Of the
-three criteria, threat-model fit is read off the categorical taxonomy of
+three criteria, threat-model fit is determined by the categorical taxonomy of
 \cref{sec:threat}, while performance and fidelity are quantitative---reported with
 each family (\cref{sec:crypto}--\cref{sec:hybrid}) and drawn together in
 \cref{sec:synthesis}.
@@ -115,7 +115,8 @@ This paper is a \emph{systematization of knowledge}. Concretely:
         adversary behavior, trust anchor, attacker knowledge, confidentiality
         scope, and \emph{security basis} (cryptographic / DP / hardware /
         heuristic) --- the last separating provably-secure schemes from
-        empirically-resistant ones, and exposing a field-wide side-channel blind spot.
+        empirically-resistant ones, and surfacing the field-wide side-channel blind
+        spot we report as a finding in \cref{ssec:sidechannel}.
   \item \textbf{A mechanism-organized systematization} (\cref{sec:crypto}--%
         \cref{sec:hybrid}) of five defense families across the full
         inference-and-RAG pipeline, including graph-RAG as a retrieval setting.
@@ -136,5 +137,10 @@ This paper is a \emph{systematization of knowledge}. Concretely:
 \dnote{this is a PURE SoK: the only original empirical content is the §5 vignette
 (finding only). Measurements + the hybrid design live in the companion paper.}
 
-\subsection{Roadmap}
-\needswork{one short paragraph mapping sections}
+\subsection{Organization}
+The evaluation framework (\cref{sec:framework}) defines the security taxonomy and the cost
+metrics. The five mechanism families are systematized in \cref{sec:crypto}--\cref{sec:hybrid}.
+The synthesis (\cref{sec:synthesis}) draws them together---the stage\,$\times$\,mechanism
+gap-map, the performance comparison, the deployment-readiness profile, graph-RAG as a retrieval
+setting, and the field-wide side-channel finding. \Cref{sec:related} positions the work against
+prior surveys, and the conclusion lists open problems.

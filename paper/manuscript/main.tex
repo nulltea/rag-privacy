@@ -43,10 +43,23 @@
 \IfFileExists{cleveref.sty}{\haveclevereftrue}{\haveclevereffalse}
 \ifhavecleveref
   \usepackage[capitalise]{cleveref}
+  % Sections/subsections render as §X / §X.Y (compact; standard in security venues).
+  \crefname{section}{\S}{\S\S}\Crefname{section}{\S}{\S\S}
+  \crefname{subsection}{\S}{\S\S}\Crefname{subsection}{\S}{\S\S}
+  \crefname{subsubsection}{\S}{\S\S}\Crefname{subsubsection}{\S}{\S\S}
+  \crefformat{section}{\S#2#1#3}\Crefformat{section}{\S#2#1#3}
+  \crefformat{subsection}{\S#2#1#3}\Crefformat{subsection}{\S#2#1#3}
+  \crefformat{subsubsection}{\S#2#1#3}\Crefformat{subsubsection}{\S#2#1#3}
 \else
   \providecommand{\cref}[1]{\autoref{#1}}
   \providecommand{\Cref}[1]{\autoref{#1}}
+  % No cleveref here: render section/subsection cross-refs as §X / §X.Y via autoref names
+  % (tables/figures keep their normal names). Active branch in minimal TeX installs.
+  \def\sectionautorefname{\S\kern-0.15em}
+  \def\subsectionautorefname{\S\kern-0.15em}
+  \def\subsubsectionautorefname{\S\kern-0.15em}
 \fi
+\usepackage{float}  % [H]: pin tables that must not float away from their definition
 
 % --- drafting scaffolding macros (remove before submission) -----------------
 \newcommand{\needswork}[1]{{\color{red}\textbf{[TODO: #1]}}}

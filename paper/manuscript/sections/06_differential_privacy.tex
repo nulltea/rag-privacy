@@ -5,7 +5,10 @@
 Differential privacy adds calibrated noise to obtain a formal---but
 probabilistic---guarantee, applied to embeddings (a noised forward pass), to queries
 (distance-DP perturbation), or to the generated output (output-DP against extraction).
-Like obfuscation its cost is near-zero compute; unlike obfuscation it buys a provable
+A practical divide runs through the family: embedding-DP typically requires
+\emph{retraining} or fine-tuning the model under the noise mechanism---a substantial
+deployment cost---whereas query- and output-DP attach to an unmodified model.
+Like obfuscation its inference cost is near-zero compute; unlike obfuscation it buys a provable
 bound, paid for in utility as $\varepsilon$ tightens. The output-side variant
 (DP-RAG/DP-KSA) is notable for composing orthogonally with any retrieval mechanism,
 making it a generic defense against the corpus-extraction attacks of

@@ -3,17 +3,21 @@
 
 % --- scope-framing (short role-framing; bodies stay \needswork) ---
 Static obfuscation transforms the data and/or weights so the server sees only
-unintelligible values, with no---or minimal---trusted hardware: token substitution,
-learned embedding transforms, covariant (data+weight) masking, null-space projection.
-It is the cheapest family in our taxonomy (near-plaintext cost, TCB of none or light),
+values the server cannot interpret, with no---or minimal---trusted hardware: token
+substitution (replacing sensitive tokens, e.g.\ SANTEXT/RANTEXT), learned embedding
+transforms, covariant (data+weight) masking, null-space projection.
+It is the cheapest family in our taxonomy (near-plaintext cost, no trusted hardware---Tier~1),
 which is precisely why its privacy claims deserve the most scrutiny: the obfuscation
-is \emph{fixed}, so a white-box adversary can study it offline. We make that scrutiny
+is \emph{fixed}, so a white-box adversary can analyze it in advance. We make that scrutiny
 concrete in \cref{ssec:vignette}, and the published inversions in
 \cref{sec:synthesis} show several static schemes recover far more plaintext than
 their authors report. On the deployment-readiness criteria of \cref{sec:intro},
 obfuscation leads on performance and fidelity, but \emph{threat-model fit} is its weak
-axis: because the transform is fixed, a white-box adversary can study it offline, so its
-real protection is often weaker than reported (\cref{sec:synthesis}).
+axis: because the transform is fixed, a white-box adversary can analyze it in advance, so its
+real protection is often weaker than reported (\cref{sec:synthesis}). A second deployment
+advantage is infrastructural: because the model runs unmodified, static obfuscation slots
+into production inference stacks (vLLM, llama.cpp) directly---unlike crypto or TEE schemes,
+which require a bespoke serving path.
 
 \subsection{Approach}
 % Transform data and/or weights so observers see unintelligible values, with no

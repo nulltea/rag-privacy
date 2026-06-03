@@ -11,9 +11,8 @@ dimension: \emph{security}---categorical properties of who the adversary is and 
 stays hidden (\cref{sec:threat})---and \emph{cost}---the quantitative price of that
 protection, in performance and fidelity (\cref{sec:comparison}). This single split runs
 through the paper: the security dimensions yield the threat-model-fit criterion of our
-deployment-readiness lens (\cref{sec:intro}), while performance and fidelity are its other
-two criteria. We also fix here how schemes are \emph{grouped} for comparison---by use
-case, not by family.
+deployment-readiness lens (\cref{sec:intro}). We also fix here how schemes are
+\emph{grouped} for comparison---by use case, not by family.
 
 \subsection{Taxonomy: Threat Model and Security}
 \label{sec:threat}
@@ -92,7 +91,7 @@ over a corpus (Opal and the RAG-storage schemes). Its dual is the \emph{residual
 leakage}---what the adversary still observes despite the scheme: obfuscated
 service I/O (AloePri), mixed activations in untrusted VRAM (GELO, ObfuscaTune,
 the TEE-split designs), bounded storage access patterns (RemoteRAG
-\citep{cheng2025remoterag}), or ciphertexts plus distance structure (Caprise's
+\citep{cheng2025remoterag}), or cosine-distance structure (Caprise's
 DCPE \citep{ye_caprise}). The access-pattern-hiding schemes (Opal, Pacmann,
 Compass) sit on the protection side of this dual, not the leakage side: ORAM and
 PIR are precisely what reduce their residual leak to an operation type or
@@ -132,8 +131,8 @@ mechanism families on the five axes. Four patterns stand out. First, the
 obfuscation family clusters tightly at \emph{HbC + white-box}: these schemes
 explicitly assume the attacker knows the open-source model and the method, and
 stake everything on an ephemeral secret. Second, the trust anchor varies more
-than the adversary behavior does---schemes that face nearly the same attacker
-nonetheless root trust in nothing, a CPU-TEE, or a GPU-TEE, which is the real
+than the adversary behavior does: schemes that face nearly the same attacker still
+root trust in very different places---nothing, a CPU-TEE, or a GPU-TEE---which is the real
 axis of disagreement in the field. Third, only Opal and Compass
 defend a \emph{malicious} operator---Opal a host that may tamper with computation outside
 the enclave, Compass a retrieval server that may deviate from the agreed search protocol
@@ -153,8 +152,8 @@ axis---yet it is exactly what the vignette (\cref{ssec:vignette}) turns on.
     schemes, on the five axes of \cref{sec:threat-axes}. \emph{Knows}:
     wb=white-box weights, +s=+scheme. \emph{Protects} and \emph{Residual leak}
     are the two facets of confidentiality scope (asset hidden vs.\ what the server
-    still sees): act=activations (VRAM), ap=access patterns, ct+dist=ciphertexts
-    + distance structure. \emph{Basis}=security basis (crypto=cryptographic,
+    still sees): act=activations (VRAM), ap=access patterns, ct+dist=ciphertext +
+    cosine-distance structure (the distance, not the ciphertext, is the leak). \emph{Basis}=security basis (crypto=cryptographic,
     DP=differential privacy, HW=hardware-enforced, heur.=heuristic;
     *=cryptographic but distance-leaking). Side channels are out of scope for
     every row (\cref{ssec:sidechannel}).}
@@ -203,12 +202,16 @@ GELO's guarantee is narrower still: per-batch non-identifiability under a fresh,
 never-reused mixing matrix, so the attacker faces a \emph{single-batch} blind
 source separation problem and---by GELO's own analysis---gains nothing across
 batches \citep{belikov_gelo}. A worst-case adversary with unbounded compute and
-unlimited adaptive observation defeats almost every obfuscation scheme here; an
-evaluation that assumed one would therefore measure nothing interesting and
-would strawman schemes that never claimed that bar.
+unlimited adaptive observation defeats every \emph{static}-obfuscation scheme here
+outright; a per-batch design like GELO still concedes nothing \emph{across} batches,
+leaving only a single-batch blind-source-separation problem (hard, but not
+information-theoretically precluded---and SGT's stronger information-theoretic claim is
+itself contested, \cref{sec:obfuscation}). An evaluation that assumed such an adversary
+would therefore measure nothing interesting and would strawman schemes that never
+claimed that bar.
 
 This is why \emph{threat-model fit}---not threat-model maximality---is one of the three
-deployment-readiness criteria of \cref{sec:intro}. A scheme that defends an adversary
+deployment-readiness criteria. A scheme that defends an adversary
 stronger than a deployment faces (an unbounded, fully-adaptive attacker, or
 microarchitectural side-channels most operators accept or mitigate out-of-band) pays for
 that protection in performance and may price itself out of use; a scheme that defends
@@ -231,9 +234,9 @@ parent-repo evals, and confirm each stays within AloePri's reported regime}
 
 The other two deployment-readiness criteria are quantitative: \emph{performance}
 (overhead and latency) and \emph{fidelity} (impact on output quality). Comparing them
-across papers is fraught---reported numbers come from different hardware, model sizes,
-datasets, and metrics, so a raw side-by-side is meaningless. We fix here a common
-yardstick for both, and state how we group schemes when we compare them.
+across papers is hard to do fairly: reported numbers come from different hardware, model
+sizes, datasets, and metrics, so a raw side-by-side can mislead. We fix here a common set of
+\emph{reference metrics} for both, and state how we group schemes when we compare them.
 
 \paragraph{Normalizing performance.}
 Wherever a paper reports its own plaintext baseline, we express cost as an
@@ -242,10 +245,11 @@ which cancels the hardware and model to first order and is the most portable fig
 across papers. Where only absolute numbers exist, we compare only \emph{within a
 regime}---a (model-size class $\times$ hardware class) bucket (e.g.\ BERT-base encoder
 on a single GPU; a 7B decoder over WAN; ANN at a fixed corpus size)---never across
-regimes. Each figure carries a provenance flag: \emph{head-to-head} (same paper, same
-setup) versus \emph{self-reported} (cross-paper, indicative only). The non-comparability
-caveat is standing, not a footnote: every cross-paper number in this SoK is indicative
-unless explicitly marked head-to-head.
+regimes. Every cross-scheme figure here is \emph{indicative} by default: each is drawn from its own
+paper's testbed---different hardware, model, and dataset---so it conveys an order of magnitude,
+not a precise ratio. The one exception is a figure we mark \emph{co-measured}: two or more
+schemes benchmarked \emph{together, in one paper on one testbed}, where a direct comparison is
+sound. We flag co-measured figures explicitly; every unflagged figure is indicative.
 
 \paragraph{One-hop relative normalization.}
 Cryptographic-inference schemes overwhelmingly report cost \emph{relative to a prior secure
@@ -288,7 +292,7 @@ metric, and plaintext baseline for each.
 
 \begin{table}[t]
   \centering \footnotesize
-  \caption{The common yardstick: per-use-case canonical metrics against which
+  \caption{Reference metrics: per-use-case canonical metrics against which
     \cref{sec:crypto}--\cref{sec:hybrid} report and \cref{sec:synthesis} compares.}
   \label{tab:yardstick}
   \begin{tabular}{@{}llll@{}}
@@ -303,4 +307,4 @@ metric, and plaintext baseline for each.
   \end{tabular}
 \end{table}
 \needswork{once the per-family numbers are filled, confirm each is normalized to the
-matching row of \cref{tab:yardstick} and flagged head-to-head vs self-reported}
+matching row of \cref{tab:yardstick} and flagged co-measured vs indicative}
