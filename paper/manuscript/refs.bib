@@ -583,6 +583,58 @@
                the Tier-3 (confidential-GPU) deferral anchor. TODO: confirm full author list}
 }
 
+@article{li_pti_survey,
+  author  = {Li, Yang and Zhou, Xinyu and Wang, Yitong and Qian, Liangxin and Zhao, Jun},
+  title   = {Private Transformer Inference in {MLaaS}: A Survey},
+  journal = {arXiv preprint arXiv:2505.10315},
+  year    = {2025},
+  note    = {[verified-EdgeQuake: full-MD] MPC+HE only; inference-only (no TEE/obfusc/DP/RAG);
+             semi-honest/honest-majority only; layer-wise (linear/non-linear) x MPC-vs-HE taxonomy +
+             comm/runtime/accuracy eval table. The crypto-inference depth anchor we defer to.}
+}
+
+@misc{pti_survey_2024,
+  author = {{TODO verify authors}},
+  title  = {A Survey on Private Transformer Inference},
+  note   = {arXiv:2412.08145 (Dec 2024); MPC/FHE/hybrid private transformer inference, 2022--2024.
+            TODO: confirm author list + venue},
+  year   = {2024}
+}
+
+@article{xue_fhe_sok,
+  author  = {Xue, Jiaqi and Xin, Xin and Zhang, Wei and Zheng, Mengxin and Song, Qianqian and Zhou, Minxuan},
+  title   = {{SoK}: Can Fully Homomorphic Encryption Support General {AI} Computation? A Functional and Cost Analysis},
+  journal = {Proceedings on Privacy Enhancing Technologies (PoPETs)},
+  year    = {2026},
+  note    = {arXiv:2504.11604; doi 10.56553/popets-2026-0066. FHE-only; 10 FHE approaches; functional +
+             cost analysis; benchmarks graph/decision-tree/sorting/DB-agg/NN-inference (no RAG). FHE-primitive level.}
+}
+
+@article{luo_cplm_survey,
+  author  = {Luo, Jinglong and Zhang, Yehong and Zhang, Zhuo and Liu, Shiyu and Dong, Ye and Li, Haoran},
+  title   = {Cryptography-based Privacy-Preserving Large Language Models: A Lifecycle Survey of Frameworks, Methods, and Future Directions},
+  journal = {Artificial Intelligence Review},
+  year    = {2025},
+  note    = {doi 10.1007/s10462-025-11466-6. FHE+MPC across data-selection/fine-tuning/inference (crypto-only,
+             includes training; no TEE/obfusc/DP/RAG-retrieval, no cost normalization).}
+}
+
+@misc{ma_semantic_sok,
+  author = {Ma, Baihe and Jiang, Yanna and Wang, Xu and Yu, Guangsheng and Wang, Qin and Sun, Caijun},
+  title  = {{SoK}: Semantic Privacy in Large Language Models},
+  note   = {arXiv:2506.23603. Lifecycle (input/pretrain/fine-tune/align); defenses = DP, embedding
+            encryption, edge, unlearning. High-level; not mechanism/cost-deep, no crypto-inference/RAG-retrieval.},
+  year   = {2025}
+}
+
+@misc{albadawi_ckks_sok,
+  author = {Al Badawi, Ahmad and Alexandru, Andreea and Polyakov, Yuriy and Vaikuntanathan, Vinod},
+  title  = {{SoK}: Private {LLM} Inference using Approximate Homomorphic Encryption},
+  note   = {Cryptology ePrint Archive 2026/935. First systematization of non-interactive CKKS-based private
+            LLM inference (narrow FHE-inference slice).},
+  year   = {2026}
+}
+
 % ====== System baselines (cited as plaintext RAG referents) =================
 
 @misc{guo_lightrag,

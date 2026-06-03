@@ -13,9 +13,12 @@ They offer the strongest confidentiality in our taxonomy (\cref{sec:threat})---a
 trusted computing base of \emph{none} (FHE) or \emph{non-colluding parties}
 (MPC/SS), with no special hardware---at the cost of one-to-three orders of magnitude
 in latency or communication, concentrated in the non-linear operations (Softmax,
-GELU, LayerNorm). We separate \emph{private inference} (\cref{ssec:crypto-mpc-inf},
-\cref{ssec:crypto-fhe-inf}) from \emph{private retrieval and storage}
-(\cref{ssec:crypto-retrieval})---the RAG-side use that is closest to deployable today.
+GELU, LayerNorm). We separate \emph{private inference} (\cref{ssec:crypto-inf}) from \emph{private retrieval
+and storage} (\cref{ssec:crypto-retrieval})---the RAG-side use that is closest to deployable
+today. Because MPC/FHE inference protocols are the subject of dedicated recent
+surveys~\citep{li_pti_survey,pti_survey_2024}, we treat that sub-family briefly---through a few
+frontier exemplars---and place this section's weight on cryptographic retrieval and storage,
+which those surveys do not cover.
 On the deployment-readiness criteria of \cref{sec:intro}, cryptography scores highest on
 threat-model fit and fidelity (exact computation under a TCB of none or non-collusion)
 but lowest on performance for inference; its retrieval variants fare materially better
@@ -25,47 +28,40 @@ but lowest on performance for inference; its retrieval variants fare materially 
 \needswork{describe MPC/SS (linear under SS, non-linears via OT/GC or polynomial
 approximation) and FHE (CKKS/BFV depth budget); the non-linear-op bottleneck}
 
-\subsection{MPC / Secret-Sharing Inference}
-\label{ssec:crypto-mpc-inf}
+\subsection{Cryptographic Inference (Exemplars; Depth Deferred)}
+\label{ssec:crypto-inf}
+We do not re-systematize MPC/FHE Transformer-inference protocols---Li et
+al.~\citep{li_pti_survey} survey that space in depth (layer-wise, MPC-vs-HE). We keep five
+frontier exemplars (\cref{tab:crypto-inf}) that span the design space---2PC, 2PC with an
+offline dealer, distributed-MPC, mixture-of-experts routing, and non-interactive FHE---and that
+locate cryptography on our deployment-cost frontier. The pattern is uniform and is the
+subsection's takeaway: even the fastest secure inference sits one-to-three orders of magnitude
+above plaintext in latency and exchanges hundreds of MB to GBs per token or inference, at exact
+(MPC) or near-exact (FHE) fidelity. None of these papers reports overhead against plaintext---they
+benchmark against prior \emph{secure} schemes---so the absolute figures below are paper-reported
+where available and otherwise recovered by one-hop extrapolation (\cref{sec:comparison}).
 \begin{table}[t]
   \centering \footnotesize
-  \caption{MPC / secret-sharing schemes for private transformer inference.}
-  \label{tab:crypto-mpc}
-  \begin{tabular}{@{}llll@{}}
+  \caption{Cryptographic-inference exemplars. Latency and communication are paper-reported where
+    available and \emph{extrapolated} ($\dagger$; 1-hop via the cited baseline, \cref{sec:comparison})
+    where the paper gives only relative figures. No scheme reports a vs-plaintext multiplier.}
+  \label{tab:crypto-inf}
+  \begin{tabular}{@{}lllll@{}}
     \toprule
-    Scheme & Adversary & Primitive & Reported cost \\
+    Scheme & Setting & Latency & Comm. & Fidelity \\
     \midrule
-    PermLLM~\cite{permllm}    & HbC / 3PC & A-SS + permutation triples & 3\,s/tok (6B, WAN) \\
-    SecFormer~\cite{secformer}& HbC / MPC & 2Quad + Fourier-GELU         & 71\,s (BERT-base) \\
-    SHAFT~\cite{shaft}        & HbC / 2PC & constant-round softmax       & best WAN (BERT-base) \\
-    CryptoMoE~\cite{cryptomoe}& HbC / MPC & balanced-expert routing      & 2.8--3.5$\times$ vs dense MoE \\
-    BumbleBee~\cite{bumblebee}& HbC / 2PC & HE+ASS, segmented-poly exp   & $\sim$8\,min/tok (7B) \\
-    SIGMA~\cite{sigma}        & HbC / 2PC & GPU function secret sharing  & 45\,GB FSS key (BERT-large) \\
-    Fission~\cite{fission}    & HbC / MPC & A-SS + permutation triples   & $<$20\,s (1B) \\
+    PermLLM~\cite{permllm}    & 2PC+dealer, ChatGLM-6B     & 3\,s/tok (1\,Gbps)              & 20\,Mb/tok                          & exact \\
+    SHAFT~\cite{shaft}        & 2PC, BERT-base             & ${\approx}1.4$\,s$^\dagger$    & ${\approx}0.6$--$0.74$\,GB$^\dagger$ & $\approx$plain. \\
+    CryptoMoE~\cite{cryptomoe}& 2PC, MoE 6.9--16.4B        & 22--46\,s/tok (e2e)            & 2.8--4.8\,GB/tok                    & 99.2\% acc \\
+    Fission~\cite{fission}    & MPC+evaluators, ModernBERT & $<$5\,s/inf                    & $<$3\,GB                            & $\approx$plain. \\
+    Euston~\cite{euston}      & FHE (non-int.), BERT-base  & ${\approx}10.7$\,s$^\dagger$   & ${\approx}37$\,MB$^\dagger$         & approx. \\
     \bottomrule
   \end{tabular}
-\end{table}
-\needswork{narrate the trust/perf spread: BumbleBee = most robust trust (2PC, no
-dealer) but slowest; SIGMA = best online perf but heavy FSS setup}
 
-\subsection{FHE / HE Inference}
-\label{ssec:crypto-fhe-inf}
-\begin{table}[t]
-  \centering \footnotesize
-  \caption{FHE schemes for private transformer inference (non-interactive).}
-  \label{tab:crypto-fhe}
-  \begin{tabular}{@{}llll@{}}
-    \toprule
-    Scheme & Adversary & Primitive & Reported cost \\
-    \midrule
-    Euston~\cite{euston}            & HbC / none & RNS-CKKS (NEXUS successor) & NEXUS-class \\
-    NEXUS~\cite{nexus}              & HbC / none & non-interactive RNS-CKKS   & 1.31\,s amortized (BERT, 256-batch) \\
-    CipherFormer~\cite{cipherformer}& HbC / none & low-round FHE encoder      & 7.7--11.9$\times$ vs HErBERT \\
-    \bottomrule
-  \end{tabular}
+  \smallskip
+  {\footnotesize $^\dagger$ extrapolated 1-hop: SHAFT via SIGMA~\cite{sigma}
+  (1.84\,s/0.99\,GB, BERT-base); Euston via NEXUS~\cite{nexus} (37.3\,s/164\,MB, BERT-base).}
 \end{table}
-\needswork{FHE = no interaction / no dealer, but multiplicative-depth-bound and
-amortization-dependent; NEXUS/Euston push non-interactive to BERT scale}
 
 \subsection{Cryptographic Retrieval and Storage}
 \label{ssec:crypto-retrieval}
@@ -90,7 +86,6 @@ amortization-dependent; NEXUS/Euston push non-interactive to BERT scale}
     GORAM~\cite{goram}                            & retrieve,gt     & 3PC sqrt-ORAM (reserve)  & billion-edge \\
     RAGtime-PIANO~\cite{ragtime_piano}            & retrieve,e2e    & CKKS cluster + lattice PIR & 40$\times$ vs PIR-RAG \\
     Compass~\cite{zhu_compass}                    & retrieve,gt     & encrypted HNSW + ORAM    & sub-second LAN \\
-    GraSS~\cite{grass}                            & retrieve,gt     & FHE graph-based ANN      & 13\,s @5K \\
     TRSE~\cite{trse}                              & retrieve,rerank & 2-round SE + HE scoring  & $\sim$100s\,ms ($k'$=100) \\
     SAP/DCPE~\cite{fuchsbauer_sap}                & store,retrieve  & distance-cmp.-preserving enc & $\sim$0\,ms (deployed) \\
     CAPRISE~\cite{ye_caprise}                     & store,retrieve  & conditional dist.-preserving enc & 2339 vec/s \\

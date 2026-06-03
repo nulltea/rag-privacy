@@ -175,7 +175,7 @@ axis---yet it is exactly what the vignette (\cref{ssec:vignette}) turns on.
     PipeLLM      & HbC        & GPU-TEE        & ---  & data+model  & PCIe act.     & HW \\
     \midrule
     \multicolumn{7}{@{}l}{\textit{Cryptographic / DP / RAG}}\\
-    PermLLM      & HbC        & non-coll.\ 3PC & wb   & input        & shares       & crypto+heur. \\
+    PermLLM      & HbC        & 2PC+dealer     & wb   & input        & shares       & crypto+heur. \\
     RemoteRAG    & HbC        & none           & ---  & query        & query+ap     & DP \\
     Caprise      & HbC        & none           & ---  & doc+query    & ct+dist      & crypto*+DP \\
     Pacmann      & HbC        & none (PIR)     & ---  & query+access & none (pub.\ DB) & crypto \\
@@ -246,6 +246,16 @@ regimes. Each figure carries a provenance flag: \emph{head-to-head} (same paper,
 setup) versus \emph{self-reported} (cross-paper, indicative only). The non-comparability
 caveat is standing, not a footnote: every cross-paper number in this SoK is indicative
 unless explicitly marked head-to-head.
+
+\paragraph{One-hop relative normalization.}
+Cryptographic-inference schemes overwhelmingly report cost \emph{relative to a prior secure
+scheme}, not to plaintext. Where a scheme $A$ reports a $k\times$ factor against a baseline
+$B$, and $B$ reports an absolute figure in the \emph{same} regime, we recover $A$'s absolute
+cost as ${\approx}\,\mathrm{cost}(B)/k$ and flag it \emph{extrapolated} (1-hop via $B$); we
+never chain beyond one hop, nor extrapolate across regimes. Because these baseline chains
+terminate at other \emph{secure} schemes rather than plaintext, a vs-plaintext multiplier for
+cryptographic inference is reported only as an order-of-magnitude estimate against a stated
+plaintext reference for the same regime, and flagged as such.
 
 \paragraph{Normalizing fidelity.}
 Fidelity is the impact on output quality relative to the \emph{plaintext} model. Schemes

@@ -19,11 +19,11 @@
     \toprule
     Pipeline stage & Crypto/MPC & TEE & Obfuscation & DP & Hybrid split \\
     \midrule
-    Embed            & SecFormer/NEXUS    & H100-CC          & SGT/Eguard    & DP-Fwd/SPARSE & GELO/ObfuscaTune \\
+    Embed            & SHAFT/Euston       & H100-CC          & SGT/Eguard    & DP-Fwd/SPARSE & GELO/ObfuscaTune \\
     Store (vectors)  & CAPRISE/SAP        & Opal             & ---           & ---           & --- \\
     Retrieve (ANN)   & Compass/Pacmann    & Opal+ORAM        & ---           & RemoteRAG     & --- \\
     Rerank           & p\textsuperscript{2}RAG/TRSE & Opal   & ---           & RemoteRAG(HE) & --- \\
-    Generate         & PermLLM/BumbleBee  & PipeLLM          & AloePri/OSNIP & DP-RAG(out)   & GELO/Amulet \\
+    Generate         & PermLLM/CryptoMoE  & PipeLLM          & AloePri/OSNIP & DP-RAG(out)   & GELO/SCX \\
     Graph construct. & ---                & ---              & ARoG          & ---           & PrivGemo \\
     Graph traverse   & Pacmann/XorMM      & Opal/H$_2$O$_2$RAM & ARoG        & ---           & PrivGemo \\
     \bottomrule
@@ -60,10 +60,10 @@ private reranking stands as an \emph{open gap} rather than a comparable cost.
     \toprule
     Use case & Mechanisms (representative) & Overhead (normalized) & Fidelity \\
     \midrule
-    Generation & MPC (PermLLM, BumbleBee); TEE (PipeLLM); obfusc (AloePri, SGT, OSNIP); hybrid (GELO, SCX, ObfuscaTune)
+    Generation & MPC (PermLLM, CryptoMoE, Fission); TEE (PipeLLM); obfusc (AloePri, SGT, OSNIP); hybrid (GELO, SCX, ObfuscaTune)
                & MPC 1--2 orders; TEE $<$20\%; obfusc $\sim$0; hybrid few$\times$
                & exact (MPC/TEE/hybrid); lossy (obfusc) \\
-    Embedding (encoder) & MPC (SecFormer, SHAFT); FHE (NEXUS, CipherFormer); DP (DP-Forward, SPARSE); obfusc (Eguard)
+    Embedding (encoder) & MPC (SHAFT); FHE (Euston); DP (DP-Forward, SPARSE); obfusc (Eguard)
                & crypto 1--2 orders; obfusc/DP $\sim$0
                & exact (crypto); acc.\ $\Delta$ (obfusc/DP) \\
     Vector retrieval & crypto (p\textsuperscript{2}RAG, Panther, PIR-RAG, RAGtime-PIANO); DP (RemoteRAG); enc (CAPRISE, SAP)
