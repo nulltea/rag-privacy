@@ -186,20 +186,25 @@
   year   = {2013}
 }
 
-@misc{fuchsbauer_sap,
-  author = {Fuchsbauer, Georg and others},
-  title  = {Approximate Distance-Comparison-Preserving Symmetric Encryption},
-  note   = {[verified-EdgeQuake] Scale-and-Perturb (SAP/ADCPE); parent of CAPRISE; IronCore Cloaked AI.
-            TODO: verify venue (SCN 2022?), year, id},
-  year   = {2022}
+@inproceedings{fuchsbauer_sap,
+  author    = {Fuchsbauer, Georg and Ghosal, Riddhi and Hauke, Nathan and O'Neill, Adam},
+  title     = {Approximate Distance-Comparison-Preserving Symmetric Encryption},
+  booktitle = {SCN},
+  year      = {2022},
+  doi       = {10.1007/978-3-031-14791-3_6},
+  note      = {[grounded 2026-06-03] Scale-and-Perturb (SAP/ADCPE); parent of CAPRISE;
+               IronCore Cloaked AI. Distance-ordering preservation IS the leak, by definition}
 }
 
-@misc{ye_caprise,
-  author = {Ye, Huanyi and others},
-  title  = {Efficient Privacy-Preserving Retrieval-Augmented Generation with Distance-Preserving Encryption},
-  note   = {[verified-EdgeQuake] CAPRISE; conditional distance-preserving enc for RAG; builds on SAP.
-            TODO: verify venue, year, arXiv/DOI},
-  year   = {2026}
+@inproceedings{ye_caprise,
+  author    = {Ye, Huanyi and Guo, Jiale and Liu, Ziyao and Lam, Kwok-Yan},
+  title     = {Efficient Privacy-Preserving Retrieval-Augmented Generation with
+               Distance-Preserving Encryption},
+  booktitle = {IEEE FLLM},
+  year      = {2025},
+  doi       = {10.1109/fllm67465.2025.11391120},
+  note      = {[grounded 2026-06-03] CAPRISE; conditional approximate DCPE for RAG; builds on SAP;
+               obfuscates inter-doc distances + query DistanceDP (Vec2Text BLEU 83$\to$12.4)}
 }
 
 % ====== Trusted Execution Environments (§4 baseline) ========================
@@ -468,12 +473,17 @@
   note      = {Vec2Text; canonical inversion bar (~92\% token recovery). TODO: verify pages}
 }
 
-@misc{lin_inversion,
-  author = {Lin, Yu and others},
-  title  = {An Inversion Attack Against Obfuscated Embedding Matrix in Language Model Inference},
-  note   = {[verified-EdgeQuake] ~100\% recovery from glide-reflection obfuscation; substantiates
-            "static obfuscation breaks". TODO: verify venue, year, id (doc cites arXiv 2411.05034)},
-  year   = {2024}
+@inproceedings{lin_inversion,
+  author    = {Lin, Yu and Zhang, Qizhi and Cai, Quanwei and Hong, Jue and Wu, Ye and
+               Liu, Huiqi and Duan, Bing},
+  title     = {An Inversion Attack Against Obfuscated Embedding Matrix in Language Model Inference},
+  booktitle = {EMNLP},
+  year      = {2024},
+  pages     = {2100--2104},
+  doi       = {10.18653/v1/2024.emnlp-main.126},
+  note      = {[grounded 2026-06-03] ~100\% recovery from GLIDE-REFLECTION obfuscation
+               (Mishra et al. 2024) --- an obfuscation (\S5) attack, NOT a DCPE break.
+               Prior arXiv:2411.05034 attribution was wrong (that id is the Eguard defense).}
 }
 
 @inproceedings{kellaris2016leakage,
@@ -481,7 +491,9 @@
   title     = {Generic Attacks on Secure Outsourced Databases},
   booktitle = {ACM CCS},
   year      = {2016},
-  note      = {access-pattern + volume leakage. TODO: verify pages}
+  doi       = {10.1145/2976749.2978386},
+  note      = {[grounded 2026-06-03] access-pattern + communication-volume reconstruction;
+               ``applies directly'' to DCPE-on-vector-DB deployments}
 }
 
 @misc{depth_false_privacy,
@@ -492,11 +504,24 @@
   year   = {2025}
 }
 
-@misc{hnm,
-  author = {Thomas and others},
-  title  = {Hidden No More: Attacking and Defending Private Third-Party {LLM} Inference},
-  note   = {99\% recovery; broke STIP/PermLLM/Centaur. TODO: verify authors, exact title,
-            venue (ICML 2025?), year (doc cites arXiv 2505.18332)},
+@inproceedings{hnm,
+  author    = {Thomas, Rahul and Zahran, Louai and Choi, Sunoo and Potti, Aravind and
+               Goldblum, Micah and Pal, Arka},
+  title     = {Hidden No More: Attacking and Defending Private Third-Party {LLM} Inference},
+  booktitle = {ICML (PMLR vol.~267)},
+  year      = {2025},
+  note      = {[grounded 2026-06-03] near-perfect prompt reconstruction via vocabulary
+               matching (decoder injectivity); broke STIP/PermLLM/Centaur (fixed permutations).
+               arXiv:2505.18332. TODO: verify full author order/pages}
+}
+
+@misc{cascade_thomas,
+  author = {Thomas, Rahul and Zahran, Louai and Choi, Sunoo and Potti, Aravind and
+            Goldblum, Micah and Pal, Arka},
+  title  = {{Cascade}: Token-Sharded Private {LLM} Inference},
+  note   = {[grounded 2026-06-03] the defense co-designed with HNM (same authors); token
+            sharding; security is statistical (not cryptographic) and only for certain
+            sharding choices. arXiv:2507.05228},
   year   = {2025}
 }
 
@@ -506,6 +531,70 @@
   note   = {>98\% weight recovery. TODO: verify authors, exact title, venue (USENIX Sec 2025?),
             year (doc cites arXiv 2602.11088)},
   year   = {2025}
+}
+
+% --- §3.5 cryptographic-attack-surface citations (grounded 2026-06-03;
+%     see docs/research/crypto-attack-surface.md) -----------------------------
+@inproceedings{muse_2021,
+  author    = {Lehmkuhl, Ryan and Mishra, Pratyush and Srinivasan, Akshayaram and Popa, Raluca Ada},
+  title     = {{Muse}: Secure Inference Resilient to Malicious Clients},
+  booktitle = {USENIX Security},
+  year      = {2021},
+  note      = {[grounded 2026-06-03] a malicious client breaks server-input privacy in
+               semi-honest 2PC secure inference (model extraction); ePrint 2021/1040}
+}
+
+@inproceedings{li_micciancio_2021,
+  author    = {Li, Baiyu and Micciancio, Daniele},
+  title     = {On the Security of Homomorphic Encryption on Approximate Numbers},
+  booktitle = {EUROCRYPT},
+  year      = {2021},
+  doi       = {10.1007/978-3-030-77870-5_23},
+  note      = {[grounded 2026-06-03] IND-CPA$^{\mathrm{D}}$: full CKKS key recovery WHEN the
+               adversary observes decryptions; plain IND-CPA (server-curious) unaffected.
+               ePrint 2020/1533}
+}
+
+@inproceedings{naveed_ppe_2015,
+  author    = {Naveed, Muhammad and Kamara, Seny and Wright, Charles V.},
+  title     = {Inference Attacks on Property-Preserving Encrypted Databases},
+  booktitle = {ACM CCS},
+  year      = {2015},
+  doi       = {10.1145/2810103.2813651},
+  note      = {[grounded 2026-06-03] plaintext recovery of the property-preserving-encryption
+               family (DCPE's class) from ciphertext + auxiliary distribution}
+}
+
+@inproceedings{kornaropoulos_knn_2019,
+  author    = {Kornaropoulos, Evgenios M. and Papamanthou, Charalampos and Tamassia, Roberto},
+  title     = {Data Recovery on Encrypted Databases with k-Nearest Neighbor Query Leakage},
+  booktitle = {IEEE S\&P},
+  year      = {2019},
+  doi       = {10.1109/sp.2019.00015},
+  note      = {[grounded 2026-06-03] k-NN/ANN value reconstruction from query leakage
+               (rel.\ error 2.9\%$\to$0.003\%); applies to non-oblivious encrypted retrieval}
+}
+
+@inproceedings{blackstone_revisiting_2020,
+  author    = {Blackstone, Laura and Kamara, Seny and Moataz, Tarik},
+  title     = {Revisiting Leakage Abuse Attacks},
+  booktitle = {NDSS},
+  year      = {2020},
+  doi       = {10.14722/ndss.2020.23103},
+  note      = {[grounded 2026-06-03] volume-only (VolAn/SelVolAn) query recovery against SSE/EMM
+               at low known-data rate}
+}
+
+@article{ando_cost_2022,
+  author  = {Ando, Megumi and George, Marilyn},
+  title   = {The Cost of Suppressing Volume for Encrypted Multi-Maps},
+  journal = {PoPETs},
+  volume  = {2022},
+  number  = {4},
+  year    = {2022},
+  doi     = {10.56553/popets-2022-0098},
+  note    = {[grounded 2026-06-03] lower bound: volume-hiding EMMs leaking $\le$ query-equality
+             often cannot beat naive max-padding storage}
 }
 
 @misc{tsqp,

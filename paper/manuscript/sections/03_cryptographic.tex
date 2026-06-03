@@ -25,8 +25,39 @@ but lowest on performance for inference; its retrieval variants fare materially 
 (\cref{sec:synthesis}).
 
 \subsection{Approach}
-\needswork{describe MPC/SS (linear under SS, non-linears via OT/GC or polynomial
-approximation) and FHE (CKKS/BFV depth budget); the non-linear-op bottleneck}
+\label{ssec:crypto-approach}
+Cryptographic confidentiality for an LLM/RAG pipeline is bought by two families of
+primitive that address two distinct leakages: \emph{compute-hiding} primitives conceal
+the values a server computes on, and \emph{access-hiding} primitives conceal which data
+a server touches.
+
+\paragraph{Compute-hiding (inference).}
+Secret sharing (SS) and the multi-party protocols built on it (MPC) split each value
+into shares held by non-colluding parties. Linear maps---the bulk of a Transformer's
+matrix multiplications---are then local (free under SS) or need only cheap Beaver-triple
+multiplications, so the cost concentrates entirely in the non-linear operations. Softmax,
+GELU, and LayerNorm have no linear-sharing analogue and must be evaluated through
+oblivious transfer or garbled circuits, or replaced by polynomial/Fourier
+approximations---each adding rounds, communication, or approximation error.
+Fully-homomorphic encryption (FHE) instead evaluates a circuit directly on ciphertext
+under a single key; the RNS-CKKS scheme used by Transformer-FHE work is \emph{leveled},
+supporting computation only up to a fixed multiplicative depth $L$ before an expensive
+bootstrap, which again forces the non-linearities into low-degree polynomial
+approximations that consume the depth budget. In both families the non-linear operations
+are the bottleneck, and this is the structural reason secure inference sits one-to-three
+orders of magnitude above plaintext (\cref{ssec:crypto-inf}).
+
+\paragraph{Access-hiding (retrieval).}
+Retrieval leaks through a different channel---\emph{which} vectors or graph nodes a query
+touches. Private information retrieval (PIR) lets a client fetch a record without the
+server learning which one; oblivious RAM (ORAM) hides the access pattern of a sequence of
+reads and writes; searchable/structured encryption (SSE) and encrypted multi-maps (EMM)
+support keyword and adjacency lookups over ciphertext while bounding what access and
+volume patterns reveal; and distance-comparison-preserving encryption (DCPE) keeps
+similarity search cheap by encrypting vectors so that distance \emph{orderings}
+survive---trading exactness and a quantified leakage for near-plaintext speed. These
+primitives compose with the compute-hiding layer but are costed and attacked separately,
+which is why we tabulate retrieval (\cref{ssec:crypto-retrieval}) apart from inference.
 
 \subsection{Cryptographic Inference (Exemplars; Depth Deferred)}
 \label{ssec:crypto-inf}
@@ -108,15 +139,101 @@ tabulate them separately. This is the RAG-side crypto closest to practical deplo
     \bottomrule
   \end{tabular}
 \end{table}
-\needswork{retrieval crypto is the practical frontier of this family; Compass/Pacmann
-serve graph-RAG ANN, XorMM/FLASH the adjacency leak (see \cref{sec:synthesis}); SAP/CAPRISE
-trade exactness for near-zero overhead (and are attackable --- \cref{sec:obfuscation})}
+Retrieval cryptography is the practical frontier of this family, and the schemes divide
+by what they hide. \emph{Access-hiding} retrieval closes the channel of which record is
+touched: Pacmann and PIR-RAG answer a query through PIR without the server learning the
+target, and Compass wraps an encrypted HNSW index in client-side ORAM to defend even a
+\emph{malicious} server, leaving only the operation type (search vs.\ insert/delete)
+visible. \emph{Volume-bounding} retrieval addresses the adjacency and multi-map leak
+central to graph-RAG: XorMM and FLASH are volume-hiding encrypted multi-maps that hide
+result-set size for entity/relation lookups, while PeGraph and GORAM extend encrypted
+search to graph traversal at scale (\cref{sec:synthesis}). At the opposite end,
+distance-comparison-preserving encryption (SAP/DCPE, CAPRISE) buys near-zero overhead
+($\sim$2339\,vec/s) by preserving distance orderings directly on ciphertext---but that
+preserved ordering is itself a leakage surface and the family is invertible; we treat the
+attack in \cref{ssec:crypto-limits} (with the obfuscation parallel in
+\cref{sec:obfuscation}).
 
 \subsection{Performance (Reported)}
-\needswork{the headline cost reality: MPC inference is 1--2 orders slower (BumbleBee
-$\sim$8\,min/token, 7B); retrieval crypto (Compass sub-second, CAPRISE 2339 vec/s) is
-far closer to practical}
+\label{ssec:crypto-perf}
+Two performance regimes separate within this family, and the gap between them is the
+section's deployment-readiness message. \emph{Inference} crypto remains one-to-three
+orders of magnitude above plaintext: among the kept exemplars, PermLLM generates a token
+in ${\approx}3$\,s (ChatGLM-6B, 1\,Gbps), CryptoMoE runs $22$--$46$\,s/token end-to-end
+at $6.9$--$16.4$B parameters, and the non-interactive FHE path (Euston,
+${\approx}10.7$\,s/inference extrapolated via NEXUS) trades interaction for
+latency---all exchanging tens of Mb to several GB per token or inference, at exact (MPC)
+or near-exact (FHE) fidelity (\cref{tab:crypto-inf}). \emph{Retrieval} crypto is
+materially closer to practical: Compass answers encrypted graph-ANN queries in
+sub-second LAN time, CAPRISE encrypts $2339$\,vectors/s, and the volume-hiding multi-maps
+add only a $1.5$--$3\times$ storage factor (\cref{tab:crypto-vec} and~\cref{tab:crypto-graph}).
+Because no scheme reports a vs-plaintext multiplier and the hardware, models, and
+datasets differ across rows, these figures are indicative rather than comparable
+(\cref{sec:comparison}); the cross-family placement is deferred to \cref{sec:synthesis}.
 
 \subsection{Limitations and Known Attacks}
-\needswork{non-colluding assumption (MPC); non-linear-op overhead; FHE depth;
-distance-preserving encryption leaks ordering and is invertible \citep{lin_inversion}}
+\label{ssec:crypto-limits}
+
+\paragraph{The trust assumption is the security.}
+Every cryptographic scheme in this section is proved secure only against a
+\emph{semi-honest} adversary, and the MPC/SS schemes additionally require their computing
+parties \emph{not to collude}. Neither assumption is free. Muse shows that a single
+\emph{malicious} client deviating from a semi-honest 2PC inference protocol can extract
+the server's model weights~\citep{muse_2021}, and two colluding parties---or, for the
+2-server retrieval schemes p\textsuperscript{2}RAG and PeGraph, two co-located
+servers---collapse additive sharing back to plaintext. Closing the malicious-client gap
+costs roughly $1.3$--$2\times$ (SIMC) and full malicious-secure inference more; no scheme
+we survey adopts either. The deployment-readiness consequence is sharp: under a realistic
+cloud adversary that can deviate or quietly co-locate its ``non-colluding'' parties, the
+cryptographic guarantee degrades to that of an honest operator---comparable in trust to a
+TEE, but without the attestation that lets a client \emph{verify} it
+(\cref{sec:tee} and~\cref{sec:hybrid}).
+
+\paragraph{Permutation secrecy is heuristic, not information-theoretic.}
+The fastest secure-inference exemplars buy their speed by evaluating non-linearities on
+\emph{permuted} plaintext rather than under MPC: PermLLM reveals randomly permuted hidden
+states for in-clear evaluation, and Fission reveals shuffled activation \emph{chunks} to
+evaluator nodes. Both papers concede this is not information-theoretic---PermLLM cannot
+achieve provable secrecy, and Fission's own attack recovers $68.7\%$ binary-class
+accuracy from PermLLM-style permuted reveals (versus $94.1\%$ with no permutation). Hidden
+No More sharpens the point, reconstructing prompts with near-perfect accuracy from fixed
+permutations by exploiting decoder injectivity---breaking STIP, Centaur, and PermLLM in a
+third-party-node deployment~\citep{hnm}; the co-designed defence (token sharding) is only
+\emph{statistically} secure, and only for some sharding choices~\citep{cascade_thomas}.
+The exposure is contingent on \emph{who} sees the permuted reveal---PermLLM as specified
+reveals to the user (their own data), and Fission's multi-evaluator chunking drives
+leakage down as ${\sim}\log(N)$ but eliminates it only by batching queries---so
+permutation schemes are best read as a heuristic speed/leakage trade, not a
+confidentiality guarantee on par with full MPC or FHE.
+
+\paragraph{FHE: depth budget and approximate-ciphertext security.}
+RNS-CKKS supports only a bounded multiplicative depth before bootstrapping, so the
+non-linearities are polynomial approximations whose accuracy is range-dependent (direct
+Taylor approximations break on large input ranges). Separately, approximate-FHE
+ciphertexts carry a security subtlety: the IND-CPA\textsuperscript{D} attack of Li and
+Micciancio recovers a CKKS secret key when an adversary can \emph{observe decryptions} of
+honestly evaluated ciphertexts~\citep{li_micciancio_2021}, mitigated by noise flooding at
+some precision cost. The attack bites only where decrypted outputs cross a boundary the
+adversary controls; for the non-interactive inference schemes here, where the server
+never sees a decryption, plain IND-CPA suffices---but RAG deployments that return
+decrypted scores or rankings to a queryable client should apply the countermeasure.
+
+\paragraph{Retrieval: ordering, access, and volume leakage.}
+The retrieval schemes trade exactness or residual leakage for their speed.
+Distance-comparison-preserving encryption (SAP/DCPE, CAPRISE) preserves distance
+\emph{orderings} on ciphertext by construction---which is precisely the leak: the
+property-preserving-encryption family is invertible from ciphertext plus auxiliary
+distribution~\citep{naveed_ppe_2015}, and embeddings recovered this way are readable by
+inversion models such as Vec2Text~\citep{morris2023vec2text} (CAPRISE obfuscates
+inter-document distances and adds query-side noise specifically to blunt this). The
+ANN/SSE schemes leak instead through access and volume: generic reconstruction attacks
+consume access-pattern and communication-volume leakage~\citep{kellaris2016leakage},
+$k$-nearest-neighbour query leakage alone suffices to recover
+values~\citep{kornaropoulos_knn_2019}, and volume-only attacks defeat schemes that hide
+\emph{which} record is touched but not \emph{how many}~\citep{blackstone_revisiting_2020}
+---the reason volume-hiding multi-maps exist, though even those cannot asymptotically beat
+naive padding~\citep{ando_cost_2022}. Crucially, this attack chain stops at the oblivious
+schemes: PIR and ORAM (Pacmann, Panther, Compass) genuinely close the access-pattern
+channel rather than merely leaving it unattacked, which is why they---not the
+distance-preserving shortcuts---anchor the deployable end of cryptographic retrieval
+(\cref{sec:synthesis}).
