@@ -53,7 +53,7 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [x] | PermLLM ★ | Zheng et al. 2024, NeurIPS | generate | HbC/3-party | 3s/tok (6B WAN) | A-SS + permutation triples; broken by Hidden-No-More |
 | [ ] | SecFormer ★ | 2024, ACL | embed,generate | HbC/MPC | 71s (BERT-base); 3.6× vs PUMA | 2Quad + Goldschmidt + Fourier-GELU → **deferred to Li et al. 2025 PTI survey** (crypto-inference; lineage) |
 | [x] | SHAFT | 2025, NDSS (ePrint 2025/2324) | embed,generate | HbC/2PC | best WAN (BERT-base) | first constant-round softmax; Fourier GELU |
-| [x] | CryptoMoE ★ | Zhou et al. 2026 | generate | HbC/MPC | 2.8–3.5× vs dense MoE | balanced-expert-routing private MoE |
+| [x] | CryptoMoE ★ | Zhou et al., NeurIPS 2025 (2511.01197) | generate | HbC/MPC | 2.8–3.5× vs dense MoE | balanced-expert-routing private MoE |
 | [ ] | PUMA | 2023 (2307.12533) | embed,generate | HbC/3PC | ~200s/tok (7B); proto-design | polynomial softmax/GELU |
 | [ ] | BOLT | 2024, S&P | embed,generate | HbC/2PC | min-scale (BERT); token-prune | HE+ASS, Remez softmax |
 | [ ] | BumbleBee | 2025, NDSS | embed,generate | HbC/2PC | ~8min/tok (7B) | HE+ASS, segmented-poly exp → **deferred to Li et al. 2025 PTI survey** (crypto-inference; lineage; SHAFT is the kept 2PC exemplar) |
@@ -70,8 +70,8 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [x] | Pacmann ★ | Zhou et al. 2025, ICLR (ePrint 2024/1600) | retrieve,gt | HbC/1-server (PIR) | 90% ANN quality; −22% lat @100M | client-side graph-ANN traversal via batched PIR; crypto-only, no HW trust; **graph-RAG crypto tier** |
 | [x] | PIR-RAG | Wang et al. 2025 | retrieve | HbC/PIR | 16.8s @5K | classical PIR into dense RAG |
 | [ ] | Hiding Your Awful Online Choices | Mukherjee et al. 2024 | retrieve | HbC/MPC | 100M entries | HE+MPC secure k-NN |
-| [x] | XorMM | Patel et al. 2022, CCS | retrieve,gt | HbC/none (SSE) | 1.5–2× storage; optimal comm | non-lossy volume-hiding EMM; **direct fit for LightRAG adjacency/source\_id leak** |
-| [x] | FLASH | 2024, IEEE TDSC | retrieve,gt | HbC/none (SSE) | 2–3× storage | conjunctive volume-hiding EMM (metadata-filtered adjacency) |
+| [x] | XorMM | Wang et al. 2022, CCS (10.1145/3548606.3559345) | retrieve,gt | HbC/none (SSE) | 1.5–2× storage; optimal comm | non-lossy volume-hiding EMM; **direct fit for LightRAG adjacency/source\_id leak** (corpus had Patel/3560593 = Leakage-Inversion baseline) |
+| [x] | FLASH | Wu et al. 2025, IEEE TDSC (10.1109/tdsc.2025.3600572) | retrieve,gt | HbC/none (SSE) | >2× storage saving vs OXTMM | conjunctive volume-hiding EMM (metadata-filtered adjacency) |
 | [ ] | Veil | 2023, SIGMOD | retrieve,gt | HbC/none (SSE) | 1.2–1.8× storage (tunable) | overlapping-bucket volume-hiding EMM (mention; XorMM/FLASH preferred) |
 | [x] | PeGraph | 2022, IEEE TIFS | store,retrieve,gt | HbC/none (SSE+SS) | <1s/query @multi-M | encrypted (social-)graph search: fuzzy + ranked + neighborhood queries at scale |
 | [x] | GORAM | Fan et al. 2025, PVLDB (2410.02234) | retrieve,gt | HbC/3PC | billion-edge | sqrt-ORAM ego-graph queries; **heavier-trust (3PC) federated/multi-silo reserve, not single-tenant default** |
@@ -99,7 +99,7 @@ graph-construct (gc) · graph-traverse (gt) · end-to-end (e2e).
 | [ ] | Strong Simulation Queries | Lyu et al. 2021, ICDE | retrieve,gt | HbC/none | ? | CPA-secure encrypted-graph match |
 | [ ] | SimplePIR / PIANO | — | retrieve | HbC/PIR | O(√n) comm | PIR primitives |
 | [x] | SAP / ADCPE / DCPE ★ | Fuchsbauer et al. 2022, SCN | store,retrieve | HbC/none | ~0ms (deployed) | Scale-and-Perturb (approx) distance-comparison-preserving enc; **parent of CAPRISE**; IronCore Cloaked AI |
-| [x] | CAPRISE ★ | Ye et al. 2026 | store,retrieve | HbC/none | 2339 vec/s | conditional distance-preserving enc for RAG (builds on SAP) |
+| [x] | CAPRISE ★ | Ye et al. 2025, IEEE FLLM (10.1109/fllm67465.2025.11391120) | store,retrieve | HbC/none | 2339 vec/s | conditional approximate distance-preserving enc for RAG (builds on SAP) |
 | [ ] | CKKS / BFV | Cheon 2017 / Fan-Vercauteren 2012 | store,retrieve | — | — | FHE scheme primitives |
 
 ## 3. Trusted Execution Environments (TEE)
@@ -191,7 +191,7 @@ proving overhead is 100×–1000s×.
 |:---:|---|---|---|---|
 | [x] | Vec2Text | Morris et al. 2023, EMNLP | embeddings | ~92% token recovery; the canonical inversion bar |
 | [x] | EDNN | Lin et al. 2024 | embeddings | ~100% model-agnostic NN inversion |
-| [x] | Lin Inversion-of-Obfusc-Embedding ★ | Lin et al. 2024 (2411.05034) | obfusc embeddings | ~100% recovery from glide-reflection obfusc |
+| [x] | Lin Inversion-of-Obfusc-Embedding ★ | Lin et al. 2024, EMNLP (DOI 10.18653/v1/2024.emnlp-main.126) | obfusc embeddings | ~100% recovery from glide-reflection obfusc (NOT DCPE; arXiv 2411.05034 was a mis-ID — that id = Eguard, line above) |
 | [x] | Kellaris et al. | 2016, CCS | access patterns | generic access/volume leakage proof |
 | [x] | Kornaropoulos et al. | 2019, S&P | searchable enc | SE leakage impossibility style |
 | [x] | ISA (Input Stealing) | AloePri §D.1 | hidden states | gradient-opt match to public model |

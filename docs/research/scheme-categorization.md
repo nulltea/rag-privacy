@@ -437,6 +437,31 @@ highest-value corrections for the manuscript and `refs.bib`.
     RAGtime-PIANO, XorMM, FLASH, PeGraph, GORAM, TRSE) is **unaffected** — Li et al. does not cover it,
     it is our distinctive territory.
 
+23. **`lin_inversion` mis-cited for DCPE — FIXED (2026-06-03).** §3.5 draft cited `lin_inversion`
+    (arXiv 2411.05034) as the attack breaking distance-comparison-preserving encryption (SAP/CAPRISE).
+    Wrong twice: (a) **2411.05034 is the Eguard *defense*** (corpus already lists it correctly at that
+    id), not Lin's attack; (b) the real Lin et al. attack ("Inversion Attack Against Obfuscated
+    Embedding Matrix," **EMNLP 2024**, DOI 10.18653/v1/2024.emnlp-main.126) targets **glide-reflection
+    obfuscation**, not DCPE. **refs.bib `lin_inversion` fixed + re-scoped to §5 obfuscation.** Correct
+    DCPE-leakage cites: Fuchsbauer SCN'22 (property), **Naveed-Kamara-Wright CCS'15** (PPE inversion),
+    Kellaris CCS'16 (access/volume), Vec2Text (embedding inversion). survey-corpus.md attack row fixed.
+
+24. **XorMM corpus row corrected (2026-06-03).** Per #11, survey-corpus.md credited "Patel et al."
+    with the Leakage-Inversion DOI (3560593). **Fixed to Wang et al., CCS 2022, DOI
+    10.1145/3548606.3559345.** Part E #11 (the diagnosis) now propagated to the corpus table.
+
+25. **FLASH metadata (2026-06-03).** Corpus said "2024, IEEE TDSC, 2–3× storage." Verified **Wu et
+    al., IEEE TDSC 2025, DOI 10.1109/tdsc.2025.3600572**, and its headline is **>2× storage *saving*
+    vs OXTMM** (not a 2–3× overhead). survey-corpus.md updated; the §3 `tab:crypto-graph` cell still
+    reads "2–3× storage" — reconcile against "saving" framing before submission.
+
+26. **CryptoMoE / CAPRISE years (2026-06-03).** CryptoMoE = **NeurIPS 2025** (arXiv 2511.01197), not
+    "Zhou et al. 2026." CAPRISE = **IEEE FLLM 2025** (DOI 10.1109/fllm67465.2025.11391120), not "2026";
+    formal name *Conditional **Approximate** DCPE*. survey-corpus.md + refs.bib updated.
+
+> Full attack investigation feeding these: `crypto-attack-surface.md` (6 property clusters,
+> property→attack→scheme→defense + transitivity flags), companion to this doc.
+
 > **Doc-ID note:** during grounding the EdgeQuake doc IDs for Compass (`7b372edb`) and
 > Fuchsbauer SAP/ADCPE (`887283e3`) were each grounded by their actual content, not by label.
 
