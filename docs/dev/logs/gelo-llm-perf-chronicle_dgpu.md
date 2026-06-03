@@ -852,6 +852,34 @@ vs orthogonal cover). The earlier "merge fused-output unapplies" idea is
 **also dead** (compute-bound → identical FLOPs; would only add concat
 copies; the transform is already column-parallel).
 
+**SIMD A/B + the real lever is the build target.** Implementing the
+branchless diag (multiply by ±1, no branch) and A/B-ing it on the spike
+microbench surfaced something bigger:
+
+| build | diag baseline (branched) | diag branchless | full unapply (d=9728) | cascade |
+|---|--:|--:|--:|--:|
+| **default `--release` (x86-64 / SSE2)** | 38.4 µs | **5.95 µs (6.45×)** | 1.52 ns/elem | — |
+| **`target-cpu=native` (Zen4 AVX-512)** | **3.5 µs** | 3.5 µs (1.00×) | 1.32 ns/elem | **~13% faster** |
+
+- On the **default build** the branched diag is slow (the data-dependent
+  negate doesn't vectorise); branchless gives 6.45×, but the diag is ~7%
+  of the cascade → only **~1.5% prefill**.
+- On **`target-cpu=native`** the compiler vectorises the *branched*
+  baseline too (38→3.5 µs, 11×), so branchless gives nothing — **and the
+  whole cascade is ~13% faster** (rustfft + glue both pick up AVX-512).
+- **The repo's `.cargo/config.toml` sets no `target-cpu`** — production
+  (and every §12/§13 bench here) builds at the x86-64 SSE2 baseline. So
+  the SIMD headroom isn't in hand-vectorising one kernel; it's a
+  **build-flag**: adding `target-cpu=native` (fixed dGPU box) or
+  `x86-64-v3` (portable AVX2) to the config. The cascade gets ~13% free,
+  and this almost certainly speeds **every autovectorised CPU bucket**
+  (mask apply/unapply, shield, cover rotates, in-TEE attention) — which
+  are ~50%+ of prefill/decode. **Next: measure `target-cpu=native` on the
+  full prefill/decode bench** (RUSTFLAGS must re-include the rpath
+  link-args, or add `target-cpu` to the config) — likely the largest
+  free CPU-side win surfaced so far. (Branchless-diag is kept as a
+  spike-only `#[cfg(test)]` helper; it's subsumed by the build flag.)
+
 ### 13.5 Disposition
 
 bf16 read-back gives net **−9% prefill wall** at both n=2048 and n=8192,

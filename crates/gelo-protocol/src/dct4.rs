@@ -938,6 +938,37 @@ fn apply_scaled_diag_in_tile(
     }
 }
 
+/// **SIMD-spike** branchless variant of [`apply_sign_diag_in_tile`]:
+/// `row[i] *= diag[i]` with `diag` holding ±1.0. No data-dependent
+/// branch, so the inner loop auto-vectorises (mulps/vmulps) instead of
+/// the per-element predicted negate. Used by `dct4_cascade_vectorize_spike`
+/// to A/B the diagonal glue against the branched baseline. Spike-only.
+#[cfg(test)]
+#[inline]
+fn apply_sign_diag_in_tile_branchless(tile_buf: &mut [f32], tile_d: usize, n: usize, diag: &[f32]) {
+    for j in 0..tile_d {
+        let row = &mut tile_buf[j * n..j * n + n];
+        for i in 0..n {
+            row[i] *= diag[i];
+        }
+    }
+}
+
+/// **SIMD-spike** variant of [`apply_scaled_diag_in_tile`] taking a
+/// pre-multiplied `scaled[i] = diag[i] * factor` (hoists the per-element
+/// `* factor` out of the j-loop). Pure element-wise multiply → vectorises.
+/// Spike-only.
+#[cfg(test)]
+#[inline]
+fn apply_scaled_diag_in_tile_precomp(tile_buf: &mut [f32], tile_d: usize, n: usize, scaled: &[f32]) {
+    for j in 0..tile_d {
+        let row = &mut tile_buf[j * n..j * n + n];
+        for i in 0..n {
+            row[i] *= scaled[i];
+        }
+    }
+}
+
 /// In-place row-wise sign flip: `m[i, *] *= d[i]`. Identical contract
 /// to [`crate::hd3::apply_diag_inplace`]; copied here to avoid a
 /// cross-module re-export. Superseded by `apply_sign_diag_in_tile`.
@@ -1374,5 +1405,26 @@ mod tests {
         eprintln!("    diag (D1/D2/D3, our glue):     {:8.2} µs  {:5.1}%", us(diag), 100.0 * diag / total);
         eprintln!("    transpose (copy_tile_in/out):  {:8.2} µs  {:5.1}%", us(transpose), 100.0 * transpose / total);
         eprintln!("    --> our-glue (diag+transpose): {:5.1}% of cascade compute", 100.0 * (diag + transpose) / total);
+
+        // --- (3) SIMD A/B: branchless diag vs the branched baseline ---
+        let scaled3: Vec<f32> = mask.d3.iter().map(|&v| v * mask.inv_norm).collect();
+        let t = Instant::now();
+        for _ in 0..reps {
+            apply_sign_diag_in_tile_branchless(&mut tile_buf, tile, n, &mask.d1);
+            apply_sign_diag_in_tile_branchless(&mut tile_buf, tile, n, &mask.d2);
+            apply_scaled_diag_in_tile_precomp(&mut tile_buf, tile, n, &scaled3);
+        }
+        let diag_simd = t.elapsed().as_secs_f64() / reps as f64;
+        // Projected full-cascade impact if the SIMD diag replaced the baseline.
+        let total_simd = fft + diag_simd + transpose;
+        let cascade_speedup = total / total_simd;
+        eprintln!("  SIMD diag A/B:");
+        eprintln!("    diag baseline (branched):  {:8.2} µs", us(diag));
+        eprintln!("    diag branchless (SIMD):    {:8.2} µs  ({:.2}× on diag)", us(diag_simd), diag / diag_simd);
+        eprintln!("    --> projected cascade:     {:.2}× ({:.1}% faster); diag share {:.1}%→{:.1}%",
+            cascade_speedup, 100.0 * (1.0 - 1.0 / cascade_speedup),
+            100.0 * diag / total, 100.0 * diag_simd / total_simd);
+        eprintln!("    (cascade is ~25% of prefill wall → ~{:.1}% prefill at most)",
+            100.0 * (1.0 - 1.0 / cascade_speedup) * 0.25);
     }
 }
