@@ -113,6 +113,47 @@ impl Clone for Dct4Mask {
     }
 }
 
+/// Round `n` up to the next **fast DCT-IV size**: the smallest `m ≥ n`
+/// with `v₂(m) ≥ 4` (divisible by 16) and largest prime factor ≤ 11.
+///
+/// `stacked_n = n_data + shield_k` lands on whatever factorisation chance
+/// gives, and rustdct/rustfft fall onto slow Rader/Bluestein paths when a
+/// larger prime divides it. Measured on the cascade microbench (native,
+/// ns/elem at d=9728, chronicle §15.2/§16): 2064 = 2⁴·3·**43** → 1.285;
+/// 2112 = 2⁶·3·11 → **0.747** (1.72×); 8208 = 2⁴·3³·**19** → 1.168;
+/// 8400 = 2⁴·3·5²·7 → **0.857** (1.36×). High power-of-two content beats
+/// pure smoothness (2112 with an 11 outruns 7-smooth 2100), hence the
+/// `v₂ ≥ 4` requirement; 13+ measured slow (2080 = 2⁵·5·13 → 1.05),
+/// hence the ≤ 11 bound. Sizes of this form are dense (pad ≤ ~3% in the
+/// 2k–16k range; 2064→2112 and 8208→8400 are both +2.3%).
+///
+/// The extra rows are zero/shield padding through the orthogonal mask —
+/// the data-row round-trip is exact regardless of pad content, so this is
+/// purely a transform-speed lever. `n < 32` passes through unchanged
+/// (tiny shapes resolve to HD₃ in production; keeps small-shape tests
+/// bit-identical).
+pub fn next_fast_n(n: usize) -> usize {
+    if n < 32 {
+        return n;
+    }
+    fn odd_part_is_11_smooth(mut m: usize) -> bool {
+        for p in [3usize, 5, 7, 11] {
+            while m % p == 0 {
+                m /= p;
+            }
+        }
+        m == 1
+    }
+    // Smallest multiple of 16 that is ≥ n, then step by 16 until the odd
+    // part is {3,5,7,11}-smooth. Terminates fast: pow2-times-small-odd
+    // sizes are dense at every scale.
+    let mut m = n.div_ceil(16) * 16;
+    while !odd_part_is_11_smooth(m >> m.trailing_zeros()) {
+        m += 16;
+    }
+    m
+}
+
 impl Dct4Mask {
     /// Sample a fresh DCT-IV mask at side length `n` (any positive int).
     /// Consumes `3·n` random bits — same orbit cardinality as HD₃ but
@@ -1306,6 +1347,40 @@ mod tests {
             "dct4 bf16 round-trip relative rms at long-n (n={n}): {:.3e}",
             err_rms / target_rms
         );
+    }
+
+    /// `next_fast_n` picks the measured-fast sizes, is idempotent on
+    /// already-fast sizes, passes tiny shapes through, and never shrinks.
+    #[test]
+    fn next_fast_n_picks_fast_sizes() {
+        // The two production shapes from the §15.2/§16 sweep.
+        assert_eq!(next_fast_n(2064), 2112); // 2⁴·3·43 → 2⁶·3·11
+        assert_eq!(next_fast_n(8208), 8400); // 2⁴·3³·19 → 2⁴·3·5²·7
+        // Already-fast sizes are fixed points.
+        for &n in &[2048usize, 2112, 2160, 2304, 8400] {
+            assert_eq!(next_fast_n(n), n);
+        }
+        // Tiny shapes pass through unchanged (HD₃ territory).
+        for n in 1..32 {
+            assert_eq!(next_fast_n(n), n);
+        }
+        // Never shrinks; result divisible by 16 with ≤11-smooth odd part.
+        for n in (32..4096).step_by(7) {
+            let m = next_fast_n(n);
+            assert!(m >= n && m % 16 == 0, "n={n} m={m}");
+            let mut odd = m >> m.trailing_zeros();
+            for p in [3usize, 5, 7, 11] {
+                while odd % p == 0 {
+                    odd /= p;
+                }
+            }
+            assert_eq!(odd, 1, "n={n} m={m} not 11-smooth");
+            // 16 absolute slack (multiple-of-16 rounding) + 10% relative.
+            // Production DCT-IV sizes are large (the Auto pad-ratio
+            // threshold sends small shapes to HD₃), where the relative
+            // term dominates and stays ≤ ~3% in practice.
+            assert!(m - n <= 16 + n / 10, "pad too large at n={n} m={m}");
+        }
     }
 
     /// **Spike microbench** (chronicle §13.3 follow-up): is the DCT-IV

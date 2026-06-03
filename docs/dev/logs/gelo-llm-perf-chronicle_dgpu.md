@@ -1064,3 +1064,44 @@ attacks the 95%-FFT share, we already vendor AOCL) and a security-gated
 **Artefacts:** `bench-results/gelo-b1-fwhtfix-native-n2048-2026-06-03.log`;
 spikes `hd3_decode_shape_spike` (hd3.rs), `dct4_cascade_vectorize_spike`
 (`DCT4_BENCH_N` sweep).
+
+## 16. DCT-IV smooth-size padding (2026-06-03) — implemented; −5% prefill (vs −18% projected)
+
+Implements §15.2. `dct4::next_fast_n(n)` rounds the DCT-IV `stacked_n` up
+to the smallest `m ≥ n` with `v₂(m) ≥ 4` and largest prime factor ≤ 11 —
+the criterion the candidate sweep favoured (high pow2 content beats pure
+smoothness: 2112 = 2⁶·3·11 at 0.747 ns/elem outruns 7-smooth 2100 at
+0.854; 13+ is slow). Production shapes: 2064 → **2112**, 8208 → **8400**
+(both +2.3% rows). Wired at the five `Dct4Mask::fresh` sites + the
+single-path `stacked_n` computation; pad rows are zero cover through the
+orthogonal round-trip (data rows exact — all 90 protocol tests pass
+unchanged). `n < 32` passes through.
+
+Measured (B=1, native, bf16-on, vs the §15 build):
+
+| | before | after | Δ |
+|---|--:|--:|--:|
+| prefill n=2048 | 13.88 s | **13.20 s** | **−4.9%** |
+| prefill n=8192 | 97.69 s | **93.98 s** | **−3.8%** |
+| `gelo:mask_apply:dct4` (n=2048, f32) | 1416 ms | 1113 ms | **−21%** |
+| `gelo:mask_unapply:dct4` (n=2048, bf16) | 4602 ms | 4138 ms | −10% |
+| decode | 3.18 s | 3.28 s | untouched (noise) |
+
+**Why only ~⅓ of the §15.2 projection (−18%):** the projection scaled the
+whole mask bucket by the microbench transform ratio. The **f32 apply**
+tracked it (−21%); the **bf16 unapply** did not — its per-tile bf16⇄f32
+widen/narrow + copy-out/alloc overhead is a constant ~0.7–1.0 ns/elem
+that doesn't shrink with the FFT and now *dominates* the unapply bucket
+(production 1.77 ns/elem vs 0.747 microbench transform-only). Lesson
+repeated from §13: transform-only microbenches overstate bucket-level
+wins when a fixed conversion overhead rides the same profile label.
+
+Cumulative this session (n=2048, B=1): prefill **16.83 → 13.20 s
+(−21.6%)**, decode **6.61 → ~3.2 s (2.05×, 4.8 → ~10 tok/s)**. Next
+levers: the unapply's now-dominant **conversion/copy overhead** (fuse the
+bf16 widen into the first cascade tile load — partially exists; audit the
+copy-out), **R4 async overlap**, and the **FLOP-reducing mask levers**
+(FFN-intermediate unmask elimination; batched DCT via AOCL-FFT REDFT11).
+
+**Artefacts:** `bench-results/gelo-b1-smoothpad-native-n{2048,8192}-2026-06-03.log`;
+`dct4::next_fast_n` + `next_fast_n_picks_fast_sizes` (dct4.rs).

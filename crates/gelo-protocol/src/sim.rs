@@ -862,10 +862,12 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
         let stacked_n = match resolved_kind {
             MaskKind::Haar => n_data + k,
             MaskKind::Hd3 => (n_data + k).next_power_of_two().max(2),
-            // DCT-IV works at arbitrary `n` so no pow2 pad — operand
-            // shape stays `(n_data + k, d)`, GPU sees same row count
-            // as Haar (no pad regression at non-pow2 prompts).
-            MaskKind::Dct4 => n_data + k,
+            // DCT-IV works at arbitrary `n`, but rustdct is slow when a
+            // larger prime divides it (2064 = 2⁴·3·43 measured 1.7× the
+            // per-element cost of 2112 = 2⁶·3·11 — chronicle §16). Round
+            // up to the next fast size; the ≤~3% extra rows are zero pad
+            // through the orthogonal mask (data rows round-trip exactly).
+            MaskKind::Dct4 => crate::dct4::next_fast_n(n_data + k),
             // Auto was already resolved by the call above; the match
             // is exhaustive on the resolved kind.
             MaskKind::Auto => unreachable!("Auto was resolved above"),
@@ -901,7 +903,10 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
                 MaskKind::Haar => self.make_haar_mask(stacked_n),
                 MaskKind::Hd3 => MaskFamily::Hd3(Hd3Mask::fresh(stacked_n, &mut self.rng)),
                 MaskKind::Dct4 => {
-                    MaskFamily::Dct4(crate::dct4::Dct4Mask::fresh(stacked_n, &mut self.rng))
+                    MaskFamily::Dct4(crate::dct4::Dct4Mask::fresh(
+                        crate::dct4::next_fast_n(stacked_n),
+                        &mut self.rng,
+                    ))
                 }
                 MaskKind::Auto => unreachable!("Auto was resolved above"),
             })
@@ -948,21 +953,26 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
                 }
                 MaskFamily::Dct4(dct4) => {
                     // Same scratch-reuse pattern as HD₃; DCT-IV is also
-                    // in-place capable. stacked_n == n_data + k for DCT-IV
-                    // (no pow2 padding), so shield_end == stacked_n and
-                    // no zero-pad section to clear.
+                    // in-place capable. `stacked_n` is the fast-size
+                    // rounding of `n_data + k` (see `next_fast_n`), so
+                    // there is a small zero-pad section past the shield
+                    // rows — same handling as the HD₃ pow2 pad.
                     let mut buf = self
                         .stacked_scratch
                         .remove(&d)
                         .filter(|b| b.shape() == [stacked_n, d])
                         .unwrap_or_else(|| Array2::<f32>::zeros((stacked_n, d)));
+                    let shield_end = (n_data + k).min(stacked_n);
                     profile::time("gelo:shield_stack", || {
                         buf.slice_mut(ndarray::s![..n_data, ..]).assign(&hidden);
                         fill_shield_rows_inline(
-                            buf.slice_mut(ndarray::s![n_data..stacked_n, ..]),
+                            buf.slice_mut(ndarray::s![n_data..shield_end, ..]),
                             sigma,
                             &mut self.shield_rng,
                         );
+                        if stacked_n > shield_end {
+                            buf.slice_mut(ndarray::s![shield_end.., ..]).fill(0.0);
+                        }
                     });
                     profile::time("gelo:mask_apply:dct4", || dct4.apply_in_place(&mut buf));
                     buf
@@ -1661,8 +1671,13 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
                 MaskFamily::Hd3(Hd3Mask::fresh(s_pad, &mut self.rng))
             }
             MaskKind::Dct4 => {
-                // DCT-IV works at any positive integer — no pad.
-                MaskFamily::Dct4(crate::dct4::Dct4Mask::fresh(stacked_n, &mut self.rng))
+                // DCT-IV works at any positive integer, but round to the
+                // next fast transform size (`next_fast_n`) — must match
+                // `build_shielded_and_apply`'s stacked_n computation.
+                MaskFamily::Dct4(crate::dct4::Dct4Mask::fresh(
+                    crate::dct4::next_fast_n(stacked_n),
+                    &mut self.rng,
+                ))
             }
             MaskKind::Auto => unreachable!("Auto resolved above"),
         });
@@ -1726,7 +1741,10 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
                     MaskFamily::Hd3(Hd3Mask::fresh(s_pad, &mut self.rng))
                 }
                 MaskKind::Dct4 => {
-                    MaskFamily::Dct4(crate::dct4::Dct4Mask::fresh(stacked_n, &mut self.rng))
+                    MaskFamily::Dct4(crate::dct4::Dct4Mask::fresh(
+                        crate::dct4::next_fast_n(stacked_n),
+                        &mut self.rng,
+                    ))
                 }
                 MaskKind::Auto => unreachable!("Auto resolved above"),
             });
@@ -1779,7 +1797,10 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
                     MaskFamily::Hd3(Hd3Mask::fresh(s_pad, &mut self.rng))
                 }
                 MaskKind::Dct4 => {
-                    MaskFamily::Dct4(crate::dct4::Dct4Mask::fresh(stacked_n, &mut self.rng))
+                    MaskFamily::Dct4(crate::dct4::Dct4Mask::fresh(
+                        crate::dct4::next_fast_n(stacked_n),
+                        &mut self.rng,
+                    ))
                 }
                 MaskKind::Auto => unreachable!("Auto resolved above"),
             });
@@ -1810,7 +1831,10 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
                     MaskFamily::Hd3(Hd3Mask::fresh(s_pad, &mut self.rng))
                 }
                 MaskKind::Dct4 => {
-                    MaskFamily::Dct4(crate::dct4::Dct4Mask::fresh(stacked_n, &mut self.rng))
+                    MaskFamily::Dct4(crate::dct4::Dct4Mask::fresh(
+                        crate::dct4::next_fast_n(stacked_n),
+                        &mut self.rng,
+                    ))
                 }
                 MaskKind::Auto => unreachable!("Auto resolved above"),
             });
