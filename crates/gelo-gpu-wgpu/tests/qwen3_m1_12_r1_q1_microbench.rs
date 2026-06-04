@@ -1095,3 +1095,74 @@ fn m1_12_sweep_cell() -> Result<()> {
 
     Ok(())
 }
+
+/// Ragged-batch parity regression (chronicle §25). Greedy is deterministic,
+/// so each prompt must yield identical tokens whether generated standalone
+/// (B=1) or as a row of a mixed-length batch. Reproduces the B=8 HumanEval
+/// garbage in seconds: ragged batches hit `stack_cache`/`build_covered_prefix_cpu`,
+/// which assume a uniform per-sequence prefix length (`views[0].nrows()`) —
+/// shorter sequences panic (OOB), longer ones get a truncated prefix → garbage.
+/// RED until the ragged resident-cover bug is fixed.
+///   GELO_GPU_PREFILL_OFFLOAD=1 GELO_GPU_RESIDENT_COVER=1 GELO_RESIDENT_SIGMA=0.01 \
+///   GELO_COVER_KAPPA=6 GELO_BENCH_VARIANT=4b GELO_BENCH_B=8 GELO_BENCH_MAX_TOKENS=16 \
+///   cargo test --release -p gelo-gpu-wgpu --test qwen3_m1_12_r1_q1_microbench \
+///     batched_parity_b1_vs_bN -- --ignored --nocapture
+#[test]
+#[ignore = "diagnostic: B=1 vs B=N batched greedy parity"]
+fn batched_parity_b1_vs_bN() -> Result<()> {
+    let variant = variant_from_env();
+    let (cfg, tokenizer, mut weights, rope) = load_pretrained(variant)?;
+    let engine = WgpuVulkanEngine::new_fp16().context("Vulkan adapter (fp16)")?;
+    let mut exec = InProcessTrustedExecutor::with_seed(engine, MaskSeed::from_bytes([42u8; 32]));
+    provision_into(&mut weights, &cfg, &mut exec)?;
+    provision_lm_head_into(&weights, &mut exec)?;
+
+    let max_tokens = max_tokens_from_env().min(16);
+    let b = batch_size_from_env().max(2);
+    let gen_cfg = GenerationConfig {
+        max_tokens,
+        eos_token_ids: vec![151643, 151645],
+        ..Default::default()
+    };
+    let _ = b;
+    // RAGGED batch: prompts of DIFFERENT lengths (the gate's real case).
+    // Same-length B=N is already known-correct; this isolates padding.
+    let texts = [
+        "def add(a, b):\n    \"\"\"Sum.\"\"\"\n",
+        "def has_close_elements(numbers, threshold):\n    \"\"\" Check if any two numbers are closer to each other than the given threshold value.\n    \"\"\"\n",
+        "def f(x):\n    return\n",
+        "from typing import List\n\ndef below_zero(operations: List[int]) -> bool:\n    \"\"\" Detect if the running balance ever falls below zero.\n    \"\"\"\n",
+    ];
+    let prompts: Vec<Vec<u32>> =
+        texts.iter().map(|t| tokenizer.encode(t, 2048)).collect::<Result<_>>()?;
+    let lens: Vec<usize> = prompts.iter().map(|p| p.len()).collect();
+    eprintln!("[b8parity] variant={variant:?} max_tokens={max_tokens} ragged prompt_lens={lens:?}");
+
+    // Per-prompt standalone references (B=1 path = known-correct).
+    let mut refs: Vec<Vec<u32>> = Vec::new();
+    for ids in &prompts {
+        let o =
+            generation::generate_batched(&cfg, &weights, &rope, &mut exec, &[ids.clone()], &gen_cfg)?;
+        refs.push(o[0].tokens.clone());
+    }
+    // One ragged batch of all prompts together.
+    let outb = generation::generate_batched(&cfg, &weights, &rope, &mut exec, &prompts, &gen_cfg)?;
+    let mut all_match = true;
+    for (k, o) in outb.iter().enumerate() {
+        let m = &o.tokens;
+        let first_div = refs[k].iter().zip(m.iter()).position(|(a, b)| a != b);
+        let same = *m == refs[k];
+        all_match &= same;
+        eprintln!(
+            "[b8parity] ragged row{k} (len={}): match_b1={same} first_divergence_at={:?}\n    ref={:?}\n    bat={m:?}",
+            lens[k], first_div, refs[k]
+        );
+    }
+    eprintln!("[b8parity] ALL_ROWS_MATCH_B1={all_match}");
+    anyhow::ensure!(
+        all_match,
+        "ragged batch diverged from per-prompt B=1 — stack_cache/build_covered_prefix_cpu \
+         assume a uniform prefix length (chronicle §25)"
+    );
+    Ok(())
+}

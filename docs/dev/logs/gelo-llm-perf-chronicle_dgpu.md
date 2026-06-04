@@ -1607,17 +1607,32 @@ sub-buckets are now permanent (chronicle §24), and the gdb-sampling
 recipe (`PR_SET_PTRACER_ANY` shim + `thread apply all bt` loop) is the
 no-sudo profiler for this box until `perf_event_paranoid` is lowered.
 
-**⚠ Parity gate + a critical caveat (2026-06-04).** Running the
-HumanEval-20 gate on this changeset: **B=1 = 8/20** (coherent; ≥ the
-7/20 in-TEE bar, > 6/20 llama.cpp ref) — the read-back pool + cubecl
-upload fix are parity-clean (bit-identical, batch-agnostic per-call). But
-**B=8 (the batched path, `generate_batched`) = 2/20 with garbage output**
-— a **pre-existing** correctness bug: the batched path was added in
-`fa7c7ad` and **never gated** (the 7/20 reference was B=1). So every B=8
-number in §21–§25 is a measurement of a path that is **numerically
-broken at B=8** — the perf is real but the B=8 batched output is not
-trustworthy until the batched cover/attention/decode bug is fixed.
-Not introduced here; flagged for diagnosis. The B=1 path is correct.
+**⚠ Parity gate + a RAGGED-batch correctness bug (2026-06-04).** Running
+the HumanEval-20 gate on this changeset: **B=1 = 8/20** (coherent; ≥ the
+7/20 in-TEE bar) — the read-back pool + cubecl upload fix are parity-clean
+(bit-identical, batch-agnostic). **B=8 = 2/20 garbage.** Root-caused
+(deterministic `batched_parity_b1_vs_bN` probe + RUST_BACKTRACE):
+
+- **Same-length B=8 is correct** — replicating one prompt ×8, all rows
+  match B=1 byte-for-byte (it takes the `uniform` fast path, forward.rs
+  ~1958). **So the §21–§25 perf numbers are valid** — the perf bench
+  replicates one prompt → uniform-length batch → correct path.
+- **Ragged batches (mixed prompt lengths) are broken.** `stack_cache`
+  (forward.rs) takes `n_kv = views[0].nrows()` (sequence 0's KV length)
+  and reads that many rows from *every* sequence — but `view_b` returns
+  each sequence's own `valid_n`. So at the prefill→decode handoff
+  (`build_covered_prefix_cpu`, `prefix_len = kv_views[0].nrows()`):
+  shorter sequences → **out-of-bounds panic**; longer → prefix
+  **truncated → garbage**. HumanEval length-sorts (small spread) → mostly
+  truncation → garbage (2/20); a wild spread `[10,28,7,31]` → panic.
+- **Pre-existing**, not from this session: the batched path landed in
+  `fa7c7ad` and was never gated (the 7/20 ref was B=1). Affects real
+  serving (mixed-length prompts), not the uniform perf bench.
+
+Fix options: pad the resident cover to the batch-max prefix + per-sequence
+length-mask the resident attention; or per-sequence resident sessions
+(simpler, mirrors the prefill ragged loop, perf cost at decode). Not yet
+fixed — needs its own B=8 gate.
 
 **Artefacts:** `bench-results/diag-b8-{readback-pool,readback-pool-rerun{1,2},
 timev,gdbsample2}-2026-06-04.{log,samples.txt}`.
