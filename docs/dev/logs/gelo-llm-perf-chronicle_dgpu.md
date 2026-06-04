@@ -1393,3 +1393,47 @@ or better — folding re-permutes *more* often than prefill-only (the
 allowed).
 
 **Artefacts:** `bench-results/gelo-b1-decscale-K{128,512}-n2048-2026-06-03.log`.
+
+## 23. Code-review fixes (2026-06-03) — and a SIMD-narrow that regressed
+
+`/code-review` (high-recall, 10 findings) over the session's 14 commits.
+Applied (correctness/clarity, no perf change): `bf16_offload_enabled`
+read once via `OnceLock` (was `std::env::var` per offload, ~252/prefill);
+the unreachable HD₃/Haar arms of `unmask_per_sequence_bf16` → `unreachable!`
+with the DCT-IV-gate invariant; `debug_assert`s for single-family
+PerSequence batch (the bf16 route keys on `masks[0]` only) and
+`next_fast_n` idempotence (the session mask-size guard depends on it);
+docstring corrections (four sites claimed HD₃/non-Haar take the bf16
+path — it is DCT-IV-only); a coupling note on `prefers_bf16_output` (an
+engine returning true should also override `matmul_many_bf16_out` or it
+pays host narrowing with no DRAM win); and a comment pinning the
+`PREFILL_SALT`-vs-`SALT` cover-seed dual-formula + decode-reads-stored-
+`DecodeCover` invariant.
+
+**#6 SIMD read-back narrow — tried, reverted (negative result).** The
+engine bf16 read-back uses a scalar `bf16::from_f32(x.to_f32())` map.
+A `HalfFloatSliceExt` SIMD narrow microbenched **2.2×** (f16→bf16) /
+**5.3×** (f32→bf16) faster (`tests/bf16_narrow_bench`) — but the bench
+**reused its buffers**. In production the f16→bf16 SIMD path needs a
+fresh ~82 MB f32 temp **per matmul output** (×72/prefill), and the
+alloc + zero-fill churn measured **prefill 10.3 → 13.1 s, `matmul_many`
+1.2 → 4.0 s** — a clear net regression. Reverted to the scalar map (one
+output alloc, no temp, no pre-zero). The §16/§17 lesson a third time:
+**a microbench that doesn't model per-call allocation overstates the
+win.** A genuinely-faster narrow would need uninit (no-zero) buffers,
+not worth the `unsafe`.
+
+**Not fixed (by design):** the dispatch bf16/f32 branch duplication and
+the 4-variant tile-copy family (churn > benefit; the assert +
+`unreachable!` cover the divergence risk). **Deferred to a security
+pass:** U-Verify (`verify_offload`) has an f32-calibrated tolerance
+(rel 1e-4) that any 16-bit GPU read-back exceeds — f16 (~5e-4) already,
+bf16 (~4e-3) more so — so the tamper-detection check is structurally
+incompatible with the production fp16 GPU. Pre-existing (predates the
+bf16 work); latent (no caller runs verify against `new_fp16()`). Needs
+a precision-aware tolerance, tracked in the handoff.
+
+(Also surfaced: `begin_decode_pass_shared_a_round_trips` is a
+pre-existing parallel-test flake — it `set_var`s the process-global
+`BATCHED_DECODE_SHARED_A`, which races other env-toggling tests; passes
+isolated. Not in scope.)

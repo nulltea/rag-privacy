@@ -16,7 +16,7 @@ use crate::ple::PleTable;
 ///
 /// `Send` because the substrate's R4 thread-split design moves tokens
 /// between the main thread (issuing matmuls) and worker threads (shield
-/// generation). Not `Sync` — a token has single-consumer semantics.
+/// generation). Not `Sync` â a token has single-consumer semantics.
 pub struct MatmulToken {
     inner: Box<dyn FnOnce() -> Result<Array2<f32>> + Send>,
 }
@@ -80,13 +80,13 @@ pub enum WeightKind {
     FfnGate,
     FfnUp,
     FfnDown,
-    /// LM-head (logits projection). M1.12 R3 — see
-    /// `docs/plans/m1-12-tee-gpu-throughput.md` §3. Registered only
+    /// LM-head (logits projection). M1.12 R3 â see
+    /// `docs/plans/m1-12-tee-gpu-throughput.md` Â§3. Registered only
     /// when callers opt in via `LM_HEAD_GPU_OFFLOAD=1`. Tied-embedding
     /// models register the transpose of `token_embedding` here
     /// (`(hidden, vocab)`); the host-side `token_embedding`
     /// `(vocab, hidden)` stays alive for `embedding_lookup`. The layer
-    /// index is by convention `0` — there's only one LM head per model.
+    /// index is by convention `0` â there's only one LM head per model.
     LmHead,
 }
 
@@ -137,7 +137,7 @@ pub struct FusedAttentionBatch<'q, 'k, 'v, 'm> {
 /// The untrusted accelerator side of the split protocol.
 ///
 /// All implementations must accept activations through [`Self::matmul`] in
-/// whatever form the trusted side supplies them — masked, plaintext, or
+/// whatever form the trusted side supplies them â masked, plaintext, or
 /// otherwise. The engine has no notion of correctness verification; integrity
 /// is the [`TrustedExecutor`]'s responsibility.
 pub trait GpuOffloadEngine: Send {
@@ -154,7 +154,7 @@ pub trait GpuOffloadEngine: Send {
     ///
     /// Default impl preserves the legacy behaviour by calling
     /// `register_weight(handle, weight.view())`. Override on engines that
-    /// can take Arc ownership — currently `ReferenceCpuEngine` (test
+    /// can take Arc ownership â currently `ReferenceCpuEngine` (test
     /// adapter only). The wgpu engine does not need this override
     /// because it uploads weights to VRAM at registration and never
     /// keeps a host copy.
@@ -168,9 +168,9 @@ pub trait GpuOffloadEngine: Send {
 
     /// **bf16-native** weight registration. Engines that can accept
     /// bf16 directly (the wgpu engine in F16 mode, which converts
-    /// bf16 → f16 at upload) override this to avoid the loader-side
-    /// bf16 → f32 upcast that `register_weight` would otherwise force
-    /// — see `feedback_memory_efficiency_priority.md`.
+    /// bf16 â f16 at upload) override this to avoid the loader-side
+    /// bf16 â f32 upcast that `register_weight` would otherwise force
+    /// â see `feedback_memory_efficiency_priority.md`.
     ///
     /// Default impl converts to f32 in a transient scratch buffer and
     /// forwards to `register_weight`. This preserves correctness for
@@ -199,19 +199,19 @@ pub trait GpuOffloadEngine: Send {
         self.register_weight_bf16(handle, weight.view())
     }
 
-    /// Compute `input · W[handle]` and return the product.
+    /// Compute `input Â· W[handle]` and return the product.
     ///
     /// `input` has shape `(n, in_features)`; the result has shape
-    /// `(n, out_features)`. The engine treats `input` as opaque bytes —
+    /// `(n, out_features)`. The engine treats `input` as opaque bytes â
     /// masking is applied by the trusted side before the call.
     fn matmul(&self, handle: WeightHandle, input: ArrayView2<f32>) -> Result<Array2<f32>>;
 
-    /// **bf16-input** variant of [`Self::matmul`] — Path β of the
+    /// **bf16-input** variant of [`Self::matmul`] â Path Î² of the
     /// bf16 activation pipeline (plan
-    /// `m1-12-bf16-activation-pipeline.md` §4.2). Engines that can
-    /// convert bf16 → device precision directly (the wgpu engine in
+    /// `m1-12-bf16-activation-pipeline.md` Â§4.2). Engines that can
+    /// convert bf16 â device precision directly (the wgpu engine in
     /// F16 mode via `array2_bf16_to_tensor_f16`) override this to
-    /// avoid the substrate-side bf16 → f32 widen that the default
+    /// avoid the substrate-side bf16 â f32 widen that the default
     /// path forces.
     ///
     /// Output stays `Array2<f32>` because the engine's natural output
@@ -230,7 +230,7 @@ pub trait GpuOffloadEngine: Send {
         self.matmul(handle, f32_owned.view())
     }
 
-    /// Compute `input · W[h]` for each `h` in `handles`, sharing **one
+    /// Compute `input Â· W[h]` for each `h` in `handles`, sharing **one
     /// upload of `input` and one device sync** across all N matmuls.
     /// Returns the results in the same order as `handles`.
     ///
@@ -240,8 +240,8 @@ pub trait GpuOffloadEngine: Send {
     /// **Why this exists:** the GELO mask round-trip means the trusted side
     /// pays one upload + one sync per offloaded GEMM via `matmul()`. For
     /// `offload_qkv` (3 matmuls sharing the same masked input) that's 2
-    /// redundant uploads + 2 redundant syncs per layer — ~24 wasted
-    /// CPU↔GPU bounces per BGE-base forward. With lazy-tensor engines
+    /// redundant uploads + 2 redundant syncs per layer â ~24 wasted
+    /// CPUâGPU bounces per BGE-base forward. With lazy-tensor engines
     /// (burn-cubecl) `matmul_many` collapses the redundancy.
     ///
     /// Default impl just loops over `matmul`, so backends without a
@@ -256,7 +256,7 @@ pub trait GpuOffloadEngine: Send {
 
     /// bf16-input variant of [`Self::matmul_many`]. Default impl
     /// widens once into an `Array2<f32>` and forwards to
-    /// [`Self::matmul_many`] — the widening happens exactly once and
+    /// [`Self::matmul_many`] â the widening happens exactly once and
     /// is amortised across the N handles, so even default engines
     /// pay a single conversion. Overriders that can keep bf16 across
     /// the multi-matmul (the wgpu engine in F16 mode) should upload
@@ -275,21 +275,28 @@ pub trait GpuOffloadEngine: Send {
     /// 16-bit on the device (so narrowing the read-back to bf16 loses no
     /// information the result didn't already carry). The GELO offload
     /// only routes through the bf16 read-back path
-    /// (`run_registered_linear_bf16_out`) when this is true — so the
+    /// (`run_registered_linear_bf16_out`) when this is true â so the
     /// fp16 GPU engine opts in while CPU / f32 / sim engines keep the
     /// **exact f32** read-back that their parity fixtures assert. Default
     /// false; `WgpuVulkanEngine` overrides to its `fp16` flag.
+    ///
+    /// â  An engine returning `true` **should also override
+    /// [`Self::matmul_many_bf16_out`]** to narrow at the device read-back.
+    /// Otherwise the default impl does a full f32 matmul + read-back and
+    /// then narrows f32âbf16 on the host â correct, but it *adds* a host
+    /// pass with zero DRAM-traffic win, silently making the bf16 route
+    /// slower than the f32 one.
     fn prefers_bf16_output(&self) -> bool {
         false
     }
 
-    /// **bf16-output** variant of [`Self::matmul_many`] — f32 input,
+    /// **bf16-output** variant of [`Self::matmul_many`] â f32 input,
     /// **bf16** outputs (the read-back is narrowed to bf16 instead of
     /// f32). Lets the trusted side run the mask unapply on bf16 storage
-    /// (`Dct4Mask::unapply_in_place_slice_bf16`), halving the DRAM
+    /// (`Dct4Mask::unapply_bf16_into_f32_rows`), halving the DRAM
     /// traffic of the dominant `mask_unapply` bucket. The GPU result is
     /// 16-bit on the wire either way, so no extra precision is lost vs
-    /// the f32 read-back beyond the f32→bf16 host narrowing.
+    /// the f32 read-back beyond the f32âbf16 host narrowing.
     ///
     /// Default impl forwards to [`Self::matmul_many`] and narrows on the
     /// host, so non-overriding engines (and CPU/sim executors) stay
@@ -321,10 +328,10 @@ pub trait GpuOffloadEngine: Send {
             return Ok(Vec::new());
         }
         // Trace by GPU dispatch fan-out: a single-weight offload (O,
-        // FfnDown) is `engine:matmul`; a fused bundle (QKV, gate∥up) is
+        // FfnDown) is `engine:matmul`; a fused bundle (QKV, gateâ¥up) is
         // `engine:matmul_many`. Both route through `matmul_many` since
         // the registered-linear refactor, so fan-out is the only thing
-        // that separates them — labelling here keeps the two GPU paths
+        // that separates them â labelling here keeps the two GPU paths
         // distinct in the profile instead of merged under one bucket.
         let label = if request.handles.len() == 1 {
             "engine:matmul"
@@ -343,7 +350,8 @@ pub trait GpuOffloadEngine: Send {
     /// dispatch + `engine:matmul*` profile labelling, but returns the
     /// projections as **bf16** host arrays so the caller's mask unapply
     /// runs on bf16 storage. Used by the GELO offload's bf16 path
-    /// (default-on for HD₃/DCT-IV masks; f32 fallback for Haar).
+    /// (default-on for DCT-IV masks on a bf16-output engine; f32 read-back
+    /// otherwise — HD₃/Haar always f32).
     fn run_registered_linear_bf16_out(
         &self,
         request: RegisteredLinearBatch<'_, '_>,
@@ -372,7 +380,7 @@ pub trait GpuOffloadEngine: Send {
     /// [`Self::read_result`] (or [`MatmulToken::into_array`] directly).
     ///
     /// On engines with deferred dispatch (wgpu/cubecl), this returns
-    /// as soon as the kernel is *submitted* — the GPU runs concurrent
+    /// as soon as the kernel is *submitted* â the GPU runs concurrent
     /// with whatever the caller does next. The substrate's R4 design
     /// uses this window to run shield-row sampling for site N+1 on a
     /// worker thread while site N's matmul executes.
@@ -380,7 +388,7 @@ pub trait GpuOffloadEngine: Send {
     /// Default impl runs sync and stashes the result behind a no-op
     /// token. Correct, just no overlap.
     ///
-    /// Plan: `docs/plans/m1-12-r4-async-overlap.md` §B.
+    /// Plan: `docs/plans/m1-12-r4-async-overlap.md` Â§B.
     fn matmul_async(&self, handle: WeightHandle, input: ArrayView2<f32>) -> Result<MatmulToken> {
         let out = self.matmul(handle, input)?;
         Ok(MatmulToken::ready(out))
@@ -429,7 +437,7 @@ pub trait GpuOffloadEngine: Send {
     }
 
     /// Two-operand dynamic matmul where neither operand is a pre-registered
-    /// weight. Required by OutAttnMult (TwinShield §V-A): both `Q` and `Kᵀ`
+    /// weight. Required by OutAttnMult (TwinShield Â§V-A): both `Q` and `Káµ`
     /// are runtime values, so neither side can be uploaded ahead of time.
     ///
     /// `lhs` has shape `(m, k)`, `rhs` has shape `(k, n)`, result is `(m, n)`.
@@ -437,7 +445,7 @@ pub trait GpuOffloadEngine: Send {
 
     /// Batched two-operand dynamic matmul. `lhs` is `(B, M, K)`, `rhs` is
     /// `(B, K, N)`, result is `(B, M, N)`. Each batch element is an
-    /// independent GEMM — no cross-batch reduction. Used by OutAttnMult to
+    /// independent GEMM â no cross-batch reduction. Used by OutAttnMult to
     /// fuse all Q-heads of a layer into one GPU dispatch.
     ///
     /// Default impl loops over the batch axis calling `matmul_dynamic`, so
@@ -473,7 +481,7 @@ pub trait GpuOffloadEngine: Send {
     }
 
     /// Row-wise numerically stable softmax on the last axis of a 3D
-    /// tensor. `input` shape `(B, M, N)` → output shape `(B, M, N)`.
+    /// tensor. `input` shape `(B, M, N)` â output shape `(B, M, N)`.
     /// Used by the permutation-shielded attention protocol (Tier 1) to
     /// offload softmax onto the engine.
     ///
@@ -505,24 +513,24 @@ pub trait GpuOffloadEngine: Send {
     }
 
     /// **M1.10 fused permuted attention seam.** Compute the full
-    /// per-head causal-masked attention `softmax(scale · Q·Kᵀ + mask) · V`
+    /// per-head causal-masked attention `softmax(scale Â· QÂ·Káµ + mask) Â· V`
     /// in one engine call.
     ///
     /// `mask` is an *optional* additive `(B, n_q, n_kv)` tensor:
-    ///   - `Some(m)` — the kernel adds `m` after the scale and before
+    ///   - `Some(m)` â the kernel adds `m` after the scale and before
     ///     softmax (use `-cfg.causal_mask_neg` at blocked positions,
     ///     `0` at allowed positions).
-    ///   - `None` — **A2 fast path**: no mask upload, no `+ mask`
+    ///   - `None` â **A2 fast path**: no mask upload, no `+ mask`
     ///     dispatch.  The caller signals "mask is identically zero
     ///     and can be elided" (the decode case where `n_q == 1` and
-    ///     `q_pos_offset == n_kv − 1`, plus any encoder/bidirectional
+    ///     `q_pos_offset == n_kv â 1`, plus any encoder/bidirectional
     ///     attention with `AttentionMask::None`).  Saves one GPU
-    ///     kernel dispatch + the (B·n_q·n_kv)-f32 upload per call.
+    ///     kernel dispatch + the (BÂ·n_qÂ·n_kv)-f32 upload per call.
     ///
     /// Default impl composes the existing dispatch chain:
     /// `matmul_dynamic_batched + (optional add-mask) + softmax_batched +
     /// matmul_dynamic_batched`. Engines that ship a FlashAttention-
-    /// style fused kernel (the M1.10 work — see
+    /// style fused kernel (the M1.10 work â see
     /// `docs/plans/path-1-gelo-gemma.md` for the cubek/burn-cubecl
     /// option matrix) override this method so the kernel runs in one
     /// GPU dispatch with no `(B, n_q, n_kv)` score-tensor
@@ -534,7 +542,7 @@ pub trait GpuOffloadEngine: Send {
     ///   k: (B, n_kv, d_head)
     ///   v: (B, n_kv, d_head)
     ///   mask: Option<(B, n_q, n_kv)> additive
-    ///   → (B, n_q, d_head)
+    ///   â (B, n_q, d_head)
     fn fused_attention_batched(
         &self,
         q: ArrayView3<f32>,
@@ -543,7 +551,7 @@ pub trait GpuOffloadEngine: Send {
         scale: f32,
         mask: Option<ArrayView3<f32>>,
     ) -> Result<Array3<f32>> {
-        // Compose: scores = Q · Kᵀ; scaled + (maybe) masked; softmax; · V.
+        // Compose: scores = Q Â· Káµ; scaled + (maybe) masked; softmax; Â· V.
         let (b, n_q, d_head) = q.dim();
         let n_kv = k.dim().1;
         debug_assert_eq!(q.dim().0, b);
@@ -590,15 +598,15 @@ pub trait GpuOffloadEngine: Send {
         self.fused_attention_batched(request.q, request.k, request.v, request.scale, request.mask)
     }
 
-    // ── Resident K/V session — perm-attn-gpu-offload Phase 2 ─────────
+    // ââ Resident K/V session â perm-attn-gpu-offload Phase 2 âââââââââ
     //
     // Engine-owned, device-resident K/V that persists across decode
     // steps so only the new row moves per step (the gate-1 win: the
     // full-cache re-upload is ~99.9% of the naive offload cost). The
-    // session is **cover-agnostic** — the TEE applies any
+    // session is **cover-agnostic** â the TEE applies any
     // permutation/noise/rotation cover *before* these calls, and
-    // `kv_refresh_block` just swaps the resident bytes — so the same
-    // substrate serves block-fresh-π AND the TwinShield-Xue fallback.
+    // `kv_refresh_block` just swaps the resident bytes â so the same
+    // substrate serves block-fresh-Ï AND the TwinShield-Xue fallback.
     // Default impls are unsupported; the wgpu engine overrides them.
 
     /// Upload `(heads, n_kv, d_head)` K/V as a resident session,
@@ -626,7 +634,7 @@ pub trait GpuOffloadEngine: Send {
     }
 
     /// Attend `(heads, n_q, d_head)` Q over the resident `[0..len]` K/V:
-    /// `softmax(q·kᵀ·scale)·v`. Phase 2 returns the full context; the
+    /// `softmax(qÂ·káµÂ·scale)Â·v`. Phase 2 returns the full context; the
     /// partial-stats `(m, l, acc)` variant for the prefix/tail online
     /// merge is the Phase-3 kernel.
     fn kv_attend(
@@ -642,7 +650,7 @@ pub trait GpuOffloadEngine: Send {
     /// [`Self::kv_attend`] but returns the *unnormalised* online-softmax
     /// state `(acc, m, l)` over the resident prefix instead of the
     /// normalised context, so the TEE can merge the in-TEE tail
-    /// (`attention_partial` + `merge_attention_partials`) — keeping the
+    /// (`attention_partial` + `merge_attention_partials`) â keeping the
     /// freshest tokens off the GPU (closes the write-location channel).
     /// `acc (h_q, n_q, d)`, `m`/`l (h_q, n_q, 1)`. Default: unsupported.
     fn kv_attend_partial(
@@ -673,12 +681,12 @@ pub trait GpuOffloadEngine: Send {
     /// Fused causal attention over **folded** operands for the prefill
     /// offload (perm-attn-gpu-offload Phase 6). `q` is `(Hq, n, d_head)`;
     /// `k`/`v` are **un-replicated** `(Hkv, n, d_head)` and `group = Hq/Hkv`
-    /// — the engine broadcasts K/V up to `Hq` **on-device** (Phase-5a O2),
+    /// â the engine broadcasts K/V up to `Hq` **on-device** (Phase-5a O2),
     /// so only the un-replicated K/V cross the PCIe bus. Returns the
     /// normalised context `(Hq, n, d_head)`. The caller (TEE) supplies
-    /// feature-rotation-covered operands (`Q·O_qk`, `K·O_qk`, `V·O_v`) and
-    /// corrects the output with `·O_vᵀ`; the engine only sees rotated bytes.
-    /// Whether this engine supports [`Self::cubek_causal_attend`] — the fused
+    /// feature-rotation-covered operands (`QÂ·O_qk`, `KÂ·O_qk`, `VÂ·O_v`) and
+    /// corrects the output with `Â·O_váµ`; the engine only sees rotated bytes.
+    /// Whether this engine supports [`Self::cubek_causal_attend`] â the fused
     /// tiled-softmax offload (the fp16 GPU engine). Drives the capability-gated
     /// default for the offloaded + covered attention path: it is the default
     /// when this returns true, and the in-TEE path otherwise.
@@ -703,7 +711,7 @@ pub trait GpuOffloadEngine: Send {
 /// Opaque handle to an engine-owned resident K/V session.
 pub type KvSessionId = u64;
 
-/// Cold-tier provider for resident K/V that exceeds VRAM — the
+/// Cold-tier provider for resident K/V that exceeds VRAM â the
 /// perm-attn-gpu-offload **Phase-2 NVMe-spill seam**. Phase 1 ships
 /// [`NullSpillProvider`] (VRAM-only); the NVMe-backed impl drops in here
 /// with no change to the session API. Not yet wired into the session
@@ -711,7 +719,7 @@ pub type KvSessionId = u64;
 /// is structurally guaranteed rather than promised.
 pub trait SpillProvider: Send + Sync {
     /// Fetch a cold page (positions `[start, end)`) back to host for
-    /// re-upload. `None` ⇒ that page is not spilled.
+    /// re-upload. `None` â that page is not spilled.
     fn fetch(
         &self,
         _session: KvSessionId,
@@ -734,7 +742,7 @@ pub trait SpillProvider: Send + Sync {
     }
 }
 
-/// VRAM-only provider (no spill) — the Phase-1 default.
+/// VRAM-only provider (no spill) â the Phase-1 default.
 pub struct NullSpillProvider;
 impl SpillProvider for NullSpillProvider {}
 
@@ -849,7 +857,7 @@ mod fused_attention_tests {
 
     #[test]
     fn default_impl_honours_additive_causal_mask() {
-        // Build a strict lower-triangular causal mask: 0 for j ≤ i,
+        // Build a strict lower-triangular causal mask: 0 for j â¤ i,
         // -inf for j > i. Verify the result matches the reference.
         let b = 1;
         let n = 5;
@@ -918,9 +926,9 @@ pub enum ForwardSessionShape {
 
 /// The trusted side of the split protocol.
 ///
-/// Implementations own the mask RNG, perform the `A·H` / `Aᵀ·(U·W)`
+/// Implementations own the mask RNG, perform the `AÂ·H` / `AáµÂ·(UÂ·W)`
 /// dance, and decide which projections to offload vs. run locally
-/// (e.g. for the sensitive first/last layers per GELO §3.2).
+/// (e.g. for the sensitive first/last layers per GELO Â§3.2).
 pub trait TrustedExecutor {
     /// Hand a public weight to the offload engine. Called at model load.
     fn provision_weight(&mut self, handle: WeightHandle, weight: ArrayView2<f32>) -> Result<()>;
@@ -928,12 +936,12 @@ pub trait TrustedExecutor {
     /// Begin a forward pass for a single text of token-axis length `n`.
     ///
     /// Implementations running in **paper-parity mode** (one mask A per
-    /// forward pass, per GELO §3.2) sample a fresh Haar-uniform `A` of
+    /// forward pass, per GELO Â§3.2) sample a fresh Haar-uniform `A` of
     /// size `(n + shield_k, n + shield_k)` here and reuse it across every
     /// subsequent `offload_*` call until the matching [`end_forward_pass`].
     ///
     /// Implementations in **per-offload mode** (sample fresh A inside
-    /// every `offload_*`) treat this as a no-op — the default impl does
+    /// every `offload_*`) treat this as a no-op â the default impl does
     /// exactly that, so `PlaintextExecutor` and other backends that don't
     /// care about session lifecycle keep working unchanged.
     ///
@@ -951,7 +959,7 @@ pub trait TrustedExecutor {
         Ok(())
     }
 
-    /// **M1.11** — Begin a *batched* prefill forward pass over `B`
+    /// **M1.11** â Begin a *batched* prefill forward pass over `B`
     /// sequences, each padded to `n_max` tokens.
     ///
     /// Implementations in paper-parity mode sample `B` independent
@@ -962,48 +970,48 @@ pub trait TrustedExecutor {
     /// B-blocks, and apply `masks[b]` to slice
     /// `[b*n_max..(b+1)*n_max, :]`.
     ///
-    /// `end_forward_pass` terminates this bracket too — there's no
+    /// `end_forward_pass` terminates this bracket too â there's no
     /// separate `end_prefill_pass`.
     ///
     /// Default impl falls back to `begin_forward_pass(batch_size *
     /// n_max)` so backends that don't yet support batched topology
     /// (PlaintextExecutor) produce correct math at the legacy single-
-    /// shared-A cost — at the price of treating all rows as one big
+    /// shared-A cost â at the price of treating all rows as one big
     /// sequence under one mask. Engines targeting M1.11 perf override.
     ///
-    /// See `docs/plans/m1-11-batched-decode.md` §3.4-3.5.
+    /// See `docs/plans/m1-11-batched-decode.md` Â§3.4-3.5.
     fn begin_prefill_pass(&mut self, batch_size: usize, n_max: usize) -> Result<()> {
         // Default: degenerate to a single big forward pass over the
         // flattened (B * n_max) row count.
         self.begin_forward_pass(batch_size.saturating_mul(n_max))
     }
 
-    /// **M1.11** — Begin a *batched* decode step over `B` sequences,
+    /// **M1.11** â Begin a *batched* decode step over `B` sequences,
     /// each contributing exactly one new token row to the per-layer
     /// activation.
     ///
-    /// Two mask topologies per `docs/plans/m1-11-batched-decode.md` §3.4:
+    /// Two mask topologies per `docs/plans/m1-11-batched-decode.md` Â§3.4:
     ///
-    /// 1. **Default — per-sequence A_b.** Mirrors `begin_prefill_pass`
+    /// 1. **Default â per-sequence A_b.** Mirrors `begin_prefill_pass`
     ///    with `n_max = 1`. Substrate samples `B` independent masks
     ///    each of size `(1 + shield_k, 1 + shield_k)` (shape-adaptive
     ///    shield overlay applies, defaulting to k=15 at n=1 so each
-    ///    A_b is `(16, 16)` HD₃-aligned). Each sequence's data row is
-    ///    masked under its own A_b — same per-row security argument as
+    ///    A_b is `(16, 16)` HDâ-aligned). Each sequence's data row is
+    ///    masked under its own A_b â same per-row security argument as
     ///    today's single-stream decode, just dispatched as one batched
     ///    engine call.
     ///
     /// 2. **`BATCHED_DECODE_SHARED_A=1` (opt-in, post c5 gate).** One
     ///    shared dense A of size `(B + k, B + k)` mixing B current-
-    ///    token rows + k shield rows. HD₃ fires cleanly at every B
+    ///    token rows + k shield rows. HDâ fires cleanly at every B
     ///    via `shield::shield_k_for_batch(B, 8)`. Mask-apply work is
-    ///    one HD₃ pass over `(B+k, hidden)` instead of B passes. Per
-    ///    M1.11 §7.1: gate flip pending AloePri
+    ///    one HDâ pass over `(B+k, hidden)` instead of B passes. Per
+    ///    M1.11 Â§7.1: gate flip pending AloePri
     ///    `c5_batched_decode_shared_a` clearing at B=8.
     ///
     /// Default impl falls back to `begin_forward_pass(batch_size)` so
     /// non-batched-aware executors produce correct math under one
-    /// shared mask (the legacy `n=B` single-mask topology — a
+    /// shared mask (the legacy `n=B` single-mask topology â a
     /// degenerate form of shared-A at decode shape).
     fn begin_decode_pass(&mut self, batch_size: usize) -> Result<()> {
         // Default: degenerate to a single-mask forward pass at row
@@ -1028,10 +1036,10 @@ pub trait TrustedExecutor {
 
     /// Move this executor's randomness source to an independent
     /// stream. Used by the embedder's rayon-parallel `embed` path so
-    /// each worker in a batch gets its own mask `A` — without this,
+    /// each worker in a batch gets its own mask `A` â without this,
     /// every worker would share the cloned executor's RNG state and
     /// sample the same `A`, exposing the cross-text Gram leak (see
-    /// `docs/prototype/future-rnd.md` §5 "Shared-A multi-text
+    /// `docs/prototype/future-rnd.md` Â§5 "Shared-A multi-text
     /// batching").
     ///
     /// Default impl is no-op: executors that don't sample randomness
@@ -1042,12 +1050,12 @@ pub trait TrustedExecutor {
     /// Same as [`Self::provision_weight`] but accepts an `Arc<Array2<f32>>` so
     /// the executor's TEE-side weight cache (for U-Verify probe computation)
     /// can share storage with the embedder's loaded weight bytes instead of
-    /// cloning them. GELO targets openweight models — weight confidentiality
-    /// is not a goal — so the only reason the executor used to keep a
+    /// cloning them. GELO targets openweight models â weight confidentiality
+    /// is not a goal â so the only reason the executor used to keep a
     /// separate copy was to have the bytes in encrypted CVM RAM. With this
     /// API the embedder's existing `Arc<DecoderWeights>` shards are reused
     /// directly, halving the encrypted memory footprint on Qwen3-class
-    /// models (−2.4 GB).
+    /// models (â2.4 GB).
     ///
     /// Default impl falls back to the cloning path so existing callers keep
     /// working unchanged.
@@ -1060,10 +1068,10 @@ pub trait TrustedExecutor {
     }
 
     /// **bf16-native** weight provisioning. The trusted side does not
-    /// need a host f32 copy of offloadable projection weights —
+    /// need a host f32 copy of offloadable projection weights â
     /// activations are masked f32 but weights live on the engine
     /// (GPU) at f16. Loader stores bf16 to avoid the
-    /// bf16 → f32 widening called out in
+    /// bf16 â f32 widening called out in
     /// `feedback_memory_efficiency_priority.md`.
     ///
     /// Default impl forwards to `register_weight_bf16` on the engine
@@ -1090,12 +1098,12 @@ pub trait TrustedExecutor {
     /// Provision a Per-Layer Embedding (PLE) table into the trusted
     /// side's encrypted memory. The table is owned by the executor
     /// (and shared via `Arc` across clones); it is **never** handed to
-    /// the offload engine — that would defeat the round-2 P0 leak
-    /// fix described in `docs/prototype/gelo-llm.html` §03. Gemma 3n /
+    /// the offload engine â that would defeat the round-2 P0 leak
+    /// fix described in `docs/prototype/gelo-llm.html` Â§03. Gemma 3n /
     /// Gemma 4 callers invoke this once at model load alongside
     /// `provision_weight` for the standard offload weights.
     ///
-    /// Default impl rejects the call — executors that don't support
+    /// Default impl rejects the call â executors that don't support
     /// PLE either have no need for it (Qwen3 embed/rerank paths) or
     /// would be loading the table into the wrong memory region.
     /// Hybrid models should fail loud rather than silently fall back
@@ -1111,7 +1119,7 @@ pub trait TrustedExecutor {
     /// table is provisioned, when the layer index is out of range, or
     /// when any token_id exceeds the table's vocab.
     ///
-    /// The gather happens entirely inside the trusted executor — no
+    /// The gather happens entirely inside the trusted executor â no
     /// engine round-trip, no PCIe traffic. A spy engine observing the
     /// offload path sees zero PLE-keyed activity.
     ///
@@ -1124,7 +1132,7 @@ pub trait TrustedExecutor {
     }
 
     /// Run a single offloaded linear: mask `hidden` on the token axis, ship
-    /// to the engine, unmask, return `hidden · W[handle]`.
+    /// to the engine, unmask, return `hidden Â· W[handle]`.
     ///
     /// `hidden` shape is `(n, in_features)`; result shape is
     /// `(n, out_features)`.
@@ -1135,7 +1143,7 @@ pub trait TrustedExecutor {
     ) -> Result<Array2<f32>>;
 
     /// Offload Q, K, V projections in one shot, sharing a single fresh mask
-    /// across all three. This is the optimization called out in GELO §3:
+    /// across all three. This is the optimization called out in GELO Â§3:
     /// reusing `A` across the three reads of the same hidden state saves
     /// two mask samples per block without leaking additional information.
     fn offload_qkv(
@@ -1171,8 +1179,8 @@ pub trait TrustedExecutor {
             .collect()
     }
 
-    /// Offload the attention `Q · Kᵀ` matmul via the TwinShield OutAttnMult
-    /// 4-partition embedding (Xue et al. 2025 §V-A). Both `q` and `kt` are
+    /// Offload the attention `Q Â· Káµ` matmul via the TwinShield OutAttnMult
+    /// 4-partition embedding (Xue et al. 2025 Â§V-A). Both `q` and `kt` are
     /// runtime values; the trick lets the untrusted engine compute the
     /// product without recovering either operand.
     ///
@@ -1188,12 +1196,12 @@ pub trait TrustedExecutor {
         unimplemented!("offload_attention_qkt not implemented for this executor")
     }
 
-    /// Batched OutAttnMult — one GPU dispatch covering every Q head in a
+    /// Batched OutAttnMult â one GPU dispatch covering every Q head in a
     /// layer. `q` is `(num_q_heads, n, d_head)`, `kt` is
     /// `(num_q_heads, d_head, n)` (with K already repeated to match Q heads
     /// for GQA), result is `(num_q_heads, n, n)`.
     ///
-    /// Each head gets independent masks, scalars, and permutations — the
+    /// Each head gets independent masks, scalars, and permutations â the
     /// privacy story stays identical to the per-head form. Default impl
     /// loops over the batch axis calling `offload_attention_qkt`; engines
     /// implementing the batched engine primitive will override.
@@ -1213,21 +1221,21 @@ pub trait TrustedExecutor {
         Ok(out)
     }
 
-    /// Compute `softmax(Q·Kᵀ / √d + mask) · V` for every head, under the
-    /// permutation-shielded attention protocol (Tier 1 — Amulet's
+    /// Compute `softmax(QÂ·Káµ / âd + mask) Â· V` for every head, under the
+    /// permutation-shielded attention protocol (Tier 1 â Amulet's
     /// softmax-permutation equivariance, arXiv 2512.07495, combined with
-    /// Hidden No More's σ-noise mitigation, arXiv 2505.18332).
+    /// Hidden No More's Ï-noise mitigation, arXiv 2505.18332).
     ///
     /// Unlike [`Self::offload_attention_qkt`] (which returns just the
-    /// pre-softmax scores), this returns the **full attention output** —
-    /// softmax and `·V` are performed under the same per-batch permutation
+    /// pre-softmax scores), this returns the **full attention output** â
+    /// softmax and `Â·V` are performed under the same per-batch permutation
     /// so neither operand is observable to the untrusted side.
     ///
     /// `q`, `k`, `v` shape: `(num_heads, n, d_head)`. Result shape:
-    /// `(num_heads, n, d_head)`. `scale` is typically `1 / √d_head`.
+    /// `(num_heads, n, d_head)`. `scale` is typically `1 / âd_head`.
     /// `mask` selects between full bidirectional and causal attention.
     ///
-    /// Default impl falls back to **plain** multi-head attention — useful
+    /// Default impl falls back to **plain** multi-head attention â useful
     /// only as a parity baseline (no privacy). Real implementations override.
     fn offload_attention_permuted(
         &mut self,
@@ -1278,7 +1286,7 @@ pub trait TrustedExecutor {
         Ok(out)
     }
 
-    // ── Resident K/V session (perm-attn-gpu-offload Phase 4 perf wire-up) ──
+    // ââ Resident K/V session (perm-attn-gpu-offload Phase 4 perf wire-up) ââ
     // Thin executor-side delegates to the engine's `kv_*` session API, so
     // the decode forward can route attention through device-resident K/V
     // (create once at the first decode step, append per step, attend).
@@ -1314,7 +1322,7 @@ pub trait TrustedExecutor {
         Err(anyhow!("resident_kv_attend: unsupported"))
     }
 
-    /// Partial-stats attend over the resident prefix — returns the
+    /// Partial-stats attend over the resident prefix â returns the
     /// unnormalised online-softmax state `(acc, m, l)` for the TEE-side
     /// tail-in-TEE merge (decode permuted-cover path). Default unsupported;
     /// `InProcessTrustedExecutor` delegates to the engine's
@@ -1333,7 +1341,7 @@ pub trait TrustedExecutor {
         Ok(())
     }
 
-    /// Fused causal attention over folded, rotation-covered operands —
+    /// Fused causal attention over folded, rotation-covered operands â
     /// the prefill-offload delegate (perm-attn-gpu-offload Phase 6). `k`/`v`
     /// are un-replicated `(Hkv, n, d)` with `group = Hq/Hkv`. See
     /// Whether the executor's engine supports the fused offload
@@ -1345,10 +1353,10 @@ pub trait TrustedExecutor {
     }
 
     /// Session-secret seed for the GPU-offload covers (prefill
-    /// `O_qk`/`C_v` rotation, decode resident cover, σ-noise streams).
+    /// `O_qk`/`C_v` rotation, decode resident cover, Ï-noise streams).
     /// The forward pass mixes this into every per-layer cover RNG so the
-    /// covers are derived from the executor's secret `MaskSeed` — the
-    /// documented per-session `C_v` contract — instead of being
+    /// covers are derived from the executor's secret `MaskSeed` â the
+    /// documented per-session `C_v` contract â instead of being
     /// derivable from compile-time constants. Default 0 (legacy fixed
     /// covers) for executors without secret state; secure executors
     /// must override.
@@ -1372,23 +1380,23 @@ pub trait TrustedExecutor {
     /// Cached-KV variant of [`Self::offload_attention_permuted`] for
     /// the autoregressive generation shape. Same protocol semantics
     /// (Amulet softmax-equivariance under fresh per-call permutations
-    /// + Hidden-No-More σ-noise) but allows `n_q ≤ n_kv` for the
+    /// + Hidden-No-More Ï-noise) but allows `n_q â¤ n_kv` for the
     /// decode / continuation-prefill case.
     ///
     /// `q_pos_offset` is the absolute position of Q row 0 in the
     /// full sequence. Q row `i` is at absolute position
     /// `q_pos_offset + i` and may attend to K rows `0..=(q_pos_offset
-    /// + i)`. For decode (`n_q = 1`, `q_pos_offset = n_kv − 1`) the
+    /// + i)`. For decode (`n_q = 1`, `q_pos_offset = n_kv â 1`) the
     /// causal mask is a no-op.
     ///
     /// Shapes:
     ///   q: `(num_heads, n_q,  d_head)`
     ///   k: `(num_heads, n_kv, d_head)`
     ///   v: `(num_heads, n_kv, d_head)`
-    ///   → `(num_heads, n_q,  d_head)`
+    ///   â `(num_heads, n_q,  d_head)`
     ///
     /// Default impl falls back to **plain** asymmetric multi-head
-    /// attention with explicit `-inf` causal mask — no privacy.
+    /// attention with explicit `-inf` causal mask â no privacy.
     /// Real implementations override to call
     /// `crate::attention::permuted_attention_cached` under the
     /// executor's fresh-per-call RNG.
@@ -1411,7 +1419,7 @@ pub trait TrustedExecutor {
         if q_pos_offset + n_q > n_kv {
             return Err(anyhow!(
                 "offload_attention_permuted_cached: q_pos_offset ({q_pos_offset}) + \
-                 n_q ({n_q}) must be ≤ n_kv ({n_kv})"
+                 n_q ({n_q}) must be â¤ n_kv ({n_kv})"
             ));
         }
         let mut out = Array3::<f32>::zeros((h, n_q, d_head));

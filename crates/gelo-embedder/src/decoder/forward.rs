@@ -767,6 +767,16 @@ fn build_covered_prefix_cpu(
     use rand::seq::SliceRandom;
     use rand_chacha::ChaCha20Rng;
     use rand_distr::{Distribution, StandardNormal};
+    // INVARIANT (cover-seed): the resident decode cover uses
+    // `SALT (0xC0FFEE_5EED) ^ cover_seed ^ layer`; the **prefill** offload
+    // cover uses a *different* salt (`PREFILL_SALT 0xC0FFEE_BEEF`, see
+    // `decoder_block_batched`). They are independent self-contained
+    // cover/uncover episodes — decode-uncover reads `O_qk`/`C_v`/`C_v⁻¹`
+    // from the **stored** `DecodeCover` (`kv_cache.gpu_cover`), it never
+    // re-derives them from a seed. If any future decode path re-derives
+    // the cover instead of reading the stored one, it MUST use this exact
+    // `SALT ^ cover_seed ^ layer` formula — copying the PREFILL_SALT
+    // variant would produce a non-inverting cover and silent garbage.
     const SALT: u64 = 0xC0FFEE_5EED;
     let mut crng = ChaCha20Rng::seed_from_u64(SALT ^ cover_seed ^ layer_idx as u64);
     let o_qk = sample_orthogonal(dh, &mut crng);

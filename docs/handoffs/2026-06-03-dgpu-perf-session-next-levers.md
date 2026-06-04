@@ -91,6 +91,25 @@ caps tail at ~33 ms ⇒ flat ~120 ms/step at any K. Folding re-permutes
 *more* often than prefill-only ⇒ security-neutral-or-better. Validate
 with the K=512 cell (`gelo-b1-decscale-*` logs are the baseline).
 
+## Security pass owed — U-Verify vs 16-bit GPU (from code review)
+
+`verify_offload` (Freivalds tamper check, `integrity.rs`) uses an
+**f32-calibrated tolerance** (relative term `1e-4·scale`,
+`ABS_FLOOR 1e-4`). Any 16-bit GPU read-back exceeds it — **f16 ~4.9e-4**
+already, **bf16 ~3.9e-3** more so. So `verify_probes > 0` is
+**structurally incompatible with the production fp16 GPU** (`new_fp16()`
++ bf16 read-back): a legitimate forward would trip a false "offload
+tampered" abort. **Latent today** (every `with_verify_probes` call site
+uses an exact engine — `ReferenceCpuEngine` or `WgpuVulkanEngine::new()`
+= the f32 GPU), and **pre-existing** (the f16 readback already broke it
+before the bf16 work). The tamper-detection security feature therefore
+cannot currently run against the precision the system actually ships.
+Fix = make `verify_offload`'s tolerance **precision-aware** (pass the
+operand/output precision, widen the relative bound to ~1e-2 for 16-bit
+paths) — but it moves the security bound, so it belongs in a dedicated
+security pass, not a perf cleanup. Until then, document that
+`verify_probes` requires an exact engine.
+
 ## Owed / open (unchanged this session)
 
 1. **HumanEval gate re-run** — numerics legitimately shifted (bf16

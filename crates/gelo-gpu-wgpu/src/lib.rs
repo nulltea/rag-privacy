@@ -694,7 +694,7 @@ fn tensor_data_to_array_f16(data: TensorData, rows: usize, cols: usize) -> Resul
 /// **bf16-output** read-back from an f16 device tensor. The GPU result
 /// is f16 on the wire either way; this narrows to a **bf16** host array
 /// (half the bytes of the f32 read-back) so the TEE-side mask unapply
-/// can run on bf16 storage (`Dct4Mask::unapply_in_place_slice_bf16`),
+/// can run on bf16 storage (the fused `Dct4Mask::unapply_bf16_into_f32_rows`),
 /// halving the DRAM traffic of the dominant `mask_unapply` bucket. The
 /// f16 → bf16 hop loses no information the f16 GPU result didn't already
 /// carry (both are 16-bit; bf16 trades mantissa for exponent range).
@@ -706,6 +706,15 @@ fn tensor_data_to_array_bf16_from_f16(
     let v_f16: Vec<f16> = data
         .into_vec()
         .map_err(|e| anyhow!("burn f16 TensorData -> Vec<f16>: {e:?}"))?;
+    // Scalar map, deliberately. A `HalfFloatSliceExt` SIMD narrow
+    // (f16→f32→bf16) microbenched 2.2× faster (tests/bf16_narrow_bench),
+    // but that bench reused its buffers: in production it needs a fresh
+    // ~82 MB f32 temp per matmul output (×72/prefill), and the alloc +
+    // zero-fill churn measured prefill 10.3→13.1 s, matmul_many bucket
+    // 1.2→4.0 s — a net regression. The scalar map allocates only the
+    // bf16 output (no temp, no pre-zero via `.collect`). See chronicle
+    // §23 / the review handoff. (Same allocation-vs-microbench lesson as
+    // §16/§17.)
     let v: Vec<bf16> = v_f16.into_iter().map(|x| bf16::from_f32(x.to_f32())).collect();
     Array2::from_shape_vec((rows, cols), v).map_err(|e| anyhow!("Array2 from tensor data: {e}"))
 }
@@ -719,6 +728,8 @@ fn tensor_data_to_array_bf16_from_f32(
     let v_f32: Vec<f32> = data
         .into_vec()
         .map_err(|e| anyhow!("burn f32 TensorData -> Vec<f32>: {e:?}"))?;
+    // Scalar map (see the f16 sibling above for why the SIMD slice
+    // convert is not used here — alloc churn regresses production).
     let v: Vec<bf16> = v_f32.into_iter().map(bf16::from_f32).collect();
     Array2::from_shape_vec((rows, cols), v).map_err(|e| anyhow!("Array2 from tensor data: {e}"))
 }
