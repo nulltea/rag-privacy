@@ -4,8 +4,7 @@ use ndarray::{Array1, Array2, Array3, ArrayView2, ArrayView3, Axis};
 use gelo_protocol::profile;
 use gelo_protocol::tee_matmul_bf16;
 use gelo_protocol::{
-    ForwardSessionShape, TrustedExecutor, WeightHandle, WeightKind, attention_partial,
-    merge_attention_partials,
+    ForwardSessionShape, TrustedExecutor, WeightHandle, WeightKind, merge_attention_partials,
 };
 
 use super::attention::{
@@ -691,6 +690,9 @@ fn rotate_heads(x: ArrayView3<'_, f32>, o: ArrayView2<'_, f32>) -> Array3<f32> {
 /// Stack the in-TEE active tail `[prefix_len..len)` of each sequence's
 /// cache into the GQA-expanded per-q-head shape `(B·nqh, n_tail, d)`
 /// (plaintext — the tail never reaches the GPU).
+// Superseded by `tail_attention_partial` on the decode path; retained as the
+// "before" baseline for the `tail_bucket_microbench` perf comparison.
+#[allow(dead_code)]
 fn stack_tail_expanded(
     views: &[(ArrayView2<'_, f32>, ArrayView2<'_, f32>)],
     prefix_len: usize,
@@ -718,6 +720,59 @@ fn stack_tail_expanded(
         }
     }
     (k, v)
+}
+
+/// Fused in-TEE decode **tail** attention partial — replaces the
+/// `stack_tail_expanded` + `attention_partial` pair on the resident-cover
+/// decode path. Reads the tail K/V `[prefix_len..total)` **straight from the
+/// cache views** (no GQA materialisation, no per-element copy), does a
+/// **transpose-free row-major `K·q`** gemv (`q` is `(nqh,1,dh)`), broadcasts
+/// kv-head `qh/group` on the fly, and **parallelises over the `nqh` query
+/// heads**. Returns the unnormalised online-softmax state `(acc, m, l)`
+/// (`acc (nqh,1,dh)`, `m`/`l (nqh,1,1)`) — same shapes/semantics as
+/// `attention_partial`, so the prefix/tail merge is unchanged. The four
+/// fixes (chronicle §25 tail diagnosis): transpose, GQA 4× materialise,
+/// per-element copy, single-thread — all addressed here.
+fn tail_attention_partial(
+    q: ArrayView3<'_, f32>,  // (nqh, 1, dh)
+    kb: ArrayView2<'_, f32>, // (total, kv_dim = nkvh·dh)
+    vb: ArrayView2<'_, f32>,
+    prefix_len: usize,
+    nqh: usize,
+    nkvh: usize,
+    dh: usize,
+    scale: f32,
+) -> (Array3<f32>, Array3<f32>, Array3<f32>) {
+    use ndarray::parallel::prelude::*;
+    use ndarray::s;
+    let group = nqh / nkvh;
+    let mut acc = Array3::<f32>::zeros((nqh, 1, dh));
+    let mut m = Array3::<f32>::zeros((nqh, 1, 1));
+    let mut l = Array3::<f32>::zeros((nqh, 1, 1));
+    acc.outer_iter_mut()
+        .into_par_iter()
+        .zip(m.outer_iter_mut().into_par_iter())
+        .zip(l.outer_iter_mut().into_par_iter())
+        .enumerate()
+        .for_each(|(qh, ((mut acc_h, mut m_h), mut l_h))| {
+            let kvh = qh / group;
+            let q1 = q.slice(s![qh, 0, ..]); // (dh,)
+            // Tail K/V for this kv head, straight from the cache (each row's
+            // dh values are contiguous → transpose-free row-major access).
+            let kt = kb.slice(s![prefix_len.., kvh * dh..kvh * dh + dh]); // (n_tail, dh)
+            let vt = vb.slice(s![prefix_len.., kvh * dh..kvh * dh + dh]);
+            // scores (n_tail,) = K·q — row-major gemv, no transpose.
+            let mut scores: Array1<f32> = kt.dot(&q1);
+            scores.mapv_inplace(|s| s * scale);
+            let mx = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            scores.mapv_inplace(|s| (s - mx).exp());
+            let sum = scores.sum();
+            m_h[(0, 0)] = mx;
+            l_h[(0, 0)] = sum;
+            // acc (dh,) = scores·V → (n_tail,)·(n_tail,dh).
+            acc_h.slice_mut(s![0, ..]).assign(&scores.dot(&vt));
+        });
+    (acc, m, l)
 }
 
 /// Build the session-fixed **covered resident prefix** for one GLOBAL layer
@@ -1167,11 +1222,15 @@ fn decoder_block_cached_batched(
                     acc_a_b
                 } else {
                     let qb = q_st.slice(ndarray::s![b * nqh..(b + 1) * nqh, .., ..]);
-                    let (tk, tv) = profile::time("cover:tail_build_tee", || {
-                        stack_tail_expanded(&kv_views[b..b + 1], plen, 1, nqh, nkvh, dh)
-                    });
-                    let (acc_bt, m_bt, l_bt) = profile::time("cover:tail_partial_tee", || {
-                        attention_partial(qb, tk.view(), tv.view(), scale)
+                    let (kb_b, vb_b) = kv_views[b];
+                    // Fused tail attention: read K/V straight from the cache
+                    // views (no stack/GQA-materialise), transpose-free row-major
+                    // K·q gemv, GQA broadcast on the fly, rayon over heads.
+                    // Replaces the old stack_tail_expanded + attention_partial
+                    // pair (cover:tail_build/partial) — see the tail sub-op
+                    // diagnosis: those were cache/impl-bound, not compute.
+                    let (acc_bt, m_bt, l_bt) = profile::time("cover:tail_attend_tee", || {
+                        tail_attention_partial(qb, kb_b, vb_b, plen, nqh, nkvh, dh, scale)
                     });
                     let m_a_b = m_a.slice(ndarray::s![b * nqh..(b + 1) * nqh, .., ..]);
                     let l_a_b = l_a.slice(ndarray::s![b * nqh..(b + 1) * nqh, .., ..]);
@@ -2593,4 +2652,119 @@ fn decoder_block(
         })
     };
     Ok(profile::time("tee:residual", || &h1 + &ffn_out))
+}
+
+/// [DEBUG-tailbench] Sub-op breakdown of the decode in-TEE tail buckets
+/// (cover:tail_build_tee = `stack_tail_expanded`, cover:tail_partial_tee =
+/// `attention_partial`) at controlled tail lengths — isolates compute vs
+/// memory vs implementation, and sizes the GQA-materialisation cost. No model.
+///   cargo test --release -p gelo-embedder tail_bucket_microbench -- --ignored --nocapture
+#[test]
+#[ignore = "perf microbench (tail buckets sub-op breakdown)"]
+fn tail_bucket_microbench() {
+    use gelo_protocol::attention_partial;
+    use ndarray::s;
+    use std::time::Instant;
+    let (nqh, nkvh, dh) = (32usize, 8usize, 128usize); // Qwen3-4B
+    let group = nqh / nkvh;
+    let kv_dim = nkvh * dh;
+    let iters = 20;
+    let scale = 1.0 / (dh as f32).sqrt();
+    eprintln!("[tailbench] nqh={nqh} nkvh={nkvh} dh={dh} group={group} iters={iters}");
+    for &n_tail in &[128usize, 512, 1024, 2048] {
+        let total = n_tail;
+        let prefix_len = 0;
+        let kb: Array2<f32> =
+            Array2::from_shape_fn((total, kv_dim), |(i, j)| (((i * 31 + j * 7) % 17) as f32) * 0.01);
+        let vb = kb.clone();
+        let views = vec![(kb.view(), vb.view())];
+        let q: Array3<f32> =
+            Array3::from_shape_fn((nqh, 1, dh), |(h, _, c)| (((h * 3 + c) % 11) as f32) * 0.01);
+
+        // --- cover:tail_build_tee = stack_tail_expanded (GQA-materialised) ---
+        let t = Instant::now();
+        let mut held = None;
+        for _ in 0..iters {
+            held = Some(stack_tail_expanded(&views, prefix_len, 1, nqh, nkvh, dh));
+        }
+        let build_ms = t.elapsed().as_secs_f64() * 1e3 / iters as f64;
+        let (k_exp, v_exp) = held.unwrap();
+        let build_gb = (nqh * n_tail * dh * 4 * 2) as f64 / 1e9; // k+v written, expanded
+
+        // no-GQA build reference: nkvh heads, contiguous row memcpy (k only).
+        let t = Instant::now();
+        for _ in 0..iters {
+            let mut k2 = Array3::<f32>::zeros((nkvh, n_tail, dh));
+            for hi in 0..nkvh {
+                for j in 0..n_tail {
+                    k2.slice_mut(s![hi, j, ..])
+                        .assign(&kb.slice(s![prefix_len + j, hi * dh..hi * dh + dh]));
+                }
+            }
+            std::hint::black_box(&k2);
+        }
+        let build_nogqa_ms = t.elapsed().as_secs_f64() * 1e3 / iters as f64;
+
+        // --- cover:tail_partial_tee = attention_partial ---
+        let t = Instant::now();
+        for _ in 0..iters {
+            std::hint::black_box(attention_partial(q.view(), k_exp.view(), v_exp.view(), scale));
+        }
+        let part_ms = t.elapsed().as_secs_f64() * 1e3 / iters as f64;
+        let part_flop = (nqh * (4 * n_tail * dh + 3 * n_tail)) as f64; // q·kᵀ + p·v + softmax
+        let part_gb = (nqh * n_tail * dh * 4 * 2) as f64 / 1e9; // read k+v (expanded)
+
+        // sub-ops of attention_partial (replica with per-op timers).
+        let (mut d1, mut sm, mut d2) = (0.0f64, 0.0f64, 0.0f64);
+        for _ in 0..iters {
+            for hi in 0..nqh {
+                let qh = q.index_axis(Axis(0), hi);
+                let kh = k_exp.index_axis(Axis(0), hi);
+                let vh = v_exp.index_axis(Axis(0), hi);
+                let t = Instant::now();
+                let mut sc = qh.dot(&kh.t());
+                sc *= scale;
+                d1 += t.elapsed().as_secs_f64();
+                let t = Instant::now();
+                let mut row = sc.row(0).to_owned();
+                let mx = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                row.mapv_inplace(|s| (s - mx).exp());
+                let _l = row.sum();
+                sm += t.elapsed().as_secs_f64();
+                let t = Instant::now();
+                std::hint::black_box(row.dot(&vh));
+                d2 += t.elapsed().as_secs_f64();
+            }
+        }
+        d1 *= 1e3 / iters as f64;
+        sm *= 1e3 / iters as f64;
+        d2 *= 1e3 / iters as f64;
+
+        eprintln!("[tailbench] n_tail={n_tail}");
+        eprintln!(
+            "  tail_build : {build_ms:6.2} ms  {:6.1} GB/s   | no-GQA(nkvh,memcpy,k-only): {build_nogqa_ms:.2} ms",
+            build_gb / (build_ms / 1e3)
+        );
+        eprintln!(
+            "  tail_part  : {part_ms:6.2} ms  {:6.1} GFLOP/s {:6.1} GB/s",
+            part_flop / (part_ms / 1e3) / 1e9,
+            part_gb / (part_ms / 1e3)
+        );
+        eprintln!("    dot1(q·kᵀ): {d1:5.2} ms | softmax+alloc: {sm:5.2} ms | dot2(p·v): {d2:5.2} ms");
+
+        // --- FUSED fix: tail_attention_partial (transpose-free, GQA-broadcast,
+        // rayon over heads, no stack) — reads straight from the (kb,vb) cache ---
+        let t = Instant::now();
+        for _ in 0..iters {
+            std::hint::black_box(tail_attention_partial(
+                q.view(), kb.view(), vb.view(), prefix_len, nqh, nkvh, dh, scale,
+            ));
+        }
+        let fused_ms = t.elapsed().as_secs_f64() * 1e3 / iters as f64;
+        let old_total = build_ms + part_ms;
+        eprintln!(
+            "  FUSED      : {fused_ms:6.2} ms  (vs old build+part {old_total:.2} ms → {:.1}x faster)",
+            old_total / fused_ms
+        );
+    }
 }

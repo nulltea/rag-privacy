@@ -1658,5 +1658,31 @@ permuted keys). Security: the mask reveals per-row length to the GPU,
 already observable under `GPU-ADV` (dispatch shapes); padding carries no
 activation, and the real-token permutation stays hidden — no new leak.
 
+**Decode-length scaling + the in-TEE tail fix (2026-06-04).** B=1 n=2048
+decode-length sweep (K=128/1024): per-step ≈ **100 ms fixed + 0.39 ms ×
+tokens-so-far** (cumulative ≈ `100·K + 0.39·K²/2`; K=1024 matched exactly:
+300 ms/step, tail 206 s). The quadratic term is the in-TEE tail
+(`cover:tail_build` + `tail_partial`) — attention over all generated-so-far
+tokens. A sub-op microbench (`tail_bucket_microbench`) showed it is
+**cache/implementation-bound, not compute** (~1.7 GFLOP/s ≈ 2% of peak;
+effective GB/s *falls* with length — cache thrash at the 16 MB GQA-expanded-K
+cliff). Four culprits: (1) `q·kᵀ` strides column-wise through row-major K
+(`kh.t()` transpose) → one float/cache-line; (2) GQA 4× over-materialisation
+(`nkvh=8→nqh=32`); (3) per-element `stack_tail_expanded` copy (no memcpy);
+(4) single-threaded over heads.
+
+**FIXED — `tail_attention_partial` (fused), landed.** One function reading
+the tail K/V **straight from the cache views** (no stack, no GQA materialise),
+a **transpose-free row-major `K·q`** gemv, **GQA broadcast** on the fly, and
+**rayon over the query heads**. Microbench (n_tail 128→2048): old build+part
+0.89→50.45 ms (super-linear) → fused 0.20→**2.83 ms** (~linear), **4.5×→17.9×**
+faster, growing with context (the super-linearity is gone). End-to-end B=1
+K=512 decode: tail per-step ~100 → **12 ms**, decode per-step ~200 → **115 ms**
+(8.7 tok/s); the tail=fixed crossover moves ~500 → ~4000 tokens, so decode is
+fixed-cost-bound (matmul round-trip + shield + GPU prefix attend) for realistic
+lengths. Parity preserved (ragged probe green; same math, row-major access).
+The deferred **periodic tail-fold** is now largely moot for K≤~2 k.
+
 **Artefacts:** `bench-results/diag-b8-{readback-pool,readback-pool-rerun{1,2},
-timev,gdbsample2}-2026-06-04.{log,samples.txt}`.
+timev,gdbsample2}-2026-06-04.{log,samples.txt}`,
+`diag-b1-decsweep-K{128,1024}-`, `diag-b1-K512-tailfix-2026-06-04.log`.
