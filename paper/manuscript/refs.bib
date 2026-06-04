@@ -544,6 +544,16 @@
                semi-honest 2PC secure inference (model extraction); ePrint 2021/1040}
 }
 
+@inproceedings{simc_2022,
+  author    = {Chandran, Nishanth and Gupta, Divya and Obbattu, Sai Lakshmi Bhavana and Shah, Akash},
+  title     = {{SIMC}: {ML} Inference Secure Against Malicious Clients at Semi-honest Cost},
+  booktitle = {USENIX Security},
+  year      = {2022},
+  note      = {[grounded 2026-06-04] hardens 2PC secure inference against a malicious client at
+               ${\approx}1.3$--$2\times$ semi-honest cost; SIMC 2.0 = arXiv 2207.04637.
+               TODO: verify author list/pages}
+}
+
 @inproceedings{li_micciancio_2021,
   author    = {Li, Baiyu and Micciancio, Daniele},
   title     = {On the Security of Homomorphic Encryption on Approximate Numbers},
@@ -595,6 +605,17 @@
   doi     = {10.56553/popets-2022-0098},
   note    = {[grounded 2026-06-03] lower bound: volume-hiding EMMs leaking $\le$ query-equality
              often cannot beat naive max-padding storage}
+}
+
+@misc{yona_moe_steal,
+  author = {Yona, Itay and Shumailov, Ilia and Hayes, Jamie and Carlini, Nicholas},
+  title  = {Stealing User Prompts from Mixture of Experts},
+  year   = {2024},
+  note   = {[grounded 2026-06-04] arXiv:2410.22884. Exploits expert-choice-routing tie-handling
+            (torch.topk) so a co-batched adversary recovers a victim's prompt in full
+            ($O(VM^2)$ queries, ${\approx}100$/token); first architectural prompt-extraction
+            attack on MoE. NOTE: cross-batch plaintext-serving threat model, distinct from the
+            MPC-compute-party routing leakage CryptoMoE closes. TODO: confirm venue (OpenReview 1RNSYEEpwi).}
 }
 
 @misc{tsqp,

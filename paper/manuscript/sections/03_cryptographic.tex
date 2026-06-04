@@ -16,7 +16,7 @@ in latency or communication, concentrated in the non-linear operations (Softmax,
 GELU, LayerNorm). We separate \emph{private inference} (\cref{ssec:crypto-inf}) from \emph{private retrieval
 and storage} (\cref{ssec:crypto-retrieval})---the RAG-side use that is closest to deployable
 today. Because MPC/FHE inference protocols are the subject of dedicated recent
-surveys~\citep{li_pti_survey,pti_survey_2024}, we treat that sub-family briefly---through a few
+surveys~\citep{li_pti_survey,pti_survey_2024}, we cover that sub-family briefly---through a few
 frontier exemplars---and focus on cryptographic retrieval and storage,
 which those surveys do not cover.
 On the deployment-readiness criteria, cryptography scores highest on
@@ -40,12 +40,17 @@ GELU, and LayerNorm have no linear-sharing analogue and must be evaluated throug
 oblivious transfer or garbled circuits, or replaced by polynomial/Fourier
 approximations---each adding rounds, communication, or approximation error.
 Fully-homomorphic encryption (FHE) instead evaluates a circuit directly on ciphertext
-under a single key; the RNS-CKKS scheme used by Transformer-FHE work is \emph{leveled},
-supporting computation only up to a fixed multiplicative depth $L$ before an expensive
+under a single key; the RNS-CKKS scheme used in most FHE-based Transformer inference is
+\emph{leveled}, supporting computation only up to a fixed multiplicative depth $L$ before an expensive
 bootstrap, which again forces the non-linearities into low-degree polynomial
-approximations that consume the depth budget. In both families the non-linear operations
-are the bottleneck, and this is the structural reason secure inference sits one-to-three
-orders of magnitude above plaintext (\cref{ssec:crypto-inf}).
+approximations that consume the depth budget. (An alternative FHE line evaluates the
+non-linearities as lookup tables via programmable bootstrapping in TFHE-style schemes; the
+leveled-RNS-CKKS exemplars we cover do not use it, and we follow the dedicated inference
+surveys~\citep{li_pti_survey} in not exemplifying it separately.) In both families the
+non-linear operations are the bottleneck---Li et al.~\citep{li_pti_survey} measure them at
+more than $85\%$ of total runtime for MPC and around $60\%$ for HE---and this is the
+structural reason secure inference sits one-to-three orders of magnitude above plaintext
+(\cref{ssec:crypto-inf}).
 
 \paragraph{Access-hiding (retrieval).}
 Retrieval leaks through a different channel---\emph{which} vectors or graph nodes a query
@@ -54,44 +59,64 @@ server learning which one; oblivious RAM (ORAM) hides the access pattern of a se
 reads and writes; searchable/structured encryption (SSE) and encrypted multi-maps (EMM)
 support keyword and adjacency lookups over ciphertext while bounding what access and
 volume patterns reveal; and distance-comparison-preserving encryption (DCPE) keeps
-similarity search cheap by encrypting vectors so that distance \emph{orderings}
+similarity search cheap by encrypting vectors so that distance \emph{comparisons}
 survive---trading exactness and a quantified leakage for near-plaintext speed. These
 primitives compose with the compute-hiding layer but are costed and attacked separately,
 which is why we tabulate retrieval (\cref{ssec:crypto-retrieval}) apart from inference.
 
-\subsection{Cryptographic Inference (Exemplars; Depth Deferred)}
+\subsection{Cryptographic Inference}
 \label{ssec:crypto-inf}
 We do not re-systematize MPC/FHE Transformer-inference protocols---Li et
 al.~\citep{li_pti_survey} survey that space in depth (layer-wise, MPC-vs-HE). We keep five
-frontier exemplars (\cref{tab:crypto-inf}) that span the design space---2PC, 2PC with an
-offline dealer, distributed-MPC, mixture-of-experts routing, and non-interactive FHE---and that
-locate cryptography on our deployment-cost frontier. The pattern is uniform and is the
-subsection's takeaway: even the fastest secure inference sits one-to-three orders of magnitude
-above plaintext in latency and exchanges hundreds of MB to GBs per token or inference, at exact
-(MPC) or near-exact (FHE) fidelity. None of these papers reports overhead against plaintext---they
-benchmark against prior \emph{secure} schemes---so the absolute figures in \cref{tab:crypto-inf} are paper-reported
-where available and otherwise recovered by one-hop extrapolation (\cref{sec:comparison}).
+frontier exemplars (\cref{tab:crypto-inf}) chosen to span the design space: a two-party
+protocol (SHAFT), a 2PC protocol with an offline dealer (PermLLM), distributed MPC with
+evaluator nodes (Fission), private mixture-of-experts routing (CryptoMoE), and
+non-interactive FHE (Euston). Together they locate cryptography on our deployment-cost
+frontier. CryptoMoE is the one exemplar whose contribution is architecture-specific:
+naive private mixture-of-experts inference must either evaluate \emph{every} expert
+(forfeiting the sparsity that motivates MoE) or reveal which experts each token selects.
+Because experts specialize by semantic domain, that routing pattern leaks the input's
+type---and expert-choice routing has been exploited concretely to recover a co-batched
+user's prompt in full~\citep{yona_moe_steal}. CryptoMoE therefore keeps the routing
+secret-shared and balances expert load so per-expert computation is data-independent,
+recovering MoE sparsity under MPC at $2.8$--$3.5\times$ the dense-MPC cost (evaluated on
+OLMoE, QWenMoE, and DeepSeekMoE at $6.9$--$16.4$B total, $1.3$--$2.8$B active parameters). The pattern across all five is uniform: even the fastest exchanges hundreds of MB to
+GBs per token or inference, at exact (MPC) or near-exact (FHE) fidelity. None of these
+papers reports overhead against plaintext---they benchmark against prior \emph{secure}
+schemes, and Li et al.\ likewise do not normalize to plaintext: they tabulate each
+scheme's self-reported latency, communication, and task accuracy, anchored to a common
+model (BERT-base) where possible. The absolute figures in \cref{tab:crypto-inf} are
+therefore paper-reported where available and otherwise recovered by one-hop extrapolation
+(\cref{sec:comparison}).
 \begin{table}[H]
   \centering \footnotesize
   \caption{Cryptographic-inference exemplars. Latency and communication are paper-reported where
     available and \emph{extrapolated} ($\dagger$; 1-hop via the cited baseline, \cref{sec:comparison})
-    where the paper gives only relative figures. No scheme reports a vs-plaintext multiplier.}
+    where the paper gives only relative figures. No scheme reports a vs-plaintext multiplier.
+    Latency unit: \emph{decoder} rows (PermLLM, CryptoMoE) are per generated token (``/tok'');
+    \emph{encoder} rows (SHAFT, Fission, Euston) are one forward pass over a 128-token sequence
+    (``/inf''). For MoE, ``B'' is total parameters; active parameters per token are far fewer.
+    $\Delta$acc is task-accuracy loss vs.\ plaintext (the plain/enc/loss convention of
+    Li et al.~\citep{li_pti_survey}). Latencies are paper-reported on \emph{differing hardware}
+    (the $\dagger$ anchors are GPU) and are not co-measured.}
   \label{tab:crypto-inf}
   \begin{tabular}{@{}lllll@{}}
     \toprule
-    Scheme & Setting & Latency & Comm. & Fidelity \\
+    Scheme & Setting & Latency & Comm. & Fidelity ($\Delta$acc) \\
     \midrule
-    PermLLM~\cite{permllm}    & 2PC+dealer, ChatGLM-6B     & 3\,s/tok (1\,Gbps)              & 20\,Mb/tok                          & exact \\
-    SHAFT~\cite{shaft}        & 2PC, BERT-base             & ${\approx}1.4$\,s$^\dagger$    & ${\approx}0.6$--$0.74$\,GB$^\dagger$ & $\approx$plain. \\
-    CryptoMoE~\cite{cryptomoe}& 2PC, MoE 6.9--16.4B        & 22--46\,s/tok (e2e)            & 2.8--4.8\,GB/tok                    & 99.2\% acc \\
-    Fission~\cite{fission}    & MPC+evaluators, ModernBERT & $<$5\,s/inf                    & $<$3\,GB                            & $\approx$plain. \\
-    Euston~\cite{euston}      & FHE (non-int.), BERT-base  & ${\approx}10.7$\,s$^\dagger$   & ${\approx}37$\,MB$^\dagger$         & approx. \\
+    PermLLM~\cite{permllm}    & 2PC+dealer, ChatGLM-6B          & 3\,s/tok (1\,Gbps)             & 20\,Mb/tok                          & exact (0) \\
+    SHAFT~\cite{shaft}        & 2PC, BERT-base (110M)           & ${\approx}1.4$\,s/inf$^\dagger$ & ${\approx}0.6$--$0.74$\,GB$^\dagger$ & ${\approx}0$ ($\approx$plain.) \\
+    CryptoMoE~\cite{cryptomoe}& 2PC, MoE (6.9--16.4B; 1.3--2.8B act.) & 22--46\,s/tok (e2e) & 2.8--4.8\,GB/tok & $-0.8\%$ (99.2\%) \\
+    Fission~\cite{fission}    & MPC+evaluators, ModernBERT (149M) & $<$5\,s/inf                  & $<$3\,GB                            & ${\approx}0$ ($\approx$plain.) \\
+    Euston~\cite{euston}      & FHE (non-int.), BERT-base (110M) & ${\approx}10.7$\,s/inf$^\dagger$ & ${\approx}37$\,MB$^\dagger$       & approx.$^\dagger$ \\
     \bottomrule
   \end{tabular}
 
   \smallskip
-  {\footnotesize $^\dagger$ extrapolated 1-hop: SHAFT via SIGMA~\cite{sigma}
-  (1.84\,s/0.99\,GB, BERT-base); Euston via NEXUS~\cite{nexus} (37.3\,s/164\,MB, BERT-base).}
+  {\footnotesize $^\dagger$ extrapolated 1-hop (\cref{sec:comparison}): SHAFT via SIGMA~\cite{sigma}
+  (1.84\,s/0.99\,GB, BERT-base, 128 tok); Euston via NEXUS~\cite{nexus} (37.3\,s/164\,MB, BERT-base,
+  128 tok; NEXUS $\Delta$acc $0.16$--$0.38\%$ per Li et al.). SHAFT's own reported BERT-base time
+  is 41\,s LAN; the $\dagger$ figures recover a GPU-class absolute, not a vs-plaintext ratio.}
 \end{table}
 
 \subsection{Cryptographic Retrieval and Storage}
@@ -99,77 +124,120 @@ where available and otherwise recovered by one-hop extrapolation (\cref{sec:comp
 % MPC + FHE together (retrieval/storage is its own grouping, all cryptographic).
 % Split by index structure: vector (flat/IVF) vs graph --- not directly comparable.
 Retrieval and storage divide by index structure, and the two are \emph{not} directly
-comparable: \emph{vector} retrieval over a flat/IVF index (\cref{tab:crypto-vec}) and
-\emph{graph} retrieval over a graph-structured index or knowledge graph
-(\cref{tab:crypto-graph}) impose different cost profiles and leakage surfaces, so we
-tabulate them separately. This is the RAG-side crypto closest to practical deployment.
+comparable: \emph{vector} retrieval over a flat or inverted-file (IVF) index
+(\cref{tab:crypto-vec}) and \emph{graph} retrieval over a graph-structured index or
+knowledge graph (\cref{tab:crypto-graph}) impose different cost profiles and leakage
+surfaces, so we tabulate them separately. This is the RAG-side crypto closest to practical
+deployment.
 \begin{table}[H]
   \centering \footnotesize
-  \caption{Cryptographic \emph{vector} retrieval and storage (flat/IVF ANN; MPC/SS and FHE/HE).}
+  \caption{Cryptographic \emph{vector} retrieval and storage (flat/IVF approximate
+    nearest-neighbour (ANN) search; MPC/SS and FHE/HE). Latency is end-to-end query time
+    unless noted; Comm./storage is per-query communication or index-storage blow-up;
+    fidelity is retrieval exactness. SE = searchable encryption; PIR = private information
+    retrieval; HE = homomorphic encryption. $^*$ relative only (no absolute latency
+    reported); n/r = not reported.}
   \label{tab:crypto-vec}
-  \begin{tabular}{@{}llll@{}}
+  \scriptsize\setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}llllll@{}}
     \toprule
-    Scheme & Stage & Primitive & Reported cost \\
+    Scheme & Stage & Primitive & Latency & Comm./storage & Fidelity \\
     \midrule
-    p\textsuperscript{2}RAG~\cite{p2rag}    & retrieve,rerank & 2-server SS                      & 3--300$\times$ vs PRAG \\
-    Panther~\cite{panther}                   & retrieve        & PIR+SS+GC+HE (ANN)               & 18\,s @10M \\
-    PIR-RAG~\cite{pirrag}                     & retrieve        & classical PIR                    & 16.8\,s @5K \\
-    RAGtime-PIANO~\cite{ragtime_piano}        & retrieve,e2e    & CKKS cluster + lattice PIR       & 40$\times$ vs PIR-RAG \\
-    TRSE~\cite{trse}                          & retrieve,rerank & 2-round SE + HE scoring          & $\sim$100s\,ms ($k'$=100) \\
-    SAP/DCPE~\cite{fuchsbauer_sap}            & store,retrieve  & distance-cmp.-preserving enc     & $\sim$0\,ms (deployed) \\
-    CAPRISE~\cite{ye_caprise}                 & store,retrieve  & conditional dist.-preserving enc & 2339 vec/s \\
+    p\textsuperscript{2}RAG~\cite{p2rag}    & retrieve,rerank & 2-server SS              & rel.\ only$^*$              & $O(N{+}S)$ B/query & exact \\
+    Panther~\cite{panther}                   & retrieve        & PIR+SS+GC+HE             & 18\,s @10M                  & 284\,MB/query      & exact \\
+    PIR-RAG~\cite{pirrag}                     & retrieve        & classical PIR            & 16.8\,s @5K                 & n/r                & exact (cluster) \\
+    RAGtime-PIANO~\cite{ragtime_piano}        & retrieve,e2e    & CKKS + lattice PIR       & rel.\ only$^*$              & n/r                & exact (ct) \\
+    TRSE~\cite{trse}                          & retrieve,rerank & 2-round SE + HE scoring  & ${\sim}100$s\,ms ($k'$=100) & n/r                & exact \\
+    SAP/DCPE~\cite{fuchsbauer_sap}            & store,retrieve  & DCPE (symmetric)         & ${\sim}0$\,ms               & ${\approx}1\times$ & approx ($\beta$) \\
+    CAPRISE~\cite{ye_caprise}                 & store,retrieve  & conditional ADCPE        & 2339\,vec/s (enc.)          & ${\approx}1\times$ & approx ($\beta$)+DP \\
     \bottomrule
   \end{tabular}
+
+  \smallskip
+  {\footnotesize $^*$ p\textsuperscript{2}RAG reports 3--300$\times$ vs PRAG;
+  RAGtime-PIANO 40$\times$ vs PIR-RAG --- neither gives an absolute query latency.}
 \end{table}
 \begin{table}[H]
   \centering \footnotesize
   \caption{Cryptographic \emph{graph} retrieval and storage (graph-indexed ANN and graph
-    traversal; MPC/SS and FHE/HE). ``gt'' = graph traversal.}
+    traversal; MPC/SS and FHE/HE). Columns as in \cref{tab:crypto-vec}; latency is per
+    graph-query (``gt'' = graph traversal). SSE = searchable symmetric encryption;
+    (VH-)EMM = (volume-hiding) encrypted multi-map; ORAM = oblivious RAM. n/r = not
+    reported. ``billion-edge'' under scale denotes the largest graph tested, not a latency.}
   \label{tab:crypto-graph}
-  \begin{tabular}{@{}llll@{}}
+  \scriptsize\setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}llllll@{}}
     \toprule
-    Scheme & Stage & Primitive & Reported cost \\
+    Scheme & Stage & Primitive & Latency & Comm./storage & Fidelity \\
     \midrule
-    Pacmann~\cite{pacmann}     & retrieve,gt       & batched PIR (graph-ANN)  & 90\% quality; $-$22\% lat @100M \\
-    Compass~\cite{zhu_compass} & retrieve,gt       & encrypted HNSW + ORAM    & sub-second LAN \\
-    XorMM~\cite{xormm}         & retrieve,gt       & volume-hiding EMM (SSE)  & 1.5--2$\times$ storage \\
-    FLASH~\cite{flash_emm}     & retrieve,gt       & conjunctive VH-EMM       & 2--3$\times$ storage \\
-    PeGraph~\cite{pegraph}     & store,retrieve,gt & SSE + secret sharing     & $<$1\,s/query @multi-M \\
-    GORAM~\cite{goram}         & retrieve,gt       & 3PC sqrt-ORAM (reserve)  & billion-edge \\
+    Pacmann~\cite{pacmann}     & retrieve,gt       & batched PIR (graph-ANN)  & $-$22\% lat @100M        & ${\sim}$few\,KB/query     & 90\% ANN quality \\
+    Compass~\cite{zhu_compass} & retrieve,gt       & encrypted HNSW + ORAM    & sub-second LAN           & n/r                       & exact \\
+    XorMM~\cite{xormm}         & retrieve,gt       & volume-hiding EMM (SSE)  & n/r                      & $1.5$--$2\times$ storage  & exact \\
+    FLASH~\cite{flash_emm}     & retrieve,gt       & conjunctive VH-EMM       & n/r                      & ${>}2\times$ stor.\ saving & exact \\
+    PeGraph~\cite{pegraph}     & store,retrieve,gt & SSE + secret sharing     & $<$1\,s/query @multi-M   & n/r                       & exact (ranked) \\
+    GORAM~\cite{goram}         & retrieve,gt       & 3PC sqrt-ORAM (reserve)  & ego-query, billion-edge  & n/r                       & exact \\
     \bottomrule
   \end{tabular}
 \end{table}
-Retrieval cryptography is the practical frontier of this family, and the schemes divide
-by what they hide. \emph{Access-hiding} retrieval closes the channel of which record is
-touched: Pacmann and PIR-RAG answer a query through PIR without the server learning the
-target, and Compass wraps an encrypted HNSW index in client-side ORAM to defend even a
-\emph{malicious} server, leaving only the operation type (search vs.\ insert/delete)
-visible. \emph{Volume-bounding} retrieval addresses the adjacency and multi-map leak
-central to graph-RAG: XorMM and FLASH are volume-hiding encrypted multi-maps that hide
-result-set size for entity/relation lookups, while PeGraph and GORAM extend encrypted
-search to graph traversal at scale (\cref{sec:synthesis}). At the opposite end,
-distance-comparison-preserving encryption (SAP/DCPE, CAPRISE) buys near-zero overhead
-($\sim$2339\,vec/s) by preserving distance orderings directly on ciphertext---but that
-preserved ordering is itself a leakage surface and the family is invertible; we treat the
-attack in \cref{ssec:crypto-limits} (with the obfuscation parallel in
+Retrieval cryptography is the practical frontier of this family, and the schemes divide by
+\emph{what} they hide. We group them by leakage channel; each group differs in mechanism,
+threat model, and what drives its cost.
+
+\paragraph{Access-hiding (PIR/ORAM).}
+Pacmann, Panther, and PIR-RAG answer a query through private information retrieval, so the
+server returns the matching record(s) without learning \emph{which} were touched; Compass
+goes further, wrapping an encrypted HNSW index in client-side ORAM to hide the access
+\emph{sequence} even against a \emph{malicious} server, leaving only the operation type
+(search vs.\ insert/delete) visible. The cost driver is the obliviousness itself: PIR keeps
+communication sublinear but forces a server-side linear scan, and ORAM adds a
+logarithmic-factor access overhead---which is why these run in seconds at million-scale
+rather than milliseconds. For graph-RAG, Pacmann and Compass fit the entity/relation ANN
+lookups that open a LightRAG-style retrieval, hiding which node a query resolves to. This
+obliviousness carries a deployment cost the ``no trusted hardware'' label hides: the client
+is \emph{load-bearing}---Compass runs the ORAM controller and holds its position map,
+Pacmann performs the graph traversal client-side---so the scheme relieves the server of
+trust but not the user of work. We treat this client-reliance as a first-order deployment
+axis in \cref{sec:synthesis}.
+
+\paragraph{Volume-bounding (SSE/EMM).}
+XorMM, FLASH, and PeGraph encrypt the adjacency and keyword multi-maps that graph retrieval
+walks, returning postings while padding result-set size so the query-result \emph{volume}
+does not leak. This is precisely the LightRAG adjacency and \texttt{source\_id} fan-out
+surface: entity$\to$relation and chunk$\to$source lookups are volume-leaking multi-map
+queries, and volume-hiding EMMs bound that leak at a $1.5$--$3\times$ storage cost (the
+conjunctive variant FLASH adds a keyword-pair access pattern of its own). What remains is
+the search/query-equality pattern, not the content---closed only by layering ORAM (as
+Compass does) or rotating keys per session.
+
+\paragraph{Distance-comparison-preserving encryption (DCPE).}
+SAP/DCPE and CAPRISE take the opposite trade: a symmetric per-vector transform
+($c = s\,e + \lambda$, the same dimension as the plaintext embedding---so the ciphertext
+imposes ${\approx}1\times$ storage, and the papers report no blow-up because there is none)
+that preserves \emph{distance comparisons}, letting the server rank encrypted database
+vectors by similarity to an encrypted query at near-plaintext speed (CAPRISE encrypts
+2339\,vectors/s) with no interaction and no homomorphic operations. The two differ in
+\emph{which} comparisons survive: SAP~\citep{fuchsbauer_sap} preserves \emph{all} pairwise
+comparisons, including those among database vectors, which leaks the corpus's relational
+structure to a vector-analysis attack; CAPRISE~\citep{ye_caprise} is \emph{conditional}---by
+adding asymmetric noise to query versus database encryptions it preserves only
+query-to-document comparisons while obfuscating inter-document ones, and perturbs the query
+under differential privacy, closing the structural leak SAP leaves open. The shared price is
+exactness and a quantified leakage---the preserved comparison structure is
+invertible---which we examine in \cref{ssec:crypto-limits} (with the obfuscation parallel in
 \cref{sec:obfuscation}).
 
-\subsection{Performance (Reported)}
-\label{ssec:crypto-perf}
-Two performance regimes separate within this family, and the gap between them is the
-section's deployment-readiness message. \emph{Inference} crypto remains one-to-three
-orders of magnitude above plaintext: among the kept exemplars, PermLLM generates a token
-in ${\approx}3$\,s (ChatGLM-6B, 1\,Gbps), CryptoMoE runs $22$--$46$\,s/token end-to-end
-at $6.9$--$16.4$B parameters, and the non-interactive FHE path (Euston,
-${\approx}10.7$\,s/inference extrapolated via NEXUS) trades interaction for
-latency---all exchanging tens of Mb to several GB per token or inference, at exact (MPC)
-or near-exact (FHE) fidelity (\cref{tab:crypto-inf}). \emph{Retrieval} crypto is
-materially closer to practical: Compass answers encrypted graph-ANN queries in
-sub-second LAN time, CAPRISE encrypts $2339$\,vectors/s, and the volume-hiding multi-maps
-add only a $1.5$--$3\times$ storage factor (\cref{tab:crypto-vec} and~\cref{tab:crypto-graph}).
-Because no scheme reports a vs-plaintext multiplier and the hardware, models, and
-datasets differ across rows, these figures are indicative rather than comparable
-(\cref{sec:comparison}); the cross-family placement is deferred to \cref{sec:synthesis}.
+\paragraph{Why retrieval, not inference, is the deployable frontier.}
+The two halves of this section sit one-to-three orders of magnitude apart. Access- and
+volume-hiding retrieval answers million-scale queries in sub-second to seconds (Compass
+sub-second; PeGraph ${<}1$\,s; CAPRISE 2339\,vec/s), because it hides \emph{access} over a
+mostly-plaintext-speed index rather than computing Transformer non-linearities under
+encryption as the inference exemplars must. For graph-RAG specifically, the kept set covers
+LightRAG's actual retrieval surface---entity/relation/chunk ANN (Compass, Pacmann, CAPRISE),
+one-hop adjacency expansion (XorMM, FLASH), and graph storage (PeGraph, GORAM)---which is
+why this family, not crypto inference, anchors the deployable end of the cryptographic
+design space (\cref{sec:synthesis}). Because no scheme reports a vs-plaintext multiplier and
+hardware, models, and datasets differ across rows, the tabulated figures are indicative, not
+comparable (\cref{sec:comparison}).
 
 \subsection{Limitations and Known Attacks}
 \label{ssec:crypto-limits}
@@ -182,8 +250,9 @@ parties \emph{not to collude}. Neither assumption is free. Muse shows that a sin
 the server's model weights~\citep{muse_2021}, and two colluding parties---or, for the
 2-server retrieval schemes p\textsuperscript{2}RAG and PeGraph, two co-located
 servers---collapse additive sharing back to plaintext. Closing the malicious-client gap
-costs roughly $1.3$--$2\times$ (SIMC) and full malicious-secure inference more; no scheme
-we survey adopts either. The deployment-readiness consequence is sharp: under a realistic
+costs roughly $1.3$--$2\times$ (SIMC, secure inference resilient to malicious
+clients~\citep{simc_2022}) and full malicious-secure inference more; no scheme we survey
+adopts either. The deployment-readiness consequence is sharp: under a realistic
 cloud adversary that can deviate or quietly co-locate its ``non-colluding'' parties, the
 cryptographic guarantee degrades to that of an honest operator---comparable in trust to a
 TEE, but without the attestation that lets a client \emph{verify} it
@@ -218,15 +287,17 @@ adversary controls; for the non-interactive inference schemes here, where the se
 never sees a decryption, plain IND-CPA suffices---but RAG deployments that return
 decrypted scores or rankings to a queryable client should apply the countermeasure.
 
-\paragraph{Retrieval: ordering, access, and volume leakage.}
+\paragraph{Retrieval: distance comparison, access, and volume leakage.}
 The retrieval schemes trade exactness or residual leakage for their speed.
 Distance-comparison-preserving encryption (SAP/DCPE, CAPRISE) preserves distance
-\emph{orderings} on ciphertext by construction---which is precisely the leak: the
+\emph{comparisons} on ciphertext by construction---which is precisely the leak: the
 property-preserving-encryption family is invertible from ciphertext plus auxiliary
 distribution~\citep{naveed_ppe_2015}, and embeddings recovered this way are readable by
 inversion models such as Vec2Text~\citep{morris2023vec2text} (CAPRISE obfuscates
 inter-document distances and adds query-side noise specifically to blunt this). The
-ANN/SSE schemes leak instead through access and volume: generic reconstruction attacks
+PIR/ORAM and searchable-encryption retrieval schemes (Panther, Pacmann, Compass; XorMM,
+FLASH, PeGraph) leak instead through access and volume---``ANN'' is a search method, not a
+scheme, so the leakage is the index's, not the search's: generic reconstruction attacks
 consume access-pattern and communication-volume leakage~\citep{kellaris2016leakage},
 $k$-nearest-neighbour query leakage alone suffices to recover
 values~\citep{kornaropoulos_knn_2019}, and volume-only attacks defeat schemes that hide
