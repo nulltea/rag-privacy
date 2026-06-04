@@ -1607,5 +1607,17 @@ sub-buckets are now permanent (chronicle §24), and the gdb-sampling
 recipe (`PR_SET_PTRACER_ANY` shim + `thread apply all bt` loop) is the
 no-sudo profiler for this box until `perf_event_paranoid` is lowered.
 
+**⚠ Parity gate + a critical caveat (2026-06-04).** Running the
+HumanEval-20 gate on this changeset: **B=1 = 8/20** (coherent; ≥ the
+7/20 in-TEE bar, > 6/20 llama.cpp ref) — the read-back pool + cubecl
+upload fix are parity-clean (bit-identical, batch-agnostic per-call). But
+**B=8 (the batched path, `generate_batched`) = 2/20 with garbage output**
+— a **pre-existing** correctness bug: the batched path was added in
+`fa7c7ad` and **never gated** (the 7/20 reference was B=1). So every B=8
+number in §21–§25 is a measurement of a path that is **numerically
+broken at B=8** — the perf is real but the B=8 batched output is not
+trustworthy until the batched cover/attention/decode bug is fixed.
+Not introduced here; flagged for diagnosis. The B=1 path is correct.
+
 **Artefacts:** `bench-results/diag-b8-{readback-pool,readback-pool-rerun{1,2},
 timev,gdbsample2}-2026-06-04.{log,samples.txt}`.
