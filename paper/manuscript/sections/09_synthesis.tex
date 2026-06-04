@@ -55,7 +55,11 @@ figure---so private reranking stands as an \emph{open gap} rather than a compara
   \centering \footnotesize
   \caption{Performance and fidelity by use case (indicative; normalized to
     \cref{tab:yardstick}). ``$\times$'' = overhead vs.\ plaintext; ``exact'' = computes the
-    true function. Cross-paper figures are indicative, not co-measured.}
+    true function. Cross-paper figures are indicative, not co-measured. All figures are
+    \emph{paper-reported}; we do not independently reproduce them, and Chen et
+    al.~\citep{chen_sok_pti} find that re-benchmarked crypto-inference numbers can diverge from
+    the originals---so cross-scheme readings here are order-of-magnitude, and open-source
+    availability is tracked per scheme in the family tables (\cref{sec:crypto}--\cref{sec:hybrid}).}
   \label{tab:performance}
   \begin{tabular}{@{}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}p{6.3cm}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{3.6cm}@{}}
     \toprule
@@ -134,6 +138,20 @@ controller---and it inverts the naive reading of the table: the families that lo
 on server trust can be the most demanding to actually field. A full per-scheme
 classification (thin/stateful/thick) across all families is the natural next step;
 \cref{tab:deployment} fills it for cryptography and flags the rest (\tq).
+
+\paragraph{Cross-comparison: a frontier, not a trajectory.}
+Andreoletti et al.~\citep{andreoletti_ppi_practice} survey an overlapping set of families through
+the same deployability lens and conclude with a single trust-minimising \emph{trajectory}---TEE as
+today's pragmatic baseline, crypto-augmentation as a mid-term step, and FHE as the asymptotic
+endpoint. Our scheme-level scoring shares their starting point (Tier-3 TEE is the only near-plaintext
+option for full-scale models today) but not the linear ordering: the hybrid split and, on cost alone,
+static obfuscation already sit at the readiness frontier (\cref{tab:deployment})---they are
+present-day operating points, not way-stations toward FHE, whose cost keeps it off the frontier for
+generative workloads. One factor a family-level view understates is \emph{infrastructural}: because
+obfuscation and DP leave the model graph unmodified, they drop into an existing production serving
+stack (vLLM, llama.cpp) with no bespoke runtime, whereas MPC, FHE, and TEE each demand a dedicated
+serving path. The deployable choice is thus \emph{use-case dependent} (\cref{tab:performance})---a
+frontier across which different families win different stages, not a single endpoint.
 
 \subsection{Graph-RAG as a Retrieval Setting}
 Graph-RAG systems such as LightRAG~\citep{guo_lightrag} index a corpus as a knowledge

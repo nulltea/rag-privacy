@@ -16,9 +16,10 @@ GELU, LayerNorm). This section covers cryptographic \emph{inference}; the crypto
 machinery for the RAG retrieval and storage layer---PIR, ORAM, searchable encryption, and
 distance-comparison-preserving encryption---is a distinct design space with different
 trade-offs, and we treat it separately in \cref{sec:retrieval}. Because MPC/FHE inference
-protocols are the subject of dedicated recent surveys~\citep{li_pti_survey,pti_survey_2024},
+protocols are the subject of dedicated recent surveys~\citep{li_pti_survey,pti_survey_2024,chen_sok_pti},
 we do not re-systematize the protocols themselves---Li et al.~\citep{li_pti_survey} survey
-that space in depth (layer-wise, MPC-vs-HE). We cover the sub-family briefly, through a few
+that space in depth (layer-wise, MPC-vs-HE), and Chen et al.~\citep{chen_sok_pti} add a
+reproducibility re-benchmark of the same protocol space. We cover the sub-family briefly, through a few
 frontier exemplars (\cref{tab:crypto-inf}) that locate it on our deployment-cost frontier.
 On the deployment-readiness criteria, cryptographic inference
 scores highest on threat-model fit and fidelity (exact computation under a TCB of none or
@@ -45,6 +46,10 @@ surveys~\citep{li_pti_survey} in not exemplifying it separately.) In both famili
 non-linear operations are the bottleneck---Li et al.~\citep{li_pti_survey} measure them at
 more than $85\%$ of total runtime for MPC and around $60\%$ for HE---and this is the
 structural reason secure inference sits one-to-three orders of magnitude above plaintext.
+Autoregressive decoding compounds it: each generated token is a full forward pass, so any
+per-pass secure overhead (and any per-token interaction round) is multiplied by the
+generation length~\citep{andreoletti_ppi_practice}---the reason these schemes report
+seconds-to-minutes \emph{per token}.
 The complementary \emph{access-hiding} primitives (PIR, ORAM,
 searchable encryption, distance-preserving encryption) that protect the RAG retrieval
 layer are introduced in \cref{sec:retrieval}.

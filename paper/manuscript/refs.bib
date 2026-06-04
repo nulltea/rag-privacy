@@ -745,6 +745,30 @@
   year   = {2026}
 }
 
+@misc{andreoletti_ppi_practice,
+  author = {Andreoletti, Davide and Rudi, Alessandro and Carpanzano, Emanuele and Lelli, Francesco and Leidi, Tiziano},
+  title  = {Privacy-Preserving {LLM} Inference in Practice: A Comparative Survey of Techniques, Trade-Offs, and Deployability},
+  note   = {[verified-EdgeQuake: full-MD] Cryptology ePrint Archive 2026/105. The closest prior work on our
+            deployability lens, but a META/PET-family survey (MPC/FHE/hybrid/TEE/information-reduction): a few
+            representative systems per family + qualitative trade-off tables, NOT a per-scheme comparison.
+            Thin on information-theoretic/obfuscation (its info-reduction = only client-side DP InferDPT +
+            redaction PrivacyRestore; no learned-transform/covariant obfuscation lineage, no attacks). No RAG
+            retrieval/graph. Thesis = trust-minimising roadmap TEE->crypto-augmented->FHE (we reach a different
+            deployment-readiness conclusion; cross-compared in sec:synthesis).},
+  year   = {2026}
+}
+
+@misc{chen_sok_pti,
+  author = {Chen, Yuntian and Lu, Tianpei and Tang, Zhanyong and Zhang, Bingsheng and Shi, Zhiying and Luan, Yuxiang and Wang, Zhuzhu},
+  title  = {{SoK}: Private Transformer-Based Model Inference},
+  note   = {[verified-EdgeQuake: full-MD] Cryptology ePrint Archive 2026/491. Crypto-only (HE/MPC/hybrid),
+            61 frameworks; explicitly excludes TEE/obfuscation/DP/RAG. Distinctive: a reproducibility audit +
+            re-benchmark under standardized hardware (P=paper-reported vs R=reproduced, code-availability flags)
+            and a network-aware re-evaluation. A second, more-recent crypto-inference depth anchor we defer to
+            alongside Li et al.; credited for the reproducibility dimension.},
+  year   = {2026}
+}
+
 % ====== System baselines (cited as plaintext RAG referents) =================
 
 @misc{guo_lightrag,

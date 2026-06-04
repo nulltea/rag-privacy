@@ -256,6 +256,14 @@ paper's testbed---different hardware, model, and dataset---so it conveys an orde
 not a precise ratio. The one exception is a figure we mark \emph{co-measured}: two or more
 schemes benchmarked \emph{together, in one paper on one testbed}, where a direct comparison is
 sound. We flag co-measured figures explicitly; every unflagged figure is indicative.
+Even \emph{within} a regime, three further conditions must match before a comparison is fair,
+and we hold them fixed or flag a mismatch: the \emph{number of computing parties} (a 2PC, 3PC,
+or dealer-aided protocol carries different cost structure), the \emph{numerical regime}
+(quantized vs.\ full-precision schemes are not directly comparable), and the \emph{network
+setting}---Chen et al.~\citep{chen_sok_pti} re-benchmark crypto-inference systems and find that
+several tuned for one bandwidth/latency profile do not reach their reported performance under a
+different one, so a WAN figure and a LAN figure are not interchangeable inside the same
+model-and-hardware bucket.
 
 \paragraph{One-hop relative normalization.}
 Cryptographic-inference schemes overwhelmingly report cost \emph{relative to a prior secure

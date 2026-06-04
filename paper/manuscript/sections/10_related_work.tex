@@ -15,12 +15,17 @@
 We positioned this systematization against prior surveys and SoKs in \cref{sec:intro}
 (\cref{tab:prior-soks}): the risk-centric RAG-privacy SoK of Bodea et
 al.~\citep{bodea_sok}; the cryptographic private-Transformer-inference surveys of Li et
-al.~\citep{li_pti_survey}, \citet{pti_survey_2024}, and Luo et
-al.~\citep{luo_cplm_survey}, whose MPC/FHE-inference depth we deliberately build on rather
+al.~\citep{li_pti_survey}, \citet{pti_survey_2024}, Luo et
+al.~\citep{luo_cplm_survey}, and Chen et al.~\citep{chen_sok_pti}, whose MPC/FHE-inference
+depth (and, for Chen et al., reproducibility re-benchmark) we deliberately build on rather
 than duplicate; the FHE-specific SoKs~\citep{xue_fhe_sok,albadawi_ckks_sok}; broad
-lifecycle treatments of LLM privacy~\citep{ma_semantic_sok}; and the accelerator-TEE
+lifecycle treatments of LLM privacy~\citep{ma_semantic_sok}; the accelerator-TEE
 design space, which we treat as a Tier-3 baseline and refer the reader to its own dedicated
-SoK~\citep{accel_tee_sok}. In every case our contribution is complementary: spanning all
+SoK~\citep{accel_tee_sok}; and the deployability-focused meta-survey of Andreoletti et
+al.~\citep{andreoletti_ppi_practice}, the one prior work sharing our lens, from which we
+differ in granularity (per-scheme vs.\ per-family), coverage (retrieval and graph-RAG), and
+conclusion (a deployment-readiness frontier vs.\ their TEE\,$\to$\,FHE trajectory; \cref{sec:intro},
+\cref{ssec:deployment}). For the others our contribution is complementary: spanning all
 five mechanism families on a single threat-model and deployment-cost frame, and covering
 private RAG retrieval, storage, and graph-RAG---the dimensions those works omit. The
 primary-source schemes are treated where they arise (\cref{sec:crypto}--\cref{sec:hybrid}),

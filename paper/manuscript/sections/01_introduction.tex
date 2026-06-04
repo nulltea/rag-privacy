@@ -23,38 +23,56 @@ systematize (\cref{tab:prior-soks}). The closest, Bodea et al.~\citep{bodea_sok}
 carries no performance axis and explicitly excludes graph-RAG. A second cluster surveys
 \emph{cryptographic} private Transformer inference: Li et al.~\citep{li_pti_survey}---the most
 detailed, with a layer-wise MPC/HE taxonomy and a communication/runtime/accuracy table---an earlier
-MPC/FHE/hybrid survey~\citep{pti_survey_2024}, and Luo et al.~\citep{luo_cplm_survey} (a
-cryptographic lifecycle view that also spans training). All three are confined to MPC/FHE and to
-\emph{inference}, touching neither the TEE, obfuscation, and DP families nor the RAG
-retrieval/storage layer. FHE-specific SoKs~\citep{xue_fhe_sok,albadawi_ckks_sok} go deep on a single
-primitive, and broad lifecycle treatments~\citep{ma_semantic_sok} stay high-level on defenses without
-a cost axis.
+MPC/FHE/hybrid survey~\citep{pti_survey_2024}, Luo et al.~\citep{luo_cplm_survey} (a
+cryptographic lifecycle view that also spans training), and Chen et al.~\citep{chen_sok_pti}, who
+add a reproducibility audit that re-benchmarks 61 crypto frameworks under standardized hardware. All
+of these are confined to MPC/FHE and to \emph{inference}, touching neither the TEE, obfuscation, and
+DP families nor the RAG retrieval/storage layer. FHE-specific SoKs~\citep{xue_fhe_sok,albadawi_ckks_sok}
+go deep on a single primitive, and broad lifecycle treatments~\citep{ma_semantic_sok} stay high-level
+on defenses without a cost axis. Closest in \emph{spirit}, Andreoletti et
+al.~\citep{andreoletti_ppi_practice} share our deployability lens, but theirs is a \emph{meta}-survey
+organized at the level of PET \emph{families} (a few representative systems per family with qualitative
+trade-off tables), not a per-scheme comparison; it is especially thin on information-theoretic and
+obfuscation methods (its ``information-reduction'' family reduces to client-side DP and span redaction,
+omitting the learned-transform/covariant-obfuscation lineage and its published inversions), and it
+covers neither RAG retrieval nor graph-RAG.
 
-We are \emph{complementary} to all of these, not competing. No prior survey places all five mechanism
-families on one threat-model and deployment-cost frame, and none covers private RAG retrieval,
-storage, or graph-RAG. For the fine-grained systematization of MPC/FHE inference protocols we
-\emph{refer the reader to} Li et al.~\citep{li_pti_survey}, keeping only enough crypto-inference depth---a
-few frontier exemplars (\cref{sec:crypto})---to locate cryptography on our cross-family cost frontier;
-our distinctive contribution is the breadth across mechanisms, the retrieval and graph-RAG dimension,
-and the deployment-readiness lens.
+We are \emph{complementary} to most of these and \emph{differ sharply} from the one that shares our
+lens. No prior survey places all five mechanism families on one threat-model and deployment-cost
+frame, and none covers private RAG retrieval, storage, or graph-RAG. For the fine-grained
+systematization of MPC/FHE inference protocols we \emph{refer the reader to} Li et
+al.~\citep{li_pti_survey} and Chen et al.~\citep{chen_sok_pti}, keeping only enough crypto-inference
+depth---a few frontier exemplars (\cref{sec:crypto})---to locate cryptography on our cross-family cost
+frontier. Against Andreoletti et al.~\citep{andreoletti_ppi_practice} the contrast is substantive, not
+just of scope: where they survey families and argue a single trust-minimising trajectory
+(TEE\,$\to$\,crypto-augmentation\,$\to$\,FHE), we score \emph{individual schemes} on a quantitative
+deployment-readiness frontier and reach a different conclusion (\cref{ssec:deployment})---one in which
+the hybrid split and obfuscation are present-day leaders rather than way-stations. Our distinctive
+contribution is thus the breadth across mechanisms, the per-scheme depth, the retrieval and graph-RAG
+dimension, and the quantitative deployment-readiness lens.
 
 \begin{table*}[t]
-  \centering \footnotesize
+  \centering \footnotesize\setlength{\tabcolsep}{4pt}
   \caption{This SoK against prior surveys and SoKs on related ground.
-    $\bullet$ = covered, $\circ$ = partial/shallow, ``---'' = absent. \emph{Threat}: the threat-model
-    treatment; \emph{Cost}: a quantitative performance axis.}
+    $\bullet$ = covered, $\circ$ = partial/shallow, ``---'' = absent. \emph{Threat}: threat-model
+    treatment. \emph{Cost}: quantitative cross-scheme performance axis. \emph{Deploy.}:
+    deployment-readiness assessment ($\bullet$ = quantitative scoring, $\circ$ = qualitative discussion).
+    \emph{Code}: code/reproducibility ($\bullet$ = re-benchmark audit, $\circ$ = notes availability).
+    \emph{Infer.}, \emph{RAG} (retrieval/storage), \emph{Graph} (graph-RAG): coverage of each layer.}
   \label{tab:prior-soks}
-  \begin{tabular}{@{}lllcccc@{}}
+  \begin{tabular}{@{}lllccccccc@{}}
     \toprule
-    Survey / SoK & Mechanism families & Threat & Cost & Inference & RAG retr. & Graph-RAG \\
+    Survey / SoK & Mechanism families & Threat & Cost & Deploy. & Code & Infer. & RAG & Graph \\
     \midrule
-    Bodea et al.~\citep{bodea_sok}        & RAG risks (attacks)   & risk-taxon. & ---       & ---       & $\circ$   & --- \\
-    Li et al.~\citep{li_pti_survey}       & MPC/FHE               & semi-honest & $\bullet$ & $\bullet$ & ---       & --- \\
-    PTI survey~\citep{pti_survey_2024}    & MPC/FHE/hybrid        & $\circ$     & $\circ$   & $\bullet$ & ---       & --- \\
-    Luo et al.~\citep{luo_cplm_survey}    & MPC/FHE (+training)   & ---         & ---       & $\bullet$ & ---       & --- \\
-    Xue et al.~\citep{xue_fhe_sok}        & FHE only              & ---         & $\bullet$ & $\circ$   & ---       & --- \\
-    Ma et al.~\citep{ma_semantic_sok}     & DP/obfusc.\ (hi-lvl)  & lifecycle   & ---       & $\circ$   & ---       & --- \\
-    \textbf{This SoK}                     & \textbf{all five}     & 5-axis      & $\bullet$ & $\bullet$ & $\bullet$ & $\bullet$ \\
+    Bodea et al.~\citep{bodea_sok}        & RAG risks (attacks)        & risk-taxon. & ---       & ---       & ---       & ---       & $\circ$   & --- \\
+    Li et al.~\citep{li_pti_survey}       & MPC/FHE                    & semi-honest & $\bullet$ & ---       & ---       & $\bullet$ & ---       & --- \\
+    PTI survey~\citep{pti_survey_2024}    & MPC/FHE/hybrid             & $\circ$     & $\circ$   & ---       & ---       & $\bullet$ & ---       & --- \\
+    Luo et al.~\citep{luo_cplm_survey}    & MPC/FHE (+training)        & ---         & ---       & ---       & $\circ$   & $\bullet$ & ---       & --- \\
+    Xue et al.~\citep{xue_fhe_sok}        & FHE only                   & ---         & $\bullet$ & ---       & ---       & $\circ$   & ---       & --- \\
+    Ma et al.~\citep{ma_semantic_sok}     & DP/obfusc.\ (hi-lvl)       & lifecycle   & ---       & ---       & ---       & $\circ$   & ---       & --- \\
+    Andreoletti et al.~\citep{andreoletti_ppi_practice} & crypto+TEE+info-red.\ (fam.) & operational & $\circ$ & $\circ$ & --- & $\bullet$ & --- & --- \\
+    Chen et al.~\citep{chen_sok_pti}      & MPC/FHE/hybrid             & semi-honest & $\bullet$ & $\circ$   & $\bullet$ & $\bullet$ & ---       & --- \\
+    \textbf{This SoK}                     & \textbf{all five}          & 5-axis      & $\bullet$ & $\bullet$ & $\circ$   & $\bullet$ & $\bullet$ & $\bullet$ \\
     \bottomrule
   \end{tabular}
 \end{table*}

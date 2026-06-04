@@ -36,6 +36,17 @@ hardware dependence is the binding deployability constraint (\cref{sec:synthesis
 % (the §2 finding bites hardest here).
 \needswork{describe TEE/CVM model, attestation, the trust shift to the silicon vendor}
 
+End-to-end confidentiality is not the enclave alone but a deployment workflow that binds the
+hardware guarantee to the threat model~\citep{andreoletti_ppi_practice}: (i)~\emph{remote
+attestation}---the client verifies the enclave's measurement (expected model, runtime, config);
+(ii)~\emph{key provisioning}---session keys are released to the enclave only after attestation;
+(iii)~\emph{secure channel}---prompts are decrypted and processed only inside the enclave, and
+completions are re-encrypted before leaving it; (iv)~\emph{output handling}---plaintext logging,
+tracing, and telemetry outside the enclave boundary are forbidden by policy. Steps (i)--(iii) are
+where TEE schemes concentrate; step~(iv), together with token-streaming and metadata
+(length/timing), is the residual-leakage surface the side-channel finding of \cref{sec:synthesis}
+targets.
+
 \subsection{Representative Schemes}
 \begin{table}[H]
   \centering \footnotesize
