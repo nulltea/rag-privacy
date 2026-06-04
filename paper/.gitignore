@@ -65,6 +65,7 @@ quality_reports/merges/*
 quality_reports/decisions/*
 quality_reports/checkpoints/*
 quality_reports/preregistrations/*
+quality_reports/annotated-pdfs/*
 !quality_reports/plans/.gitkeep
 !quality_reports/specs/.gitkeep
 !quality_reports/session_logs/.gitkeep
@@ -72,6 +73,7 @@ quality_reports/preregistrations/*
 !quality_reports/decisions/.gitkeep
 !quality_reports/checkpoints/.gitkeep
 !quality_reports/preregistrations/.gitkeep
+!quality_reports/annotated-pdfs/.gitkeep
 
 # R analysis outputs (generated artifacts; keep scripts, ignore outputs)
 scripts/R/_outputs/
