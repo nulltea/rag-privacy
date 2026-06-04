@@ -147,3 +147,27 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 toml = "0.8"
 base64 = "0.22"
 
+# cubecl stack patched to a fork carrying the `do_create` upload host-copy
+# fix: cubecl-runtime's `do_create`/`do_create_from_slices` deep-copied the
+# entire upload buffer via `Bytes::from_bytes_vec(data.to_vec())` every call
+# (a per-upload memcpy + mmap/page-fault churn). On the B=8 Qwen3-4B prefill
+# this `engine:matmul:upload` bucket was 19.7 s; the fix takes it to ~0
+# (prefill 100 → 78.6 s — chronicle §25). Pinned to one rev so all crates
+# resolve to a single source (avoids a split cubecl-common). Drop this patch
+# once the fix lands upstream (PR to tracel-ai/cubecl pending).
+[patch.crates-io]
+cubecl = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-common = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-core = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-cpp = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-cuda = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-ir = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-macros = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-macros-internal = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-opt = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-runtime = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-spirv = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-std = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-wgpu = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+cubecl-zspace = { git = "https://github.com/nulltea/cubecl", rev = "aabe3173641204b46b5c1fea49c562d0f8d15cbf" }
+
