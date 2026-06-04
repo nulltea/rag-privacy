@@ -17,21 +17,24 @@ machinery for the RAG retrieval and storage layer---PIR, ORAM, searchable encryp
 distance-comparison-preserving encryption---is a distinct design space with different
 trade-offs, and we treat it separately in \cref{sec:retrieval}. Because MPC/FHE inference
 protocols are the subject of dedicated recent surveys~\citep{li_pti_survey,pti_survey_2024},
-we cover the sub-family briefly, through a few frontier exemplars that locate it on our
-deployment-cost frontier. On the deployment-readiness criteria, cryptographic inference
+we do not re-systematize the protocols themselves---Li et al.~\citep{li_pti_survey} survey
+that space in depth (layer-wise, MPC-vs-HE). We cover the sub-family briefly, through a few
+frontier exemplars (\cref{tab:crypto-inf}) that locate it on our deployment-cost frontier.
+On the deployment-readiness criteria, cryptographic inference
 scores highest on threat-model fit and fidelity (exact computation under a TCB of none or
 non-collusion) but lowest on performance (\cref{sec:synthesis}).
 
 \subsection{Approach}
 \label{ssec:crypto-approach}
-Secret sharing (SS) and the multi-party protocols built on it (MPC) split each value
-into shares held by non-colluding parties. Linear maps---the bulk of a Transformer's
-matrix multiplications---are then local (free under SS) or need only cheap Beaver-triple
-multiplications, so the cost concentrates entirely in the non-linear operations. Softmax,
-GELU, and LayerNorm have no linear-sharing analogue and must be evaluated through
-oblivious transfer or garbled circuits, or replaced by polynomial/Fourier
+\emph{Secret sharing and MPC.} Secret sharing (SS) and the multi-party protocols built on
+it (MPC) split each value into shares held by non-colluding parties. Linear maps---the bulk
+of a Transformer's matrix multiplications---are then local (free under SS) or need only
+cheap Beaver-triple multiplications, so the cost concentrates entirely in the non-linear
+operations. Softmax, GELU, and LayerNorm have no linear-sharing analogue and must be
+evaluated through oblivious transfer or garbled circuits, or replaced by polynomial/Fourier
 approximations---each adding rounds, communication, or approximation error.
-Fully-homomorphic encryption (FHE) instead evaluates a circuit directly on ciphertext
+
+\emph{Fully-homomorphic encryption.} FHE instead evaluates a circuit directly on ciphertext
 under a single key; the RNS-CKKS scheme used in most FHE-based Transformer inference is
 \emph{leveled}, supporting computation only up to a fixed multiplicative depth $L$ before an expensive
 bootstrap, which again forces the non-linearities into low-degree polynomial
@@ -41,15 +44,12 @@ leveled-RNS-CKKS exemplars we cover do not use it, and we follow the dedicated i
 surveys~\citep{li_pti_survey} in not exemplifying it separately.) In both families the
 non-linear operations are the bottleneck---Li et al.~\citep{li_pti_survey} measure them at
 more than $85\%$ of total runtime for MPC and around $60\%$ for HE---and this is the
-structural reason secure inference sits one-to-three orders of magnitude above plaintext
-(\cref{ssec:crypto-inf}). The complementary \emph{access-hiding} primitives (PIR, ORAM,
+structural reason secure inference sits one-to-three orders of magnitude above plaintext.
+The complementary \emph{access-hiding} primitives (PIR, ORAM,
 searchable encryption, distance-preserving encryption) that protect the RAG retrieval
 layer are introduced in \cref{sec:retrieval}.
 
-\subsection{Cryptographic Inference}
-\label{ssec:crypto-inf}
-We do not re-systematize MPC/FHE Transformer-inference protocols---Li et
-al.~\citep{li_pti_survey} survey that space in depth (layer-wise, MPC-vs-HE). We keep five
+We keep five
 frontier exemplars (\cref{tab:crypto-inf}) chosen to span the design space: a two-party
 protocol (SHAFT), a 2PC protocol with an offline dealer (PermLLM), distributed MPC with
 evaluator nodes (Fission), private mixture-of-experts routing (CryptoMoE), and
@@ -103,6 +103,8 @@ therefore paper-reported where available and otherwise recovered by one-hop extr
 
 \subsection{Limitations and Known Attacks}
 \label{ssec:crypto-limits}
+Each failure mode below is a concrete attack on a specific trust assumption or speed
+heuristic; \cref{tab:crypto-attacks} collects them by family (MPC/secret sharing vs FHE).
 
 \paragraph{The trust assumption is the security.}
 Every cryptographic scheme in this section is proved secure only against a
@@ -150,3 +152,27 @@ decrypted scores or rankings to a queryable client should apply the countermeasu
 (\cref{ssec:retr-limits}). The leakage and attacks specific to cryptographic
 \emph{retrieval}---distance-comparison inversion, access-pattern and volume
 reconstruction---are treated with the retrieval schemes in \cref{sec:retrieval}.
+\begin{table}[H]
+  \centering \footnotesize
+  \caption{Known attacks on cryptographic \emph{inference}, separated by family
+    (MPC/secret sharing vs FHE; the failure modes differ). Each row names the attack, the
+    assumption or speed heuristic it exploits, the schemes at risk, and the defence.
+    IND-CPA\textsuperscript{D} = indistinguishability under chosen plaintext with a
+    decryption oracle.}
+  \label{tab:crypto-attacks}
+  \scriptsize\setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{@{}Y{1.05}Y{1.0}Y{0.85}Y{1.1}@{}}
+    \toprule
+    Attack (cited) & Assumption / heuristic exploited & Schemes at risk & Defence \\
+    \midrule
+    \multicolumn{4}{@{}l}{\emph{MPC / secret sharing}}\\
+    Model extraction (Muse)~\citep{muse_2021} & malicious client deviating from a semi-honest 2PC protocol & semi-honest 2PC inference (SHAFT, PermLLM) & malicious-client security: SIMC~\citep{simc_2022} ($1.3$--$2\times$) \\
+    Party collusion & two parties collude $\Rightarrow$ additive shares recombine to plaintext & MPC/SS (PermLLM, Fission) & non-collusion / honest-majority deployment \\
+    Permutation inversion (Fission)~\citep{fission} & heuristic, non-information-theoretic permuted-plaintext reveal & PermLLM-style permutation & multi-evaluator chunking (${\sim}\log N$) + query batching \\
+    Prompt reconstruction (Hidden No More)~\citep{hnm} & fixed permutation + decoder injectivity & STIP, Centaur, PermLLM & token sharding~\citep{cascade_thomas} (statistical only) \\
+    \midrule
+    \multicolumn{4}{@{}l}{\emph{FHE}}\\
+    Approx.-ciphertext key recovery (IND-CPA\textsuperscript{D})~\citep{li_micciancio_2021} & adversary observes decryptions of approximate CKKS ciphertexts & CKKS w/ exposed decryptions (not non-int.\ Euston) & noise flooding (precision cost) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}

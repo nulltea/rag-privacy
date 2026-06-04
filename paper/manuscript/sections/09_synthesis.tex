@@ -9,7 +9,7 @@
 % Rows = pipeline stages (ingest, embed, store, retrieve, rerank, generate, +
 % graph construction, graph traversal); columns = mechanism families (§3-§7).
 % Cells = representative schemes. EMPTY / weak cells = open problems.
-\begin{table*}[t]
+\begin{table}[H]
   \centering \scriptsize
   \caption{Coverage of the inference-and-RAG pipeline by mechanism family. Cell = one
     or two representative schemes (\cref{sec:crypto}--\cref{sec:hybrid}; see those
@@ -28,7 +28,7 @@
     Graph traverse   & Pacmann/XorMM      & Opal/H$_2$O$_2$RAM & ARoG        & ---           & PrivGemo \\
     \bottomrule
   \end{tabular}
-\end{table*}
+\end{table}
 \needswork{narrate the headline gaps the ``---'' cells expose: obfuscation and DP are
 almost absent from storage/retrieval/rerank; the hybrid split is absent from every
 retrieval stage (it is an inference technique); graph \emph{construction} is a near-total
@@ -49,8 +49,8 @@ paper); the non-comparability caveat of \cref{sec:comparison} stands.
 \emph{Reranking} is absent from \cref{tab:performance} by design: although it is a pipeline
 stage in the gap-map above, no surveyed scheme reports a standalone private cross-encoder
 reranking measurement---the few schemes with a scoring step (p\textsuperscript{2}RAG, TRSE,
-RemoteRAG's HE rerank, Opal's in-enclave rerank) fold it into a retrieval-pipeline figure---so
-private reranking stands as an \emph{open gap} rather than a comparable cost.
+RemoteRAG's HE top-$k$ scoring, Opal's in-enclave scoring) fold it into a retrieval-pipeline
+figure---so private reranking stands as an \emph{open gap} rather than a comparable cost.
 \begin{table*}[t]
   \centering \footnotesize
   \caption{Performance and fidelity by use case (indicative; normalized to
@@ -174,3 +174,4 @@ them \citep{kaviani_opal}. But we record it as a systematisation finding and a
 standing item for future work: the field has converged on a threat model that
 structurally excludes the attack class most likely to break its dominant trust
 anchor.
+C

@@ -29,6 +29,10 @@
 % --- tables, graphics, color ------------------------------------------------
 \usepackage{booktabs}
 \usepackage{array}
+\usepackage{tabularx}
+% Weighted ragged-right X column for full-\textwidth tables: Y{w} sets the column's
+% share; the weights across a table must sum to its column count.
+\newcolumntype{Y}[1]{>{\raggedright\arraybackslash\hsize=#1\hsize}X}
 \usepackage{graphicx}
 \graphicspath{{figures/}}
 \usepackage{xcolor}

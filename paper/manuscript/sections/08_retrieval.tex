@@ -12,16 +12,14 @@ predominantly cryptographic---private information retrieval (PIR), oblivious RAM
 searchable encryption, and distance-comparison-preserving encryption---but the layer also
 admits trusted-execution and anonymization designs, so we organize by retrieval
 \emph{setting} rather than by mechanism. We split by index structure, which determines both
-cost and leakage: \emph{dense} retrieval over a flat or inverted-file (IVF) vector index
-(naive RAG, \cref{ssec:retr-dense}) and \emph{graph} retrieval and traversal over a
+cost and leakage: \emph{dense} approximate-nearest-neighbour (ANN) retrieval over a vector
+index (naive RAG, \cref{ssec:retr-dense}) and \emph{graph} retrieval and traversal over a
 graph-structured index or knowledge graph (Graph/LightRAG, \cref{ssec:retr-graph}). Storage
 and retrieval mostly share the same machinery, so we fold storage into each and flag where
 they diverge. On the deployment-readiness criteria this is the RAG-side confidentiality
 closest to practical deployment---one-to-three orders of magnitude cheaper than
 cryptographic inference (\cref{sec:synthesis}).
 
-\subsection{Approach}
-\label{ssec:retr-approach}
 Retrieval leaks through \emph{which} records a query touches and what the index reveals at
 rest, so its primitives are access-hiding rather than compute-hiding. Private information
 retrieval (PIR) lets a client fetch a record without the server learning which one;
@@ -31,16 +29,25 @@ adjacency lookups over ciphertext while bounding what access and volume patterns
 distance-comparison-preserving encryption (DCPE) keeps similarity search cheap by encrypting
 vectors so that distance \emph{comparisons} survive---trading exactness and a quantified
 leakage for near-plaintext speed. These primitives compose with the compute-hiding inference
-layer (\cref{sec:crypto}) but are costed and attacked separately.
+layer (\cref{sec:crypto}) but are costed and attacked separately; we group them by retrieval
+setting below.
 
 \subsection{Dense Retrieval (Naive RAG)}
 \label{ssec:retr-dense}
-Over a flat or inverted-file (IVF) vector index, the question is how to rank the database by
-similarity to a query without revealing the query, the matches, or the stored vectors
-(\cref{tab:crypto-vec}).
+Dense retrieval ranks the database by similarity to a query embedding. The confidentiality
+problem is to perform that ranking without revealing the query, the matches, or the stored
+vectors (\cref{tab:crypto-vec})---each of which is a concrete leak. The \emph{query embedding}
+is invertible to readable text by inversion models such as Vec2Text~\citep{morris2023vec2text},
+so exposing it discloses the user's question verbatim. \emph{Which} database vectors a query
+touches or returns---the access pattern---reveals which corpus documents the user is
+interested in, and over repeated queries this pattern alone supports database-reconstruction
+attacks~\citep{kellaris2016leakage}. The \emph{stored vectors} at rest are themselves
+sensitive: an embedding is a lossy encoding of its source document, again invertible. A scheme
+is therefore judged on how many of these three channels---query, access pattern, and at-rest
+index---it actually closes (\cref{ssec:retr-limits}).
 \begin{table}[H]
   \centering \footnotesize
-  \caption{\emph{Dense} (flat/IVF) retrieval and storage---approximate nearest-neighbour
+  \caption{\emph{Dense} retrieval and storage---approximate nearest-neighbour
     (ANN) search over a vector index; all mechanisms. Latency is end-to-end query time
     unless noted; Comm./storage is per-query communication or index-storage blow-up;
     fidelity is retrieval exactness. SE = searchable encryption; PIR = private information
@@ -52,12 +59,12 @@ similarity to a query without revealing the query, the matches, or the stored ve
     \toprule
     Scheme & Stage & Primitive & Latency & Comm./storage & Fidelity \\
     \midrule
-    p\textsuperscript{2}RAG~\cite{p2rag}    & retrieve,rerank & 2-server SS              & rel.\ only$^*$              & $O(N{+}S)$ B/query & exact \\
+    p\textsuperscript{2}RAG~\cite{p2rag}    & retrieve,score  & 2-server SS              & rel.\ only$^*$              & $O(N{+}S)$ B/query & exact \\
     Panther~\cite{panther}                   & retrieve        & PIR+SS+GC+HE             & 18\,s @10M                  & 284\,MB/query      & exact \\
     PIR-RAG~\cite{pirrag}                     & retrieve        & classical PIR            & 16.8\,s @5K                 & n/r                & exact (cluster) \\
     RAGtime-PIANO~\cite{ragtime_piano}        & retrieve,e2e    & CKKS + lattice PIR       & rel.\ only$^*$              & n/r                & exact (ct) \\
-    TRSE~\cite{trse}                          & retrieve,rerank & 2-round SE + HE scoring  & ${\sim}100$s\,ms ($k'$=100) & n/r                & exact \\
-    RemoteRAG~\cite{cheng2025remoterag}       & retrieve,rerank & DistanceDP + PHE rerank  & 0.67\,s                     & n/r                & 100\% recall (DP) \\
+    TRSE~\cite{trse}                          & retrieve,score  & 2-round SE + HE scoring  & ${\sim}100$s\,ms ($k'$=100) & n/r                & exact \\
+    RemoteRAG~\cite{cheng2025remoterag}       & retrieve,score  & DistanceDP + PHE top-$k$ & 0.67\,s                     & n/r                & 100\% recall (DP) \\
     SAP/DCPE~\cite{fuchsbauer_sap}            & store,retrieve  & DCPE (symmetric)         & ${\sim}0$\,ms               & ${\approx}1\times$ & approx ($\beta$) \\
     CAPRISE~\cite{ye_caprise}                 & store,retrieve  & conditional ADCPE        & 2339\,vec/s (enc.)          & ${\approx}1\times$ & approx ($\beta$)+DP \\
     \bottomrule
@@ -68,22 +75,32 @@ similarity to a query without revealing the query, the matches, or the stored ve
   RAGtime-PIANO 40$\times$ vs PIR-RAG --- neither gives an absolute query latency.}
 \end{table}
 
-\paragraph{PIR and searchable encryption.}
+\paragraph{Oblivious fetch (PIR).}
 Panther, PIR-RAG, p\textsuperscript{2}RAG, and RAGtime-PIANO retrieve through PIR (single- or
 multi-server, classical or lattice/CKKS-based), so the server returns the matching vectors
-without learning which were touched; TRSE instead uses two-round searchable encryption with
-homomorphic scoring. The cost driver is the obliviousness itself: PIR keeps communication
-sublinear but forces a server-side linear scan, which is why these run in seconds at
-million-scale rather than milliseconds. RemoteRAG takes a hybrid route---it perturbs the
-query under DistanceDP, narrows the candidate set, then reranks by cosine distance under
-partially-homomorphic encryption (with optional oblivious transfer for the final fetch),
-reaching $0.67$\,s at $100\%$ recall for a small privacy budget; its CKKS/PHE machinery
-protects the query and the at-rest vectors alike.
+without learning which were touched, closing the access-pattern channel. The cost driver is
+the obliviousness itself: PIR keeps communication sublinear but forces a server-side linear
+scan, which is why these run in seconds at million-scale rather than milliseconds.
+
+\paragraph{Homomorphic scoring.}
+A distinct subclass keeps the similarity \emph{scoring} under encryption rather than hiding
+the fetch: the server scores the encrypted query against encrypted database vectors
+homomorphically, so the similarity values and their order never appear in the clear. TRSE runs
+two-round searchable encryption with homomorphic top-$k$ scoring. RemoteRAG is two-stage: it
+first coarse-retrieves a candidate set of $k'$ documents matching a DistanceDP-perturbed
+embedding (in the clear, so the cloud sees only a noised query), then computes \emph{exact}
+cosine-similarity top-$k$ over those $k'$ candidates with the true query encrypted under
+partially-homomorphic encryption (PHE)---the user decrypts the returned distances and sorts
+them locally---with optional $k$-out-of-$k'$ oblivious transfer for the final fetch, reaching
+$0.67$\,s at $100\%$ recall for a small privacy budget. RAGtime-PIANO likewise layers CKKS scoring over its lattice PIR. The
+shared cost is the homomorphic arithmetic per candidate, which is why these schemes prune the
+candidate set (DP, clustering) before scoring; the shared benefit is that the query embedding
+and the at-rest vectors are protected by the same CKKS/PHE machinery.
 
 \paragraph{Distance-comparison-preserving encryption (DCPE).}
 SAP/DCPE and CAPRISE take the opposite trade: a symmetric per-vector transform
 ($c = s\,e + \lambda$, the same dimension as the plaintext embedding---so the ciphertext
-imposes ${\approx}1\times$ storage, and the papers report no blow-up because there is none)
+imposes ${\approx}1\times$ storage)
 that preserves \emph{distance comparisons}, letting the server rank encrypted database
 vectors by similarity to an encrypted query at near-plaintext speed (CAPRISE encrypts
 2339\,vectors/s) with no interaction and no homomorphic operations. The two differ in
@@ -98,18 +115,28 @@ exactness and a quantified leakage, examined in \cref{ssec:retr-limits}.
 \subsection{Graph Retrieval and Traversal (Graph/LightRAG)}
 \label{ssec:retr-graph}
 Graph-RAG retrieves over a graph-structured index or knowledge graph: entity/relation ANN
-lookups, one-hop adjacency expansion, and \texttt{source\_id} fan-out (the LightRAG surface).
-These ops leak differently from dense search---node access pattern and adjacency
-\emph{volume} are the surfaces---so they need a different toolkit (\cref{tab:crypto-graph}).
+lookups, one-hop adjacency expansion, and \texttt{source\_id} fan-out (the LightRAG
+surface~\citep{guo_lightrag}). These ops leak differently from dense search, along three
+graph-specific channels. First, the \emph{node access pattern}---which entity or relation a
+query resolves to---identifies the subject of the query directly (an adjacency lookup on
+``Alice'' reveals interest in Alice even if the edge contents stay encrypted). Second, the
+\emph{adjacency volume}---how many neighbours a one-hop expansion returns---leaks each node's
+degree, and a degree sequence is a structural fingerprint that re-identifies nodes against a
+public graph even under encryption. Third, the \texttt{source\_id} \emph{fan-out}---which
+chunks an entity maps to---links a query to specific source documents. Because these surfaces
+are about \emph{structure and access}, not arithmetic, dense-retrieval primitives do not
+address them and graph retrieval needs a different toolkit (\cref{tab:crypto-graph}).
 \begin{table}[H]
   \centering \footnotesize
   \caption{\emph{Graph} retrieval and storage---graph-indexed ANN and graph traversal
     (Graph/LightRAG); all mechanisms. Columns as in \cref{tab:crypto-vec}; latency is per
     graph-query (``gt'' = graph traversal). SSE = searchable symmetric encryption;
     (VH-)EMM = (volume-hiding) encrypted multi-map; ORAM = oblivious RAM. n/r = not
-    reported. ``billion-edge'' denotes the largest graph tested, not a latency.}
+    reported. ``billion-edge'' denotes the largest graph tested, not a latency.
+    ``lossy; QA-pres.''\ = retrieval is not exact (the subgraph is pruned by design) but
+    downstream answer quality is preserved.}
   \label{tab:crypto-graph}
-  \scriptsize\setlength{\tabcolsep}{4pt}
+  \scriptsize\setlength{\tabcolsep}{3pt}
   \begin{tabular}{@{}llllll@{}}
     \toprule
     Scheme & Stage & Primitive & Latency & Comm./storage & Fidelity \\
@@ -120,10 +147,14 @@ These ops leak differently from dense search---node access pattern and adjacency
     FLASH~\cite{flash_emm}     & retrieve,gt       & conjunctive VH-EMM       & n/r                      & ${>}2\times$ stor.\ saving & exact \\
     PeGraph~\cite{pegraph}     & store,retrieve,gt & SSE + secret sharing     & $<$1\,s/query @multi-M   & n/r                       & exact (ranked) \\
     H$_2$O$_2$RAM~\cite{h2o2ram}& store,retrieve,gt & doubly-oblivious RAM (TEE) & ${\sim}1000\times$ vs O$_2$RAM & n/r                & exact \\
-    GORAM~\cite{goram}         & retrieve,gt       & 3PC sqrt-ORAM (reserve)  & ego-query, billion-edge  & n/r                       & exact \\
-    PrivGemo~\cite{tan_privgemo}& retrieve,gt       & dual-tower KG anon (HMAC) & no crypto cost          & ---                       & quality-only \\
+    GORAM~\cite{goram}         & retrieve,gt       & 3PC sqrt-ORAM (reserve)  & 58\,ms--36\,s @1.4B      & n/r; init ${<}3$\,min     & exact \\
+    PrivGemo~\cite{tan_privgemo}& retrieve,gt       & dual-tower KG anon (HMAC) & no crypto cost          & ${\approx}70\%$ subgraph  & lossy; QA-pres. \\
     \bottomrule
   \end{tabular}
+
+  \smallskip
+  {\footnotesize \needswork{XorMM latency is unreported; we have a XorMM implementation in the
+  parent repository and can co-measure its query latency on the LightRAG adjacency workload---fill this cell.}}
 \end{table}
 
 \paragraph{Graph-ANN over an oblivious index.}
@@ -151,33 +182,84 @@ does) or rotating keys per session. H$_2$O$_2$RAM supplies a doubly-oblivious RA
 billion-edge federated graphs.
 
 \paragraph{Anonymization.}
-Where exact cryptography is too costly, PrivGemo~\citep{tan_privgemo} anonymizes the
-knowledge-graph view---a dual-tower design with HMAC session identifiers---so a remote LLM
-reasons over de-identified entities at no cryptographic cost, trading provable
-confidentiality for quality-preserving obfuscation (the hybrid/anonymization lineage of
-\cref{sec:hybrid}). Together the kept set covers LightRAG's actual retrieval
-surface---entity/relation/chunk ANN (Compass, Pacmann, CAPRISE), one-hop adjacency expansion
-(XorMM, FLASH), and graph storage (PeGraph, GORAM)---which is why retrieval, not crypto
-inference, anchors the deployable end of the confidential-RAG design space
+Where exact cryptography is too costly, PrivGemo~\citep{tan_privgemo} attacks the graph leak
+channels directly rather than encrypting them away. A local ``Hand'' module performs the
+graph exploration and hands the remote ``Brain'' LLM only a sanitized view of the retrieved
+subgraph: structure pruning and clustering strip motifs that are weakly connected to the
+query anchors, removing the uniquely-identifying topology that the adjacency-volume and
+degree-signature channels above would otherwise leak (the paper reports ${\approx}70\%$ node
+reduction---e.g.\ a ${>}2.4$M-node CWQ subgraph compressed to ${\approx}732$K---explicitly to
+minimize the structural fingerprint). Entity labels are replaced by HMAC session identifiers,
+so the Brain reasons over de-identified nodes; the dual-tower split keeps the raw graph
+local. The result secures graph-view retrieval by shrinking and pseudonymizing the exposed
+surface at no cryptographic cost, but it is quality-preserving \emph{obfuscation}, not a
+provable-confidentiality guarantee---a heuristic defence whose residual leakage is not
+quantified (the hybrid/anonymization lineage of \cref{sec:hybrid}). 
+
+Together these cover LightRAG's retrieval surface---entity/relation/chunk ANN (Compass, Pacmann, CAPRISE), one-hop adjacency expansion (XorMM, FLASH), and graph storage (PeGraph, GORAM)---which is why retrieval, not crypto inference, anchors the deployable end of the confidential-RAG design space
 (\cref{sec:synthesis}).
 
 \subsection{Limitations and Known Attacks}
 \label{ssec:retr-limits}
-The retrieval schemes trade exactness or residual leakage for their speed.
-Distance-comparison-preserving encryption (SAP/DCPE, CAPRISE) preserves distance
-\emph{comparisons} on ciphertext by construction---which is precisely the leak: the
-property-preserving-encryption family is invertible from ciphertext plus auxiliary
-distribution~\citep{naveed_ppe_2015}, and embeddings recovered this way are readable by
-inversion models such as Vec2Text~\citep{morris2023vec2text} (CAPRISE obfuscates
-inter-document distances and adds query-side noise specifically to blunt this). The PIR/ORAM
-and searchable-encryption schemes leak instead through access and volume---``ANN'' is a
-search method, not a scheme, so the leakage is the index's, not the search's: generic
+The retrieval schemes trade exactness or residual leakage for their speed, and the leakage
+profile differs by index structure: dense and graph retrieval are attacked through different
+channels, so we treat them separately (\cref{tab:retr-attacks}).
+
+\paragraph{Dense retrieval.}
+The distance-comparison-preserving schemes (SAP/DCPE, CAPRISE) preserve distance
+\emph{comparisons} on ciphertext by construction---which is precisely the leak. The
+property-preserving-encryption family is invertible from ciphertext plus an auxiliary data
+distribution~\citep{naveed_ppe_2015}, and the embeddings recovered this way are readable as
+text by inversion models such as Vec2Text~\citep{morris2023vec2text}; SAP additionally
+preserves inter-document comparisons, exposing the corpus's relational structure. CAPRISE is
+the co-designed defence: it makes the comparisons \emph{conditional} (obfuscating
+inter-document distances) and perturbs the query under differential privacy. The
+fetch-oriented schemes leak instead through \emph{access pattern} and \emph{volume}: generic
 reconstruction attacks consume access-pattern and communication-volume
 leakage~\citep{kellaris2016leakage}, $k$-nearest-neighbour query leakage alone suffices to
 recover values~\citep{kornaropoulos_knn_2019}, and volume-only attacks defeat schemes that
-hide \emph{which} record is touched but not \emph{how many}~\citep{blackstone_revisiting_2020}
----the reason volume-hiding multi-maps exist, though even those cannot asymptotically beat
-naive padding~\citep{ando_cost_2022}. Crucially, this attack chain stops at the oblivious
-schemes: PIR and ORAM (Pacmann, Panther, Compass) genuinely close the access-pattern channel
-rather than merely leaving it unattacked, which is why they---not the distance-preserving
-shortcuts---anchor the deployable end of cryptographic retrieval (\cref{sec:synthesis}).
+hide \emph{which} record is touched but not \emph{how many}~\citep{blackstone_revisiting_2020}.
+These attacks stop at the oblivious schemes: PIR (Panther, PIR-RAG, p\textsuperscript{2}RAG)
+genuinely closes the access-pattern channel, and homomorphic scoring (TRSE, RemoteRAG) keeps
+the similarity values themselves encrypted---which is why the oblivious schemes, not the
+distance-preserving shortcuts, anchor the deployable end (\cref{sec:synthesis}).
+
+\paragraph{Graph retrieval.}
+Graph retrieval is attacked along the structural channels of \cref{ssec:retr-graph}. The
+adjacency and keyword multi-maps leak \emph{volume}---postings-list and one-hop result-set
+sizes---so the same volume-only reconstruction applies~\citep{blackstone_revisiting_2020};
+volume-hiding EMMs (XorMM, FLASH) bound it by padding, though no padding scheme can
+asymptotically beat the naive bound~\citep{ando_cost_2022}, and what remains is the
+search/query-equality pattern, closed only by layering ORAM or rotating keys per session.
+The \emph{node access pattern} and adjacency-\emph{degree} signatures support
+re-identification against a public graph in the same reconstruction
+family~\citep{kellaris2016leakage}; ORAM (Compass) and doubly-oblivious RAM (H$_2$O$_2$RAM)
+close this channel by hiding which node is touched, while GORAM's 3PC sqrt-ORAM does so for
+billion-edge federated graphs. Where cryptography is too costly, anonymization (PrivGemo)
+instead shrinks and pseudonymizes the structural fingerprint---a heuristic obfuscation, not
+a provable guarantee, with unquantified residual leakage.
+\begin{table}[H]
+  \centering \footnotesize
+  \caption{Known attacks on confidential retrieval, separated by index structure (dense vs
+    graph; the leakage channels differ). Each row names the attack, the leakage it consumes,
+    the schemes at risk, and the defending scheme/primitive. PPE = property-preserving
+    encryption; EMM = encrypted multi-map.}
+  \label{tab:retr-attacks}
+  \scriptsize\setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{@{}Y{1.05}Y{1.0}Y{0.85}Y{1.1}@{}}
+    \toprule
+    Attack (cited) & Leakage exploited & Schemes at risk & Defence \\
+    \midrule
+    \multicolumn{4}{@{}l}{\emph{Dense retrieval}}\\
+    PPE inversion~\citep{naveed_ppe_2015} + Vec2Text~\citep{morris2023vec2text} & ciphertext distance comparisons + aux.\ distribution & SAP/DCPE & CAPRISE (conditional ADCPE + query DP) \\
+    Access-pattern reconstruction~\citep{kellaris2016leakage} & which records are fetched/returned & non-oblivious SE retrieval & PIR (Panther, PIR-RAG); HE scoring (TRSE, RemoteRAG) \\
+    $k$NN query leakage~\citep{kornaropoulos_knn_2019} & $k$-NN result geometry & distance-revealing search & oblivious fetch + query DP (RemoteRAG) \\
+    Volume leakage~\citep{blackstone_revisiting_2020} & result-set size & non-volume-hiding indexes & padding / DP candidate pruning \\
+    \midrule
+    \multicolumn{4}{@{}l}{\emph{Graph retrieval}}\\
+    Volume leakage~\citep{blackstone_revisiting_2020} (bound~\citep{ando_cost_2022}) & adjacency / postings-list size & encrypted multi-maps & volume-hiding EMM (XorMM, FLASH) \\
+    Access-pattern / degree re-identification~\citep{kellaris2016leakage} & node access + adjacency degree signature & encrypted graph stores (PeGraph) & ORAM (Compass), doubly-oblivious (H$_2$O$_2$RAM), 3PC (GORAM) \\
+    Structural fingerprinting & unique subgraph topology of the exposed view & anonymized graph views & de-uniqueness sanitization (PrivGemo) \\
+    \bottomrule
+  \end{tabularx}
+\end{table}

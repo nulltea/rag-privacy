@@ -37,7 +37,8 @@ well on performance and offers a formal threat model, trading \emph{fidelity}
     \bottomrule
   \end{tabular}
 \end{table}
-RemoteRAG applies DistanceDP to the \emph{query} and reranks under homomorphic encryption;
+RemoteRAG applies DistanceDP to the \emph{query} to coarse-retrieve a candidate set, then
+computes exact top-$k$ similarity over those candidates under homomorphic encryption;
 as a retrieval scheme it is covered in \cref{sec:retrieval} (\cref{tab:crypto-vec}).
 
 \subsection{Performance (Reported)}
