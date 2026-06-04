@@ -3,6 +3,60 @@
 This file captures project-wide rules that apply regardless of which
 file or crate is being edited. Loaded into context automatically.
 
+## Threat model (split TEE ⟷ untrusted GPU)
+
+GELO offloads matmuls from a trusted CPU enclave to an untrusted GPU,
+sending only *covered* (masked) activations. Four standing assumptions
+govern every security claim (canonical source:
+`docs/dev/logs/perm-attn-gpu-offload.md` § "Threat model — standardized
+assumptions"):
+
+- **`TEE-TRUST`** — the trust boundary is the SEV-SNP enclave. It holds
+  the plaintext activations / Q·K·V, the secret covers (masks,
+  permutations, rotations) and the noise RNG, and performs all
+  cover/un-cover and merge. Everything inside is trusted.
+- **`GPU-ADV`** — the VFIO-passed GPU is **fully adversarial**. It
+  observes every byte in VRAM, every intermediate it chooses to compute
+  (it controls the kernel — fused *or* un-fused), dispatch shapes and
+  timing, and its own per-step VRAM **write locations**. A fused kernel
+  is a *performance* boundary, never a confidentiality one — security
+  may never rest on a kernel staying fused.
+- **`WEIGHTS-PUB`** — **the conservative default (decided 2026-05-29).**
+  The adversary knows the model weights and the embedding/unembedding
+  tables (the deployment serves open Qwen3). Every
+  rotation-/permutation-*invariant* quantity (a norm, a Gram) is thus a
+  *known* bilinear form of the secret activations — an algebraic anchor
+  for reconstruction. Its negation **`WEIGHTS-BLIND`** (private
+  fine-tune) is the optimistic case; where a result depends on this
+  axis, **measure both and report the `WEIGHTS-PUB` number as the bar.**
+- **`NO-PLAINTEXT`** — the adversary never possesses the user's
+  plaintext activations or tokens. This is the *definition of the
+  secret*, not an attacker capability; an "attack" that consumes the
+  plaintext is not an attack. Clean activations may be used **only for
+  offline scoring** of an attack's success.
+
+**Secret:** user activations (hidden states at every layer), Q·K·V, the
+KV-cache contents, and the prompt/tokens they encode. **Public:** the
+weights and embedding tables.
+
+**The cover invariant (load-bearing lesson).** Activations are covered
+before they leave the enclave and un-covered on return. An *orthogonal*
+cover (the fresh per-batch row-mask; the feature rotations
+`O_v`/`O_qk`) hides values information-theoretically per pass — but
+under `WEIGHTS-PUB` its **invariants leak**: orthogonal transforms and
+permutations preserve per-token norms and the Gram, which the public
+weights turn into a per-token membership dictionary (measured top-1 =
+1.000 against an `O_v`/permutation cover —
+`docs/dev/prototype/gpu-offloaded-attention-with-value-cover.md` §2).
+Closing a leak that lives in an invariant requires a **covariant,
+non-orthogonal cover refreshed per session** (the κ-bounded `C_v`
+value-basis cover). **Design rule: no orthogonal-or-permutation cover,
+however refreshed, hides token membership under `WEIGHTS-PUB` — only a
+non-orthogonal, per-session, activation-space cover does.** Any new
+offload that exposes an activation to the GPU under only an orthogonal
+or permutation cover must clear the `WEIGHTS-PUB` membership gate before
+it ships.
+
 ## Gelo-LLM main benchmark
 
 The canonical performance benchmark for the GELO LLM serving path is
