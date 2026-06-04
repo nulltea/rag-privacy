@@ -1,0 +1,20 @@
+{"completion":"    # Check if a is greater than","idx":0,"task_id":"HumanEval/163"}
+{"completion":"    return ''.join(strings)\n\n","idx":1,"task_id":"HumanEval/28"}
+{"completion":"    result = []\n    current_depth =","idx":2,"task_id":"HumanEval/6"}
+{"completion":"    # Check if the list is empty","idx":3,"task_id":"HumanEval/70"}
+{"completion":"    # Your code here\n    #","idx":4,"task_id":"HumanEval/62"}
+{"completion":"    increasing = all(l[i] <=","idx":5,"task_id":"HumanEval/57"}
+{"completion":"    if not l:\n        return None","idx":6,"task_id":"HumanEval/35"}
+{"completion":"    seen = set()\n    result =","idx":7,"task_id":"HumanEval/26"}
+{"completion":"    # YOUR CODE HERE\n    #","idx":8,"task_id":"HumanEval/139"}
+{"completion":"    return [value for value in values","idx":9,"task_id":"HumanEval/22"}
+{"completion":"    total = 0\n    for","idx":10,"task_id":"HumanEval/151"}
+{"completion":"    count = 0\n    for","idx":11,"task_id":"HumanEval/108"}
+{"completion":"    sum_numbers = sum(numbers)\n   ","idx":12,"task_id":"HumanEval/8"}
+{"completion":"    return [s for s in strings","idx":13,"task_id":"HumanEval/7"}
+{"completion":"    return len(string)\n\ndef strrev","idx":14,"task_id":"HumanEval/23"}
+{"completion":"    if n == 0:\n       ","idx":15,"task_id":"HumanEval/55"}
+{"completion":"    29\n    2","idx":16,"task_id":"HumanEval/59"}
+{"completion":"    # Your code here\n    #","idx":17,"task_id":"HumanEval/129"}
+{"completion":"    # Check if the string contains any","idx":18,"task_id":"HumanEval/161"}
+{"completion":"    # Split the sentence into words\n","idx":19,"task_id":"HumanEval/143"}
