@@ -521,16 +521,26 @@ fn array2_to_tensor_f16(view: ArrayView2<'_, f32>, device: &Dev) -> Tensor<CubeW
     // convert — is the residual ~42 s wall). f16 is a POD u16 wrapper, so
     // set_len before the chunked write (which covers every element) is
     // sound. 64K-elem chunks keep small (decode) inputs single-chunk.
-    let mut dst: Vec<f16> = Vec::with_capacity(src.len());
-    unsafe {
-        dst.set_len(src.len());
-    }
-    use rayon::prelude::*;
-    const CHUNK: usize = 1 << 16;
-    dst.par_chunks_mut(CHUNK)
-        .zip(src.par_chunks(CHUNK))
-        .for_each(|(d, s)| d.convert_from_f32_slice(s));
-    Tensor::<CubeWgpu16, 2>::from_data(TensorData::new(dst, [rows, cols]), device)
+    // Sub-bucket split of the fp16 offload host path (chronicle §24): the
+    // f32→f16 convert vs the `from_data` HtoD upload (the latter stages
+    // through pageable host memory and dominates — ~19.6 s of the B=8
+    // prefill `engine:matmul*` wall vs ~2.3 s for the convert). These
+    // sit *inside* the `engine:matmul`/`engine:matmul_many` parent wall.
+    let dst = gelo_protocol::profile::time("engine:matmul:cvt", || {
+        let mut dst: Vec<f16> = Vec::with_capacity(src.len());
+        unsafe {
+            dst.set_len(src.len());
+        }
+        use rayon::prelude::*;
+        const CHUNK: usize = 1 << 16;
+        dst.par_chunks_mut(CHUNK)
+            .zip(src.par_chunks(CHUNK))
+            .for_each(|(d, s)| d.convert_from_f32_slice(s));
+        dst
+    });
+    gelo_protocol::profile::time("engine:matmul:upload", || {
+        Tensor::<CubeWgpu16, 2>::from_data(TensorData::new(dst, [rows, cols]), device)
+    })
 }
 
 /// **bf16-native** weight upload. Skips the bf16 → f32 host
@@ -718,18 +728,24 @@ fn tensor_data_to_array_f16_raw(
     rows: usize,
     cols: usize,
 ) -> Result<Array2<f16>> {
-    let v_f16: Vec<f16> = data
-        .into_vec()
-        .map_err(|e| anyhow!("burn f16 TensorData -> Vec<f16>: {e:?}"))?;
-    // Scalar map, deliberately. A `HalfFloatSliceExt` SIMD narrow
-    // (f16→f32→bf16) microbenched 2.2× faster (tests/bf16_narrow_bench),
-    // but that bench reused its buffers: in production it needs a fresh
-    // ~82 MB f32 temp per matmul output (×72/prefill), and the alloc +
-    // zero-fill churn measured prefill 10.3→13.1 s, matmul_many bucket
-    // 1.2→4.0 s — a net regression. The scalar map allocates only the
-    // bf16 output (no temp, no pre-zero via `.collect`). See chronicle
-    // §23 / the review handoff. (Same allocation-vs-microbench lesson as
-    // §16/§17.)
+    // `engine:matmul:readback` = the mandatory host copy of the DtoH'd
+    // result into the enclave (the mask-unapply consumes the secret covers,
+    // so it must run in-TEE — `TEE-TRUST`). burn's `into_vec` can't take the
+    // pinned read-back buffer by value (it's cubecl's pooled pinned alloc),
+    // so it would `to_vec` into a FRESH per-call `Vec` — an `mmap` that
+    // page-faults in and is `munmap`'d on drop, re-faulting every call
+    // (~2.2 GB/s, ~22 s of the B=8 prefill — chronicle §24). Instead we view
+    // the pinned bytes zero-copy and copy into a page-resident buffer from
+    // `readback_pool` (~13 GB/s); the in-TEE unapply consumer returns the
+    // buffer to the pool once drained.
+    let v_f16: Vec<f16> = gelo_protocol::profile::time("engine:matmul:readback", || {
+        let src = data
+            .as_slice::<f16>()
+            .map_err(|e| anyhow!("burn f16 TensorData -> &[f16]: {e:?}"))?;
+        let mut buf = gelo_protocol::readback_pool::take(src.len());
+        buf.copy_from_slice(src);
+        Ok::<Vec<f16>, anyhow::Error>(buf)
+    })?;
     Array2::from_shape_vec((rows, cols), v_f16).map_err(|e| anyhow!("Array2 from tensor data: {e}"))
 }
 
@@ -822,7 +838,12 @@ fn execute_registered_many_f16_raw(
         out_dims.push((d[0], d[1]));
         tx = tx.register(out);
     }
-    tx.execute()
+    // `engine:matmul:drain` = the actual GPU sync (kernel enqueue is lazy;
+    // `tx.execute` is where the queued matmuls run + are read back). On the
+    // B=8 prefill this is only ~5.3 s — i.e. the GPU work itself is small;
+    // the parent bucket is dominated by host marshalling (chronicle §24).
+    let datas = gelo_protocol::profile::time("engine:matmul:drain", || tx.execute());
+    datas
         .into_iter()
         .zip(out_dims)
         .map(|(data, (rows, cols))| tensor_data_to_array_f16_raw(data, rows, cols))

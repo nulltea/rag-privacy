@@ -1427,6 +1427,12 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
                     }
                 });
         });
+        // Recycle the read-back buffer (chronicle §24): the engine took it
+        // from `readback_pool`; the unapply has now drained it into `output`,
+        // so return the resident allocation for the next offload to reuse
+        // (kills the per-call mmap/page-fault churn). Same thread as the
+        // engine `take`, since offload→unapply is synchronous.
+        crate::readback_pool::give(concat_out.into_raw_vec_and_offset().0);
         output
     }
 

@@ -30,6 +30,7 @@ pub mod mask;
 pub mod out_attn_mult;
 pub mod ple;
 pub mod profile;
+pub mod readback_pool;
 pub mod rng;
 pub mod shield;
 pub mod sim;
