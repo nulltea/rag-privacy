@@ -511,11 +511,35 @@ fn array2_to_tensor_f16(view: ArrayView2<'_, f32>, device: &Dev) -> Tensor<CubeW
     // map does NOT auto-vectorise — it's the software bit-twiddle —
     // measured ~2.7 ns/elem vs ~0.2-0.3 ns SIMD; see the upload
     // decomposition in docs/dev/logs/perm-attn-gpu-offload.md).
-    let std = view.as_standard_layout();
-    let src = std.as_slice().expect("standard-layout slice is contiguous");
-    let mut dst = vec![f16::ZERO; src.len()];
-    dst.convert_from_f32_slice(src);
-    Tensor::<CubeWgpu16, 2>::from_data(TensorData::new(dst, [rows, cols]), device)
+    // [DEBUG-upsplit] split host convert (:up_cvt, our code) from burn's
+    // device upload (:up_dev, from_data) — the sync-split (2026-06-04)
+    // showed :upload dominates engine:matmul* but couldn't say whether
+    // it's the convert/copy (parallelisable) or from_data (burn-internal).
+    let dst = gelo_protocol::profile::time("engine:up_cvt", || {
+        let std = view.as_standard_layout();
+        let src = std.as_slice().expect("standard-layout slice is contiguous");
+        // Parallel f32->f16 into an UNINIT buffer: kills the redundant
+        // `vec![f16::ZERO]` zerofill and spreads the SIMD F16C convert
+        // across cores (was single-threaded — the dominant ':upload' host
+        // cost at B=8). f16 is a POD u16 wrapper, so set_len before the
+        // chunked write (which covers every element) is sound.
+        let mut dst: Vec<f16> = Vec::with_capacity(src.len());
+        unsafe {
+            dst.set_len(src.len());
+        }
+        // Chunked rayon convert: the single-threaded F16C pass was ~9.6 s
+        // of B=8 :upload (sync-split 2026-06-04). 64K-elem chunks keep
+        // small (decode) inputs single-chunk (no fork-join tax).
+        use rayon::prelude::*;
+        const CHUNK: usize = 1 << 16;
+        dst.par_chunks_mut(CHUNK)
+            .zip(src.par_chunks(CHUNK))
+            .for_each(|(d, s)| d.convert_from_f32_slice(s));
+        dst
+    });
+    gelo_protocol::profile::time("engine:up_dev", || {
+        Tensor::<CubeWgpu16, 2>::from_data(TensorData::new(dst, [rows, cols]), device)
+    })
 }
 
 /// **bf16-native** weight upload. Skips the bf16 → f32 host
@@ -798,7 +822,20 @@ fn execute_registered_many_f32_to_f16(
 fn execute_registered_many_f16_raw(
     lhs: Tensor<CubeWgpu16, 2>,
     weights: Vec<Tensor<CubeWgpu16, 2>>,
+    device: &Dev,
+    many: bool,
 ) -> Result<Vec<Array2<f16>>> {
+    use gelo_protocol::profile::time;
+    // [DEBUG-mmsync] forced-sync attribution: split lazy GPU compute from
+    // the host read-back. `tx.execute()` only submits; `Backend::sync`
+    // blocks until the matmul kernels finish, so `:gpusync` is true GPU
+    // compute and `:readback` (after sync) is pure device->host transfer +
+    // host Vec materialisation. Remove after the B=8 lever is found.
+    let (submit_lbl, sync_lbl, readback_lbl) = if many {
+        ("engine:mm_many:submit", "engine:mm_many:gpusync", "engine:mm_many:readback")
+    } else {
+        ("engine:mm:submit", "engine:mm:gpusync", "engine:mm:readback")
+    };
     let mut out_dims: Vec<(usize, usize)> = Vec::with_capacity(weights.len());
     let mut tx = Transaction::<CubeWgpu16>::default();
     for w in weights {
@@ -807,11 +844,17 @@ fn execute_registered_many_f16_raw(
         out_dims.push((d[0], d[1]));
         tx = tx.register(out);
     }
-    tx.execute()
-        .into_iter()
-        .zip(out_dims)
-        .map(|(data, (rows, cols))| tensor_data_to_array_f16_raw(data, rows, cols))
-        .collect()
+    let readback = time(submit_lbl, || tx.execute());
+    time(sync_lbl, || {
+        <CubeWgpu16 as Backend>::sync(device).expect("[DEBUG-mmsync] gpu sync");
+    });
+    time(readback_lbl, || {
+        readback
+            .into_iter()
+            .zip(out_dims)
+            .map(|(data, (rows, cols))| tensor_data_to_array_f16_raw(data, rows, cols))
+            .collect()
+    })
 }
 
 fn submit_registered_many_f32(
@@ -1058,8 +1101,23 @@ impl GpuOffloadEngine for WgpuVulkanEngine {
             WeightStore::F16(map) => {
                 let weights = registered_weights_f16(map, handles, k, "matmul_many_f16_out")?;
                 drop(guard);
-                let lhs = array2_to_tensor_f16(input, &self.device);
-                execute_registered_many_f16_raw(lhs, weights)
+                // [DEBUG-mmsync] :upload = host f32->f16 convert + queued
+                // device upload; :upload_sync forces the upload PCIe
+                // transfer so it isn't charged to :gpusync.
+                let many = handles.len() > 1;
+                let (up_lbl, up_sync_lbl) = if many {
+                    ("engine:mm_many:upload", "engine:mm_many:upload_sync")
+                } else {
+                    ("engine:mm:upload", "engine:mm:upload_sync")
+                };
+                let lhs = gelo_protocol::profile::time(up_lbl, || {
+                    array2_to_tensor_f16(input, &self.device)
+                });
+                gelo_protocol::profile::time(up_sync_lbl, || {
+                    <CubeWgpu16 as Backend>::sync(&self.device)
+                        .expect("[DEBUG-mmsync] upload sync");
+                });
+                execute_registered_many_f16_raw(lhs, weights, &self.device, many)
             }
         }
     }

@@ -49,6 +49,7 @@ cubek-attention.workspace = true
 gelo-protocol = { path = "../gelo-protocol", default-features = false }
 half.workspace = true
 ndarray.workspace = true
+rayon.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
