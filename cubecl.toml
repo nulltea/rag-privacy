@@ -3,13 +3,16 @@
 # `cubecl-runtime/src/config/base.rs::from_current_dir`.
 
 [autotune]
-# Cache autotune-picked kernel configs under the WORKSPACE `target/` —
-# explicit "file" config because `cache = "target"` walks up from
-# `current_dir()` and stops at the FIRST `Cargo.toml`, which is the
-# crate's, not the workspace root. With `cargo test -p X` that splits
-# the cache across `crates/X/target/autotune/`. Pointing all crates at
-# the workspace target unifies the cache.
-cache = { file = "/home/timo/repos/private-rag/target/autotune-cache" }
+# Cache autotune-picked kernel configs under the WORKSPACE `target/`.
+# `cache = "target"` walks up from `current_dir()` to the first
+# `Cargo.toml` and appends `target/`; run from the workspace root (the
+# canonical bench/test invocation in CLAUDE.md), the first `Cargo.toml`
+# IS the workspace manifest, so the cache lands in `<workspace>/target/
+# autotune/` and is shared across crates. `target/` is gitignored, so
+# this is checkout- and machine-portable (no absolute path committed).
+# Caveat: invoking `cargo test` from *inside* a crate dir would resolve
+# to that crate's `target/` — always run from the workspace root.
+cache = "target"
 
 [autotune.logger]
 level = "minimal"
