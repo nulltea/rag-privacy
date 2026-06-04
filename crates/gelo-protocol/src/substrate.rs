@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use half::bf16;
+use half::{bf16, f16};
 use ndarray::{Array2, Array3, ArrayView2, ArrayView3, Axis};
 
 use crate::ple::PleTable;
@@ -275,18 +275,18 @@ pub trait GpuOffloadEngine: Send {
     /// 16-bit on the device (so narrowing the read-back to bf16 loses no
     /// information the result didn't already carry). The GELO offload
     /// only routes through the bf16 read-back path
-    /// (`run_registered_linear_bf16_out`) when this is true â so the
+    /// (`run_registered_linear_f16_out`) when this is true â so the
     /// fp16 GPU engine opts in while CPU / f32 / sim engines keep the
     /// **exact f32** read-back that their parity fixtures assert. Default
     /// false; `WgpuVulkanEngine` overrides to its `fp16` flag.
     ///
     /// â  An engine returning `true` **should also override
-    /// [`Self::matmul_many_bf16_out`]** to narrow at the device read-back.
+    /// [`Self::matmul_many_f16_out`]** to narrow at the device read-back.
     /// Otherwise the default impl does a full f32 matmul + read-back and
     /// then narrows f32âbf16 on the host â correct, but it *adds* a host
     /// pass with zero DRAM-traffic win, silently making the bf16 route
     /// slower than the f32 one.
-    fn prefers_bf16_output(&self) -> bool {
+    fn prefers_f16_output(&self) -> bool {
         false
     }
 
@@ -301,15 +301,15 @@ pub trait GpuOffloadEngine: Send {
     /// Default impl forwards to [`Self::matmul_many`] and narrows on the
     /// host, so non-overriding engines (and CPU/sim executors) stay
     /// correct; the wgpu engine overrides to narrow at read-back.
-    fn matmul_many_bf16_out(
+    fn matmul_many_f16_out(
         &self,
         handles: &[WeightHandle],
         input: ArrayView2<f32>,
-    ) -> Result<Vec<Array2<bf16>>> {
+    ) -> Result<Vec<Array2<f16>>> {
         let f32_outs = self.matmul_many(handles, input)?;
         Ok(f32_outs
             .into_iter()
-            .map(|a| a.mapv(bf16::from_f32))
+            .map(|a| a.mapv(f16::from_f32))
             .collect())
     }
 
@@ -352,10 +352,10 @@ pub trait GpuOffloadEngine: Send {
     /// runs on bf16 storage. Used by the GELO offload's bf16 path
     /// (default-on for DCT-IV masks on a bf16-output engine; f32 read-back
     /// otherwise — HD₃/Haar always f32).
-    fn run_registered_linear_bf16_out(
+    fn run_registered_linear_f16_out(
         &self,
         request: RegisteredLinearBatch<'_, '_>,
-    ) -> Result<Vec<Array2<bf16>>> {
+    ) -> Result<Vec<Array2<f16>>> {
         if request.handles.is_empty() {
             return Ok(Vec::new());
         }
@@ -366,11 +366,11 @@ pub trait GpuOffloadEngine: Send {
         };
         crate::profile::time(label, || match request.input {
             RegisteredLinearInput::F32(input) => {
-                self.matmul_many_bf16_out(request.handles, input)
+                self.matmul_many_f16_out(request.handles, input)
             }
             RegisteredLinearInput::Bf16(input) => {
                 let f32_owned: Array2<f32> = input.mapv(|v| v.to_f32());
-                self.matmul_many_bf16_out(request.handles, f32_owned.view())
+                self.matmul_many_f16_out(request.handles, f32_owned.view())
             }
         })
     }

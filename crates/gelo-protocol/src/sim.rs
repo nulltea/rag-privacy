@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use half::bf16;
+use half::f16;
 use ndarray::{Array2, Array3, ArrayView2, ArrayView3};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -1375,9 +1375,9 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
     /// f32 the forward pass consumes. Haar has no bf16 slice path and is
     /// gated out upstream (`dispatch_unmask_per_sequence`); the Haar arm
     /// here is a defensive widen-then-dense-unapply fallback.
-    fn unmask_per_sequence_bf16(
+    fn unmask_per_sequence_f16(
         &self,
-        mut concat_out: Array2<bf16>,
+        mut concat_out: Array2<f16>,
         masks: &[MaskFamily],
         batch_size: usize,
         data_n: usize,
@@ -1390,7 +1390,7 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
         // is DCT-IV — the Hd3/Haar arms below are `unreachable!`.
         debug_assert!(
             masks.iter().all(|m| matches!(m, MaskFamily::Dct4(_))),
-            "unmask_per_sequence_bf16 reached with a non-DCT-IV mask — \
+            "unmask_per_sequence_f16 reached with a non-DCT-IV mask — \
              the bf16 read-back gate must keep this DCT-IV-only",
         );
         let mut output = Array2::<f32>::zeros((batch_size * data_n, d_out));
@@ -1413,7 +1413,7 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
                         // in-place bf16 narrow, no separate widen-copy
                         // pass, pad/shield rows never stored, one bf16
                         // rounding fewer per element.
-                        dct4.unapply_bf16_into_f32_rows(in_block, d_out, out_block, data_n);
+                        dct4.unapply_f16_into_f32_rows(in_block, d_out, out_block, data_n);
                     }
                     // HD₃/Haar never reach here: the bf16 read-back is
                     // gated to DCT-IV (chronicle §13.2 — HD₃ bf16 is a
@@ -1421,7 +1421,7 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
                     // path). Widening the gate requires revisiting this.
                     MaskFamily::Hd3(_) | MaskFamily::Haar(_) => {
                         unreachable!(
-                            "unmask_per_sequence_bf16: bf16 read-back is gated to DCT-IV in \
+                            "unmask_per_sequence_f16: bf16 read-back is gated to DCT-IV in \
                              dispatch_unmask_per_sequence; widen that gate before using this path"
                         )
                     }
@@ -1432,8 +1432,8 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
 
     /// Shared engine-dispatch + snapshot/verify + unmask tail for the
     /// three per-sequence offload entry points. Chooses the **bf16**
-    /// round-trip (bf16 matmul outputs + `unmask_per_sequence_bf16`)
-    /// when [`bf16_offload_enabled`], the engine prefers bf16 output,
+    /// round-trip (bf16 matmul outputs + `unmask_per_sequence_f16`)
+    /// when [`f16_offload_enabled`], the engine prefers bf16 output,
     /// and the mask family is **DCT-IV** (HD₃ bf16 was a measured
     /// regression — chronicle §13.2; Haar has no bf16 slice path);
     /// otherwise the f32 path verbatim. The f32 masked operand
@@ -1464,7 +1464,7 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
         // decode ~5%. So bf16 is a prefill (DCT-IV) lever only; HD₃ and
         // Haar keep the exact f32 path.
         // The gate checks `masks[0]` only; the bf16 unapply
-        // (`unmask_per_sequence_bf16`) handles DCT-IV exclusively. A
+        // (`unmask_per_sequence_f16`) handles DCT-IV exclusively. A
         // PerSequence batch is single-family today (one resolved kind
         // per pass in `begin_{prefill,decode}_pass`); assert it so the
         // `masks[0]`-only route can't silently mis-route a mixed batch
@@ -1473,17 +1473,17 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
             masks.iter().all(|m| std::mem::discriminant(m) == std::mem::discriminant(&masks[0])),
             "PerSequence batch is not single-family — the bf16 route gate keys on masks[0] only",
         );
-        let use_bf16 = bf16_offload_enabled()
-            && self.engine.prefers_bf16_output()
+        let use_f16 = f16_offload_enabled()
+            && self.engine.prefers_f16_output()
             && matches!(masks[0], MaskFamily::Dct4(_));
-        if use_bf16 {
-            let outs = self.engine.run_registered_linear_bf16_out(RegisteredLinearBatch {
+        if use_f16 {
+            let outs = self.engine.run_registered_linear_f16_out(RegisteredLinearBatch {
                 handles,
                 input: RegisteredLinearInput::F32(concat_masked.view()),
             })?;
             anyhow::ensure!(
                 outs.len() == handles.len(),
-                "run_registered_linear_bf16_out returned {} results; expected {}",
+                "run_registered_linear_f16_out returned {} results; expected {}",
                 outs.len(),
                 handles.len(),
             );
@@ -1512,7 +1512,7 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
             }
             let outputs: Vec<Array2<f32>> = outs
                 .into_iter()
-                .map(|m| self.unmask_per_sequence_bf16(m, masks, batch_size, data_n))
+                .map(|m| self.unmask_per_sequence_f16(m, masks, batch_size, data_n))
                 .collect();
             self.return_per_seq_apply_scratch(concat_masked);
             Ok(outputs)
@@ -1764,7 +1764,7 @@ fn sum_squares_simd(s: &[f32]) -> f32 {
 /// Whether the registered-linear offload reads its matmul outputs back as
 /// **bf16** and runs the mask unapply on bf16 storage (halving the DRAM
 /// traffic of the dominant `mask_unapply` bucket). **Default on**; the
-/// escape hatch `GELO_BF16_OFFLOAD=0` forces the f32 read-back (for the
+/// escape hatch `GELO_F16_OFFLOAD=0` forces the f32 read-back (for the
 /// perf A/B and as a safety toggle). Engages only for **DCT-IV** masks
 /// on a bf16-output engine (HD₃ bf16 was a measured regression — §13.2;
 /// Haar has no bf16 slice path) — gated in `dispatch_unmask_per_sequence`.
@@ -1774,11 +1774,11 @@ fn sum_squares_simd(s: &[f32]) -> f32 {
 /// walks `environ` each call. Caching also makes the toggle
 /// process-stable (no mid-run reconfiguration), matching the env-read
 /// discipline of `ensure_blis_single_thread`.
-fn bf16_offload_enabled() -> bool {
+fn f16_offload_enabled() -> bool {
     use std::sync::OnceLock;
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
-        std::env::var("GELO_BF16_OFFLOAD")
+        std::env::var("GELO_F16_OFFLOAD")
             .map(|v| v != "0" && !v.is_empty())
             .unwrap_or(true)
     })

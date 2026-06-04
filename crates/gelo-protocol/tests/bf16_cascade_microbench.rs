@@ -22,7 +22,7 @@ use std::time::Instant;
 
 use gelo_protocol::dct4::Dct4Mask;
 use gelo_protocol::hd3::Hd3Mask;
-use half::bf16;
+use half::{bf16, f16};
 use ndarray::Array2;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -83,17 +83,17 @@ fn dct4_bf16_vs_f32_cascade_at_production_shape() {
     }
 
     // ── bf16 path ──
-    let h_init_bf16: Vec<bf16> = h_init.iter().map(|&v| bf16::from_f32(v)).collect();
+    let h_init_bf16: Vec<f16> = h_init.iter().map(|&v| f16::from_f32(v)).collect();
     let mut bf16_apply: Vec<f64> = Vec::with_capacity(N_ITER);
     let mut bf16_unapply: Vec<f64> = Vec::with_capacity(N_ITER);
     let mut bf16_round_trip: Vec<f64> = Vec::with_capacity(N_ITER);
     for i in 0..(N_WARMUP + N_ITER) {
         let mut buf = h_init_bf16.clone();
         let t0 = Instant::now();
-        mask.apply_in_place_slice_bf16(&mut buf, d);
+        mask.apply_in_place_slice_f16(&mut buf, d);
         let apply_dt = t0.elapsed().as_secs_f64();
         let t1 = Instant::now();
-        mask.unapply_in_place_slice_bf16(&mut buf, d);
+        mask.unapply_in_place_slice_f16(&mut buf, d);
         let unapply_dt = t1.elapsed().as_secs_f64();
         let total_dt = apply_dt + unapply_dt;
         if i >= N_WARMUP {

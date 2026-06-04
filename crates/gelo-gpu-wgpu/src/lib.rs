@@ -698,11 +698,11 @@ fn tensor_data_to_array_f16(data: TensorData, rows: usize, cols: usize) -> Resul
 /// halving the DRAM traffic of the dominant `mask_unapply` bucket. The
 /// f16 → bf16 hop loses no information the f16 GPU result didn't already
 /// carry (both are 16-bit; bf16 trades mantissa for exponent range).
-fn tensor_data_to_array_bf16_from_f16(
+fn tensor_data_to_array_f16_raw(
     data: TensorData,
     rows: usize,
     cols: usize,
-) -> Result<Array2<bf16>> {
+) -> Result<Array2<f16>> {
     let v_f16: Vec<f16> = data
         .into_vec()
         .map_err(|e| anyhow!("burn f16 TensorData -> Vec<f16>: {e:?}"))?;
@@ -715,22 +715,21 @@ fn tensor_data_to_array_bf16_from_f16(
     // bf16 output (no temp, no pre-zero via `.collect`). See chronicle
     // §23 / the review handoff. (Same allocation-vs-microbench lesson as
     // §16/§17.)
-    let v: Vec<bf16> = v_f16.into_iter().map(|x| bf16::from_f32(x.to_f32())).collect();
-    Array2::from_shape_vec((rows, cols), v).map_err(|e| anyhow!("Array2 from tensor data: {e}"))
+    Array2::from_shape_vec((rows, cols), v_f16).map_err(|e| anyhow!("Array2 from tensor data: {e}"))
 }
 
 /// bf16-output read-back from an f32 device tensor (F32 weight store).
-fn tensor_data_to_array_bf16_from_f32(
+fn tensor_data_to_array_f16_from_f32(
     data: TensorData,
     rows: usize,
     cols: usize,
-) -> Result<Array2<bf16>> {
+) -> Result<Array2<f16>> {
     let v_f32: Vec<f32> = data
         .into_vec()
         .map_err(|e| anyhow!("burn f32 TensorData -> Vec<f32>: {e:?}"))?;
     // Scalar map (see the f16 sibling above for why the SIMD slice
     // convert is not used here — alloc churn regresses production).
-    let v: Vec<bf16> = v_f32.into_iter().map(bf16::from_f32).collect();
+    let v: Vec<f16> = v_f32.into_iter().map(f16::from_f32).collect();
     Array2::from_shape_vec((rows, cols), v).map_err(|e| anyhow!("Array2 from tensor data: {e}"))
 }
 
@@ -774,10 +773,10 @@ fn execute_registered_many_f16(
 
 /// bf16-output sibling of [`execute_registered_many_f32`]: same fused
 /// transaction, narrows each output to a bf16 host array.
-fn execute_registered_many_f32_to_bf16(
+fn execute_registered_many_f32_to_f16(
     lhs: Tensor<CubeWgpu32, 2>,
     weights: Vec<Tensor<CubeWgpu32, 2>>,
-) -> Result<Vec<Array2<bf16>>> {
+) -> Result<Vec<Array2<f16>>> {
     let mut out_dims: Vec<(usize, usize)> = Vec::with_capacity(weights.len());
     let mut tx = Transaction::<CubeWgpu32>::default();
     for w in weights {
@@ -789,17 +788,17 @@ fn execute_registered_many_f32_to_bf16(
     tx.execute()
         .into_iter()
         .zip(out_dims)
-        .map(|(data, (rows, cols))| tensor_data_to_array_bf16_from_f32(data, rows, cols))
+        .map(|(data, (rows, cols))| tensor_data_to_array_f16_from_f32(data, rows, cols))
         .collect()
 }
 
 /// bf16-output sibling of [`execute_registered_many_f16`]: same fused
 /// transaction, narrows each f16 output to a bf16 host array (half the
 /// read-back bytes of the f32 path).
-fn execute_registered_many_f16_to_bf16(
+fn execute_registered_many_f16_raw(
     lhs: Tensor<CubeWgpu16, 2>,
     weights: Vec<Tensor<CubeWgpu16, 2>>,
-) -> Result<Vec<Array2<bf16>>> {
+) -> Result<Vec<Array2<f16>>> {
     let mut out_dims: Vec<(usize, usize)> = Vec::with_capacity(weights.len());
     let mut tx = Transaction::<CubeWgpu16>::default();
     for w in weights {
@@ -811,7 +810,7 @@ fn execute_registered_many_f16_to_bf16(
     tx.execute()
         .into_iter()
         .zip(out_dims)
-        .map(|(data, (rows, cols))| tensor_data_to_array_bf16_from_f16(data, rows, cols))
+        .map(|(data, (rows, cols))| tensor_data_to_array_f16_raw(data, rows, cols))
         .collect()
 }
 
@@ -928,7 +927,7 @@ impl GpuOffloadEngine for WgpuVulkanEngine {
         self.fp16
     }
 
-    fn prefers_bf16_output(&self) -> bool {
+    fn prefers_f16_output(&self) -> bool {
         // In fp16 mode the registered-linear matmul output is already
         // 16-bit on the device, so the bf16 read-back loses nothing the
         // f16 result didn't already carry — opt the offload into the
@@ -1039,11 +1038,11 @@ impl GpuOffloadEngine for WgpuVulkanEngine {
     /// read-back host buffer so the TEE-side mask unapply runs on bf16
     /// storage — the dominant `mask_unapply` bucket (perm-attn-gpu-offload,
     /// chronicle §12/§13 bf16-offload lever).
-    fn matmul_many_bf16_out(
+    fn matmul_many_f16_out(
         &self,
         handles: &[WeightHandle],
         input: ArrayView2<'_, f32>,
-    ) -> Result<Vec<Array2<bf16>>> {
+    ) -> Result<Vec<Array2<f16>>> {
         if handles.is_empty() {
             return Ok(Vec::new());
         }
@@ -1051,16 +1050,16 @@ impl GpuOffloadEngine for WgpuVulkanEngine {
         let guard = self.weights.lock().unwrap();
         match &*guard {
             WeightStore::F32(map) => {
-                let weights = registered_weights_f32(map, handles, k, "matmul_many_bf16_out")?;
+                let weights = registered_weights_f32(map, handles, k, "matmul_many_f16_out")?;
                 drop(guard);
                 let lhs = array2_to_tensor_f32(input, &self.device);
-                execute_registered_many_f32_to_bf16(lhs, weights)
+                execute_registered_many_f32_to_f16(lhs, weights)
             }
             WeightStore::F16(map) => {
-                let weights = registered_weights_f16(map, handles, k, "matmul_many_bf16_out")?;
+                let weights = registered_weights_f16(map, handles, k, "matmul_many_f16_out")?;
                 drop(guard);
                 let lhs = array2_to_tensor_f16(input, &self.device);
-                execute_registered_many_f16_to_bf16(lhs, weights)
+                execute_registered_many_f16_raw(lhs, weights)
             }
         }
     }
