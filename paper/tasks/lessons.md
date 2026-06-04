@@ -1,0 +1,1 @@
+- 2026-06-04 | address-comments reported "all 25 resolved" against the markdown count, not the PDF's true annotation total — silently ignored comments the md bucketed away | Reconcile extracted count vs `pdfannots -f json` length (=M); every comment gets a terminal status; conservation gate M==rows==Σstatuses; enumerate all in the report.
