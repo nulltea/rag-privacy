@@ -84,16 +84,18 @@
 
 \input{sections/01_introduction}
 \input{sections/02_evaluation_framework}  % unified: Security (taxonomy) + Cost (perf/fidelity)
-% --- mechanism-primary spine -------------------------------------------------
-\input{sections/03_cryptographic}         % MPC / FHE / secret-sharing
+% --- inference mechanisms (by-mechanism spine) -------------------------------
+\input{sections/03_cryptographic}         % crypto INFERENCE: MPC / FHE / secret-sharing
 \input{sections/04_tee}                   % trusted execution environments
 \input{sections/05_obfuscation}           % static obfuscation (+ the breaks vignette)
 \input{sections/06_differential_privacy}  % DP
 \input{sections/07_hybrid_split}          % TEE + obfuscation hybrids
+% --- retrieval (by-stage; all mechanisms) ------------------------------------
+\input{sections/08_retrieval}             % confidential retrieval & storage (dense + graph/LightRAG)
 % --- synthesis ---------------------------------------------------------------
-\input{sections/08_synthesis}             % stage x mechanism matrix, gap-map, performance, graph-RAG
-\input{sections/09_related_work}          % Bodea positioning + prior surveys
-\input{sections/10_conclusion}            % open problems
+\input{sections/09_synthesis}             % stage x mechanism matrix, gap-map, performance, graph-RAG finding
+\input{sections/10_related_work}          % Bodea positioning + prior surveys
+\input{sections/11_conclusion}            % open problems
 
 \bibliographystyle{plainnat}
 \bibliography{refs}

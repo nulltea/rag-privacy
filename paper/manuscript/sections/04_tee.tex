@@ -48,12 +48,14 @@ hardware dependence is the binding deployability constraint (\cref{sec:synthesis
     H100 CC baseline~\cite{h100cc}  & embed, generate     & GPU-TEE (H100 CC)      & 4--8\% \\
     PipeLLM~\cite{pipellm}          & generate            & GPU-TEE (PCIe-AES)     & $<$19.6\% \\
     Opal~\cite{kaviani_opal}        & retrieve, generate, gt, e2e & TDX + B200 + ORAM & 29$\times$ lower infra vs secure baseline \\
-    H$_2$O$_2$RAM~\cite{h2o2ram}    & store, retrieve, gt & CPU-TEE (doubly-obliv) & $\sim$1000$\times$ vs prior O$_2$RAM \\
     \bottomrule
   \end{tabular}
 \end{table}
-\needswork{Opal additionally hides access patterns via ORAM and assumes a
-malicious host --- the strongest adversary in the corpus (cf. \cref{tab:threat-taxonomy})}
+Opal is an end-to-end graph-RAG system and the corpus's strongest adversary (a
+\emph{malicious host}, hiding access patterns via ORAM; cf.\ \cref{tab:threat-taxonomy}); we
+keep it here as the TEE baseline and detail its retrieval role with the other RAG schemes in
+\cref{sec:retrieval}. The TEE oblivious-RAM substrate H$_2$O$_2$RAM, being a
+retrieval/storage primitive, is likewise covered there.
 
 \subsection{Performance (Reported)}
 \needswork{TEE overhead is near-plaintext (single-digit \%); ORAM (Opal) adds cost}

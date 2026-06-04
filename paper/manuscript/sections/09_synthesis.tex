@@ -136,22 +136,18 @@ classification (thin/stateful/thick) across all families is the natural next ste
 \cref{tab:deployment} fills it for cryptography and flags the rest (\tq).
 
 \subsection{Graph-RAG as a Retrieval Setting}
-% Woven treatment (decision: short dedicated subsection, not a parallel track).
-% Graph-RAG (LightRAG, Microsoft GraphRAG) indexes a corpus as a knowledge graph;
-% privacy work here is sparse (Ning et al. KG-QA privacy; Compass for encrypted
-% search; Opal's in-enclave KG traversal). Bodea explicitly excludes this setting.
 Graph-RAG systems such as LightRAG~\citep{guo_lightrag} index a corpus as a knowledge
 graph; their retrieval surface is entity/relation ANN plus \emph{one-hop} neighborhood
-expansion and a source-chunk fan-out---not multi-hop reasoning or GNN message-passing.
-That shape determines which mechanisms apply: ANN matching is served by
-Compass/Pacmann~\citep{zhu_compass,pacmann}, the distinctive adjacency/degree leak by
-volume-hiding multi-maps (XorMM/FLASH)~\citep{xormm,flash_emm}, traversal-integrity by
-ZKGraph~\citep{zkgraph}, and output-extraction (AGEA-class) by anonymization or
-output-DP~\citep{ning_arog,tan_privgemo,tang_dprag}. Conversely, secure GNN-inference
-and graph-analytics schemes are off-target for this setting and we cite them only as
-lineage. Bodea et al.~\citep{bodea_sok} exclude graph-RAG entirely; the near-empty
-graph rows of \cref{tab:gapmap} are the resulting open frontier.
-\needswork{expand: per-stage attack-surface change vs naive RAG; the construction-stage gap}
+expansion and a source-chunk fan-out---not multi-hop reasoning or GNN message-passing. The
+schemes that cover this surface are catalogued with the other retrieval work in
+\cref{sec:retrieval} (\cref{ssec:retr-graph}); here we record only the cross-family finding.
+Graph-RAG is the most privacy-underserved setting in the corpus: Bodea et
+al.~\citep{bodea_sok} exclude it entirely, secure GNN-inference and graph-analytics schemes
+are off-target for the one-hop surface (cited only as lineage), and the near-empty graph rows
+of \cref{tab:gapmap} are the resulting open frontier---most acute at the \emph{construction}
+stage and for traversal integrity (ZKGraph~\citep{zkgraph} is the lone entry). The
+distinctive adjacency/degree leak that separates graph-RAG from naive RAG is the volume
+surface that volume-hiding multi-maps target (\cref{ssec:retr-graph}).
 
 \subsection{Finding: the Field-Wide Side-Channel Blind Spot}
 \label{ssec:sidechannel}

@@ -55,11 +55,12 @@ untrusted accelerator over obfuscated activations)}
                 & 2.8--4.8$\times$ vs GPU; 8--9$\times$ vs TEE \\
     Portcullis~\cite{portcullis}    & TEE-attested PII-anonymization gateway
                 & 96$\times$ vs Hide-and-Seek \\
-    PrivGemo~\cite{tan_privgemo}    & dual-tower KG-RAG, HMAC session anon (graph-RAG)
-                & no crypto cost (quality only) \\
     \bottomrule
   \end{tabular}
 \end{table}
+The graph-RAG anonymization scheme PrivGemo (dual-tower KG with HMAC session identifiers)
+applies the same anonymization lineage to the \emph{retrieval} layer; it is covered with the
+other graph-retrieval schemes in \cref{sec:retrieval}.
 \dnote{This family is the substrate the COMPANION paper builds on (GELO
 optimizations + a unified static+dynamic design). Here we survey it only.}
 

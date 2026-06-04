@@ -32,12 +32,13 @@ well on performance and offers a formal threat model, trading \emph{fidelity}
     Scheme & Where applied & Reported utility \\
     \midrule
     DP-Forward~\cite{du_dpforward}   & embedding (forward pass) & $\sim$94\% on SST2; vulnerable to IMA \\
-    RemoteRAG~\cite{cheng2025remoterag} & query (DistanceDP) + HE rerank & 0.67\,s; 100\% recall at small $\varepsilon$ \\
     SPARSE~\cite{sparse_dp}          & embedding (metric-DP)    & $\sim$0; 65\% util @$\varepsilon$=5 \\
     DP-RAG/DP-KSA~\cite{tang_dprag}  & output (generation)      & output-DP; backend-agnostic \\
     \bottomrule
   \end{tabular}
 \end{table}
+RemoteRAG applies DistanceDP to the \emph{query} and reranks under homomorphic encryption;
+as a retrieval scheme it is covered in \cref{sec:retrieval} (\cref{tab:crypto-vec}).
 
 \subsection{Performance (Reported)}
 \needswork{DP is cheap; the cost is recall/accuracy as epsilon tightens}

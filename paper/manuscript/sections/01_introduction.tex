@@ -117,9 +117,10 @@ This paper is a \emph{systematization of knowledge}. Concretely:
         heuristic) --- the last separating provably-secure schemes from
         empirically-resistant ones, and surfacing the field-wide side-channel blind
         spot we report as a finding in \cref{ssec:sidechannel}.
-  \item \textbf{A mechanism-organized systematization} (\cref{sec:crypto}--%
-        \cref{sec:hybrid}) of five defense families across the full
-        inference-and-RAG pipeline, including graph-RAG as a retrieval setting.
+  \item \textbf{A mechanism-organized systematization} of five inference-defense
+        families (\cref{sec:crypto}--\cref{sec:hybrid}) plus a dedicated treatment of the
+        confidential \textbf{retrieval and storage} layer (\cref{sec:retrieval})---dense and
+        graph/LightRAG---spanning the full inference-and-RAG pipeline.
   \item \textbf{A performance comparison} synthesized from reported numbers
         (\cref{sec:synthesis}) --- the cost axis the existing RAG-privacy SoK
         \cite{bodea_sok} omits --- with an explicit non-comparability caveat.
@@ -140,8 +141,11 @@ design live in the companion paper.}
 
 \subsection{Organization}
 The evaluation framework (\cref{sec:framework}) defines the security taxonomy and the cost
-metrics. The five mechanism families are systematized in \cref{sec:crypto}--\cref{sec:hybrid}.
-The synthesis (\cref{sec:synthesis}) draws them together---the stage\,$\times$\,mechanism
-gap-map, the performance comparison, the deployment-readiness profile, graph-RAG as a retrieval
-setting, and the field-wide side-channel finding. \Cref{sec:related} positions the work against
-prior surveys, and the conclusion lists open problems.
+metrics. The five mechanism families for confidential \emph{inference} are systematized in
+\cref{sec:crypto}--\cref{sec:hybrid}; the RAG \emph{retrieval and storage} layer---dense and
+graph/LightRAG, across all mechanisms---is treated separately in \cref{sec:retrieval}, since
+its trade-offs and primitives differ. The synthesis (\cref{sec:synthesis}) draws them
+together---the stage\,$\times$\,mechanism gap-map, the performance comparison, the
+deployment-readiness profile, graph-RAG as a retrieval setting, and the field-wide
+side-channel finding. \Cref{sec:related} positions the work against prior surveys, and the
+conclusion lists open problems.
