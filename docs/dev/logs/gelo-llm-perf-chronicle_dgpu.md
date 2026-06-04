@@ -1677,11 +1677,30 @@ a **transpose-free row-major `K·q`** gemv, **GQA broadcast** on the fly, and
 **rayon over the query heads**. Microbench (n_tail 128→2048): old build+part
 0.89→50.45 ms (super-linear) → fused 0.20→**2.83 ms** (~linear), **4.5×→17.9×**
 faster, growing with context (the super-linearity is gone). End-to-end B=1
-K=512 decode: tail per-step ~100 → **12 ms**, decode per-step ~200 → **115 ms**
-(8.7 tok/s); the tail=fixed crossover moves ~500 → ~4000 tokens, so decode is
-fixed-cost-bound (matmul round-trip + shield + GPU prefix attend) for realistic
-lengths. Parity preserved (ragged probe green; same math, row-major access).
-The deferred **periodic tail-fold** is now largely moot for K≤~2 k.
+decode (tail per-step / decode per-step / tok/s):
+
+| K | pre-fix | post-fix | speedup |
+|---|---|---|--:|
+| 512 | ~100 / 163 ms / 6.1 | 12 / **115 ms** / 8.7 | 1.4× |
+| 1024 | ~200 / 300 ms / 3.3 | 23 / **124 ms** / 8.1 | **2.43×** |
+
+The tail=fixed crossover moves ~500 → ~4000 tokens, so decode is fixed-cost-
+bound (matmul round-trip + shield + GPU prefix attend) for realistic lengths.
+Parity preserved (ragged probe green; same math, row-major access). The
+deferred **periodic tail-fold** is now largely moot for K≤~2 k.
+
+**Reconciling the "~10 tok/s" floor (§20/§22).** Decode per-step = fixed +
+tail; tok/s falls with generation length (§22: K=32→10, 128→9, 512→6.1).
+The ~10 tok/s was the *fixed* floor at short K (~100 ms/step: matmul
+round-trip + shield + GPU prefix attend + logits, negligible tail). Current
+fixed floor, from the K=1024 decomposition: 124 − 23 (tail) = **~101 ms ≈
+9.9 tok/s** — unchanged from §22. So post-fix K=1024 = 8.1 tok/s is the floor
++ the small residual tail; it can't exceed ~10 tok/s without attacking the
+fixed cost (the decode matmul round-trip — same host-marshalling lever as
+prefill). NB the K=32 *mean* (179 ms/step, 5.6 tok/s) is **not** the floor —
+it's skewed by a ~1.5 s one-time decode warm-up (first matmul dispatch /
+autotune; `engine:matmul_many` 66 ms/step at K=32 vs 25 ms steady at K=1024)
+amortized over only 32 steps.
 
 **Artefacts:** `bench-results/diag-b8-{readback-pool,readback-pool-rerun{1,2},
 timev,gdbsample2}-2026-06-04.{log,samples.txt}`,
