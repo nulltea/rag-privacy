@@ -1,31 +1,52 @@
 ---
 type: handoff
-status: current
+status: stale
 created: 2026-06-04
 updated: 2026-06-04
-tags: [gelo, dgpu, cuda, perf, b8-scaling, engine-matmul, readback, pinned-memory, cubecl, nsys, blocked]
+tags: [gelo, dgpu, cuda, perf, b8-scaling, engine-matmul, readback, pinned-memory, cubecl, nsys, resolved]
 companion: [gelo-llm-perf-chronicle_dgpu, 2026-06-04-ffn-unmask-spike-killed-nonlinearity-offload-research]
 supersedes: []
+archive_reason: >
+  RESOLVED 2026-06-04 — `nsys` became available and settled the attribution.
+  Finding + fix levers recorded in gelo-llm-perf-chronicle_dgpu §24. This doc
+  is kept for the diagnosis trail; the next session works the §24 levers.
 ---
 
-# Handoff — B=8 `engine:matmul*` attribution is BLOCKED on `nsys`; what landed and everything tried
+# Handoff — B=8 `engine:matmul*` attribution — RESOLVED via `nsys` (was: blocked)
 
-## TL;DR / current blocker (read this first)
+## TL;DR / RESOLUTION (read this first)
 
-**`engine:matmul*` is ~45% of B=8 prefill wall (~57 s) and scales super-linearly.
-Its true cause is UNRESOLVED and is BLOCKED on an external GPU profiler.**
+**RESOLVED.** `nsys` became available; the B=8 `engine:matmul*` cost is
+**host-side f32↔f16 marshalling, not GPU compute.** The GPU is **idle 96.5 %**
+of the prefill (4.6 s active in a 131 s run); matmul *kernels* total **0.56 s**.
+The 49 s `engine:matmul*` bucket splits as **`into_vec` readback 22.1 s +
+`from_data` upload 19.6 s + GPU drain 5.3 s + convert 2.3 s**. The "47×" is
+host marshalling wrapped around a ~0.5 s GPU op; the "super-linear in B" is that
+host memcpy/alloc grows with data volume while the tiny GPU baseline does not.
+**Chronicle §21's "GPU-matmul-bound" conclusion is corrected in §24.**
 
-In-process timing (`Instant` around `into_data` / `tx.execute`) is **confounded by
-cubecl's lazy-execution + sync model**: the same `matmul().into_data()` measured
-**10 ms in one harness and 237 ms in another**, because `into_data` on a matmul
-output vs an uploaded tensor drains queued GPU work at different points. I cannot
-separate compute / transfer / sync-drain from inside the process. **The next step
-is `nsys` (Nsight Systems) on the real B=8 prefill** — it traces the actual CUDA
-API + kernel/copy timeline, immune to the lazy/sync ambiguity. `nsys` is **not
-available in this environment** — that is the blocker.
+Full numbers, eliminations, and ranked **fix levers** are in
+`docs/dev/logs/gelo-llm-perf-chronicle_dgpu.md` **§24**. Repro: the canonical
+B=8 cell under `nsys profile -t cuda --cuda-memory-usage=true` (skip decode with
+`GELO_BENCH_MAX_TOKENS=1`); read `cuda_gpu_kern_sum` / `cuda_gpu_mem_time_sum` /
+`cuda_api_sum`. Top lever: **do the GELO mask-unapply on-device and stop reading
+the matmul output back to host** (kills the 22 s `into_vec`).
 
-**Do not attempt another fix from in-process numbers** — three already failed
-(below). Get the `nsys` timeline first.
+The historical "everything tried / blocked" notes below are retained as the
+diagnosis trail.
+
+**Update (later 2026-06-04) — fixes acted on, see chronicle §25.** The two
+host giants are fresh-alloc + memcpy churn (82 M faults / 228 s system CPU
+over the prefill). **Read-back: FIXED** — `gelo_protocol::readback_pool`
+recycles the host buffer (zero-copy `as_slice` view → resident pooled buf,
+returned by the in-TEE unapply consumer); **B=8 prefill 115.7 → ~100 s
+(−13.5%)**, `engine:matmul:readback` 22.1 → 7.4 s. **Upload: root-caused,
+not fixed** — gdb poor-man's profiler (perf blocked; `PR_SET_PTRACER_ANY`
+`LD_PRELOAD` shim under `ptrace_scope=1`) pinned it to cubecl-runtime
+`ComputeClient::do_create` doing `Bytes::from_bytes_vec(data.to_vec())` — a
+gratuitous full copy per upload, inside the dep. Next lever = vendor/patch
+`cubecl-runtime` to drop that `to_vec()` (~another −15 s, projected). Owed
+HumanEval-20 gate still applies before pushing.
 
 ## What LANDED this session (branch `dgpu-nvidia-bringup`, NOT pushed)
 

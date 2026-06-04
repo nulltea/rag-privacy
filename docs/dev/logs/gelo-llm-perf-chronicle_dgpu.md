@@ -2,7 +2,7 @@
 type: dev-log
 status: current
 created: 2026-05-29
-updated: 2026-06-03
+updated: 2026-06-04
 tags: [gelo, perf, dgpu, nvidia, rtx5090, vulkan, cuda, attention, offload, cubek, mask, chronicle]
 companion: [gelo-llm-perf-chronicle]
 ---
@@ -1437,3 +1437,175 @@ a precision-aware tolerance, tracked in the handoff.
 pre-existing parallel-test flake — it `set_var`s the process-global
 `BATCHED_DECODE_SHARED_A`, which races other env-toggling tests; passes
 isolated. Not in scope.)
+
+## 24. `nsys` settles the B=8 `engine:matmul*` cost (2026-06-04) — host-marshalling-bound, NOT GPU-bound; §21 corrected
+
+The §21 conclusion — "B=8 prefill is GPU-matmul-bound; `engine:matmul*`
+scales super-linearly (25–32×)" — is **wrong**. An Nsight Systems trace
+of the canonical warm B=8/n=2048 prefill (`nsys profile -t cuda
+--cuda-memory-usage=true`, full 131 s span) shows the **GPU is idle
+96.5 %** of the run:
+
+| GPU activity (whole prefill) | time |
+|---|--:|
+| matmul kernels | 0.56 s |
+| attention (cubek) kernels | 0.49 s |
+| all other kernels | 0.02 s |
+| HtoD transfer (40.9 GB @ **15.4 GB/s**) | 2.66 s |
+| DtoH transfer (42.5 GB @ 46.6 GB/s, pinned) | 0.91 s |
+| **GPU active, total** | **4.64 s** |
+
+The matmul *kernels* are 0.56 s — the isolated 228 TFLOP/s figure was
+right all along. The `engine:matmul*` **buckets** (49 s) are almost
+entirely **host-side f32↔f16 marshalling around a ~0.5 s GPU op**, which
+is why an isolated kernel timed ~10 ms while the production bucket timed
+~400 ms/call (the "47×"). Sub-bucket instrumentation of the host path:
+
+| `engine:matmul*` sub-step | B=8 | what it is |
+|---|--:|---|
+| `into_vec` (DtoH → fresh `Vec<f16>`) | **22.1 s** | per-call large-buffer alloc + copy out of the pinned readback |
+| `from_data` (HtoD upload) | **19.6 s** | pageable staging copy (15.4 GB/s) + upload-buffer alloc |
+| `tx.execute` (GPU sync drain) | 5.3 s | ≈ the real 4.6 s GPU work |
+| f32→f16 convert | 2.3 s | confirms §20/tier-1; NOT the bottleneck |
+| ndarray wrap / kernel issue | ~0 | zero-copy / async |
+
+These four — `engine:matmul:{cvt,upload,drain,readback}` — are now
+**standing profile sub-buckets** (in `gelo-gpu-wgpu/src/lib.rs`, on the
+fp16 offload host path), nested inside the `engine:matmul*` parent wall,
+so the convert/upload/drain/readback split shows on every bench run.
+
+**Net:** ~42 s of the 49 s is host memcpy/alloc (~40 GB up + ~42 GB
+back through the CPU per prefill, ~1.9 GB/s effective — dominated by
+per-call allocation and page-faults, not raw bandwidth). The
+"super-linear 25–32× in B" is this host marshalling growing with the
+data volume while the (tiny, near-fixed) GPU baseline does not — not a
+GPU scaling effect.
+
+**Eliminated** (this trace + the prior session's micro-benches):
+device-alloc thrash (`cuMemAllocAsync` 24 calls / 25 ms — pool reuses),
+DtoH transfer (pinned, 46.6 GB/s), autotune re-run (warm cache; one-time
+`cuModuleLoadData` 0.28 s), sync-serialization (`cuEventSynchronize`
+1.6 s total).
+
+**Levers (next session, ranked by ceiling):**
+1. **Don't read the result back to host** — keep the matmul output
+   resident and run the GELO mask-unapply on-device. Removes the 22 s
+   `into_vec` outright (the unapply is already the next consumer).
+2. **Pinned upload buffers** — `from_data` stages HtoD through pageable
+   memory (15.4 GB/s vs 46.6 pinned); a pooled pinned upload path ~3×s
+   the transfer and drops the host staging copy (~19.6 s target).
+3. **Reuse readback/upload buffers** (uninit, pooled) instead of a fresh
+   per-call `Vec` — the effective 1.9 GB/s says alloc/page-fault, not
+   copy, dominates.
+4. **Architectural:** with the GPU 96 % idle, the per-matmul
+   host→GPU→host round-trip is the design cost. Keeping a whole layer
+   resident between matmuls (amortising transfers) is the real ceiling.
+
+Two incidental trace findings worth a fix regardless: HtoD runs at
+**15.4 GB/s** (pageable staging — 3× slower than the pinned DtoH), and
+`cuMemAllocHost_v2` is **4 calls / 0.9 s (max 673 ms)** — pinned-pool
+growth stalls on the largest readbacks.
+
+**Artefacts:** `bench-results/diag-b8-{reproduce,nsys-capture,subbucket,
+subbucket2}-native-... -2026-06-04.log`, trace `/tmp/gelo-b8-prefill.nsys-rep`.
+Also fixed this session: the committed `cubecl.toml` autotune cache
+pointed at a hardcoded absolute path in a *different, older* checkout
+(`/home/timo/repos/private-rag/target/...`); switched to portable
+`cache = "target"` (workspace `target/`, gitignored) and migrated the
+warm CUDA tune cache so steady-state timing is unaffected.
+
+## 25. Killing the host-marshalling churn (2026-06-04) — readback pool lands −13%; upload root-caused to a cubecl copy
+
+Acting on §24. The two giant host buckets are both **fresh-allocation +
+memcpy churn** — not transfer, not compute. A microbench at production
+size (319 MB ×36) showed a fresh `Vec::to_vec` runs at **2.2 GB/s** vs
+**13.3 GB/s** into a resident buffer (5.9×): the cost is the per-call
+`mmap`→page-fault→`munmap` cycle (the kernel zero-fills each of ~78 K
+pages before the copy overwrites it), not the copy. `/usr/bin/time -v`
+on the whole prefill confirms the scale: **82 M minor page-faults, 228 s
+system (kernel) CPU** — allocation churn is systemic.
+
+**Read-back (`engine:matmul:readback`) — FIXED, landed.** burn's
+`into_vec` can't take cubecl's pooled pinned buffer by value, so it
+`to_vec`s into a fresh `Vec` every call. Replaced with a zero-copy
+`as_slice::<f16>()` view copied into a **thread-local recycling pool**
+(`gelo_protocol::readback_pool`); the in-TEE unapply consumer returns
+the buffer once drained (offload→unapply is synchronous on one thread).
+The read-back stays in-TEE — it must, the unapply consumes the secret
+covers (`TEE-TRUST`); we only made the mandatory copy resident.
+
+Measured (B=8, n=2048, clean min-of-runs; the wall is co-tenant-CPU
+sensitive now that prefill is host-bound — a `zebrad`-contended run hit
+124 s with decode 22 s, discard those):
+
+| bucket | §24 baseline | with pool | Δ |
+|---|--:|--:|--:|
+| `engine:matmul:readback` | 22.1 s | **7.4 s** | −14.7 s |
+| `engine:matmul_many` | 28.1 s | 16.1 s | −12.0 s |
+| `engine:matmul` | 21.2 s | 18.6 s | −2.5 s |
+| **prefill wall** | **115.7 s** | **~100 s** | **−13.5%** |
+| decode (K=1) | 3.2 s | 2.1 s | −34% |
+
+**Upload (`engine:matmul:upload`, 19.7 s) — root-caused, NOT yet fixed
+(cubecl-internal).** It is *not* the missing-pinned issue §24 first
+guessed (cubecl's `create_with_data` pins; `Bytes::from_elems` is
+zero-copy). A **gdb poor-man's profiler** (perf is blocked at
+`perf_event_paranoid=4` with no sudo; attached via an `LD_PRELOAD`
+`prctl(PR_SET_PTRACER_ANY)` shim under yama `ptrace_scope=1`) caught the
+offload thread in `do_create`: cubecl-runtime's
+`ComputeClient::do_create` does `Bytes::from_bytes_vec(data.to_vec())` —
+a **gratuitous full copy of the upload buffer into a fresh allocation
+every call** (`data` is already an owned, contiguous `Bytes`), i.e. the
+identical churn as the read-back but inside the dependency. Driver-thread
+sample distribution (50 samples): 40 % blocked on workers/GPU sync, 26 %
+in upload `do_create→memcpy`, 16 % unapply, 8 % read-back (down from
+~22 % pre-pool ✓). **Fix path:** vendor/patch `cubecl-runtime` to pass
+`data` through instead of `to_vec()`-copying it (and/or pool its host
+staging) — projected ~another −15 s, but it's a dependency change to
+test, not a one-crate edit. Filed as the next lever, not shipped.
+(Repo: `github.com/tracel-ai/cubecl`, `crates/cubecl-runtime/src/client.rs`.)
+
+**No-fork mitigation ruled out.** The `to_vec` allocation is cubecl's,
+not ours, so the read-back pool can't reach it; the only in-crate lever
+is the global allocator. Tested `MALLOC_MMAP_MAX_=0` +
+`MALLOC_TRIM_THRESHOLD_=-1` (force large allocs onto a retained heap):
+**no effect** — faults 82 M → 79 M, upload 19.7 → 19.6 s, wall flat,
+while RSS rose 16.8 → 22.2 GB. glibc *retained* memory but didn't
+*reuse* the freed 319 MB block for the next same-size request
+(cross-thread arenas / fragmentation), so the churn persists — unlike
+the read-back pool which reuses by explicit size key. Re-confirms the
+upload is fault-bound (40.9 GB / 19.6 s ≈ 2.1 GB/s, matching the
+fresh-`to_vec` microbench). A deterministic size-class allocator
+(mimalloc/jemalloc) *might* reuse where glibc didn't, but it's uncertain
++ a process-global dep; removing the cubecl `to_vec` is the guaranteed
+fix.
+
+**Upload — FIXED via cubecl fork, landed.** Patched `cubecl-runtime`
+`do_create`/`do_create_from_slices` to move the owned upload buffer into
+the write instead of `Bytes::from_bytes_vec(data.to_vec())`-copying it
+(fork `nulltea/cubecl`, rev `aabe3173`, pinned via `[patch.crates-io]`
+on the whole cubecl 0.10.0 stack; upstream PR to `tracel-ai/cubecl`
+pending). The `to_vec` was the *entire* upload bucket — bigger than
+projected:
+
+| bucket | baseline | +readback pool | +cubecl upload fix |
+|---|--:|--:|--:|
+| `engine:matmul:upload` | 19.6 s | 19.7 s | **0.003 s** |
+| `engine:matmul` | 21.2 s | 18.6 s | **4.3 s** |
+| `engine:matmul_many` | 28.1 s | 16.1 s | **10.6 s** |
+| **prefill wall** | **115.7 s** | 100.0 s | **78.6 s** |
+
+**Cumulative: B=8 prefill 115.7 → 78.6 s (−32%), decode 3.2 → 2.2 s**,
+from two changes — the in-TEE read-back recycling pool (our crate) and
+the cubecl upload-copy removal (forked dep) — both bit-identical, both
+fixing the same fresh-alloc + memcpy churn §24 surfaced. The real HtoD
+is now async (drained under `engine:matmul:drain`), so the upload bucket
+is just the non-blocking issue.
+
+**Standing instrumentation:** `engine:matmul:{cvt,upload,drain,readback}`
+sub-buckets are now permanent (chronicle §24), and the gdb-sampling
+recipe (`PR_SET_PTRACER_ANY` shim + `thread apply all bt` loop) is the
+no-sudo profiler for this box until `perf_event_paranoid` is lowered.
+
+**Artefacts:** `bench-results/diag-b8-{readback-pool,readback-pool-rerun{1,2},
+timev,gdbsample2}-2026-06-04.{log,samples.txt}`.
