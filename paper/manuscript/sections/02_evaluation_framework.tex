@@ -59,6 +59,14 @@ organize the systematization and its scope (\cref{sec:intro}):
 \begin{description}
   \item[Tier 1.] \emph{No trusted hardware}---confidentiality rests on cryptography or
         statistics alone (MPC/FHE, static obfuscation, DP); trust anchor \emph{none}.
+        ``None'' is a statement about what must be \emph{trusted not to leak}---no trusted
+        third party or hardware---not about where the \emph{work} runs: several Tier-1
+        schemes are not thin-client. Client-side-PIR/ORAM retrieval (Pacmann, Compass) and
+        2PC inference where the user is a compute party (PermLLM) make the client
+        \emph{load-bearing}---it stores access state and runs the oblivious-access or
+        traversal loop, delegating only bulk storage to the server. We mark these
+        ``none; client-relied'' and report the resulting client burden, a first-order
+        deployment factor, in \cref{sec:synthesis}.
   \item[Tier 2.] \emph{CPU-TEE only}---a commodity CPU enclave (Intel SGX/TDX, AMD
         SEV-SNP) is trusted; any GPU used for acceleration is \emph{untrusted}.
   \item[Tier 3.] \emph{Confidential accelerator}---a confidential GPU (NVIDIA H100/B200
@@ -178,8 +186,8 @@ axis---yet it is exactly what the case study (\cref{app:validation}) turns on.
     PermLLM      & HbC        & 2PC+dealer     & wb   & input        & shares       & crypto+heur. \\
     RemoteRAG    & HbC        & none           & ---  & query        & query+ap     & DP \\
     Caprise      & HbC        & none           & ---  & doc+query    & ct+dist      & crypto*+DP \\
-    Pacmann      & HbC        & none (PIR)     & ---  & query+access & none (pub.\ DB) & crypto \\
-    Compass      & malicious  & none (clt.\ ORAM) & --- & query+access & op-type only  & crypto \\
+    Pacmann      & HbC        & none; clt.-relied & ---  & query+access & none (pub.\ DB) & crypto \\
+    Compass      & malicious  & none; clt.-relied & --- & query+access & op-type only  & crypto \\
     \bottomrule
   \end{tabular}
 \end{table*}

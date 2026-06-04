@@ -95,26 +95,45 @@ comparison (\cref{tab:performance}): the profiles say what each family is \emph{
 while the use-case view says which family is the deployable choice \emph{for a given
 stage}---together they answer ``what should I deploy for my use case?''
 \begin{table*}[t]
-  \centering \scriptsize
-  \caption{Deployment readiness by family, on the three criteria of \cref{sec:intro}.
-    Ratings are qualitative (H/M/L) and indicative, not co-measured; see
-    \cref{tab:performance} for the underlying performance basis.}
+  \centering \scriptsize\setlength{\tabcolsep}{4pt}
+  \caption{Deployment readiness by family, on the three criteria of \cref{sec:intro}, plus
+    \emph{client reliance} (thin = enc/dec a query; stateful = holds keys + light work;
+    thick = stores access state and runs a multi-round retrieval/compute loop). Ratings are
+    qualitative and indicative, not co-measured; see \cref{tab:performance} for the
+    performance basis. \tq{}-marked client cells await the per-scheme review
+    (\cref{ssec:deployment}).}
   \label{tab:deployment}
-  \begin{tabular}{@{}lllll@{}}
+  \begin{tabular}{@{}llllll@{}}
     \toprule
-    Mechanism family & Performance & Fidelity & Threat-model fit & Deploy.\ readiness \\
+    Mechanism family & Performance & Fidelity & Threat-model fit & Client & Deploy.\ readiness \\
     \midrule
-    Cryptographic (MPC/FHE) & L infer./M retr. & H (exact) & H (often exceeds need) & L--M \\
-    TEE (Tier 3)            & H (near-plain.)  & H (exact) & M (HW-trust; side-ch.) & M (HW-gated) \\
-    Static obfuscation      & H (near-plain.)  & H (small loss) & L (fixed; several broken) & M \\
-    Differential privacy    & H                & M (recall at small $\varepsilon$) & M (formal, prob.) & M \\
-    Hybrid split            & M--H (few$\times$) & H (exact) & M--H (Tier-2; per-batch) & H \\
+    Cryptographic (MPC/FHE) & L infer./M retr. & H (exact) & H (often exceeds need) & thin--thick & L--M \\
+    TEE (Tier 3)            & H (near-plain.)  & H (exact) & M (HW-trust; side-ch.) & \tq & M (HW-gated) \\
+    Static obfuscation      & H (near-plain.)  & H (small loss) & L (fixed; several broken) & \tq & M \\
+    Differential privacy    & H                & M (recall at small $\varepsilon$) & M (formal, prob.) & \tq & M \\
+    Hybrid split            & M--H (few$\times$) & H (exact) & M--H (Tier-2; per-batch) & \tq & H \\
     \bottomrule
   \end{tabular}
 \end{table*}
 \needswork{justify each cell from the cited numbers; the headline reading: hybrid split
 and (on cost alone) obfuscation lead, but obfuscation's threat-fit is its liability;
 exact-but-slow cryptography and hardware-gated Tier-3 TEE trail on the binding axis}
+
+\paragraph{Finding: the client-reliance asymmetry.}
+A fourth factor cuts across the three and is easy to miss because the trust ladder hides
+it: \emph{how much work the scheme leaves on the client}. The lowest-server-trust
+schemes---Tier-1 cryptographic retrieval with no trusted hardware---are precisely the ones
+that make the client \emph{thick}. Compass and Pacmann achieve oblivious retrieval by
+running the ORAM controller or the graph traversal \emph{client-side} (the client stores
+the access state and drives a multi-round loop), and 2PC inference such as PermLLM makes
+the user a compute party outright. ``Trust anchor: none'' reads as zero cost, but the cost
+has only moved: from a trusted third party to the user's own device, which must now be
+capable, stateful, and online for the duration of a query. For deployment, adoption, and
+user experience this is a first-order constraint---a phone or a browser tab is a poor ORAM
+controller---and it inverts the naive reading of the table: the families that look cheapest
+on server trust can be the most demanding to actually field. A full per-scheme
+classification (thin/stateful/thick) across all families is the natural next step;
+\cref{tab:deployment} fills it for cryptography and flags the rest (\tq).
 
 \subsection{Graph-RAG as a Retrieval Setting}
 % Woven treatment (decision: short dedicated subsection, not a parallel track).
