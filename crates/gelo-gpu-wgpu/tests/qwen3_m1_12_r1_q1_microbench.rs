@@ -781,12 +781,21 @@ fn cover_greedy_parity() -> Result<()> {
 fn humaneval_gate_generate() -> Result<()> {
     use std::io::Write;
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../evals/humaneval-gate");
-    let subset = std::env::var("GELO_HE_SUBSET")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| root.join("subset.jsonl"));
-    let out_path = std::env::var("GELO_HE_OUT")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| root.join("completions.jsonl"));
+    // Resolve the subset/output overrides against the eval root (not the
+    // process CWD, which is the crate dir under `cargo test`). A bare
+    // `GELO_HE_OUT=completions_x.jsonl` then lands in evals/humaneval-gate/
+    // portably — no machine-specific absolute path needed.
+    let resolve_in_root = |var: &str, default: &str| -> std::path::PathBuf {
+        match std::env::var(var) {
+            Ok(s) => {
+                let p = std::path::PathBuf::from(s);
+                if p.is_relative() { root.join(p) } else { p }
+            }
+            Err(_) => root.join(default),
+        }
+    };
+    let subset = resolve_in_root("GELO_HE_SUBSET", "subset.jsonl");
+    let out_path = resolve_in_root("GELO_HE_OUT", "completions.jsonl");
     let max_tokens: usize = std::env::var("GELO_HE_MAXTOK").ok().and_then(|s| s.parse().ok()).unwrap_or(384);
 
     let variant = variant_from_env();
