@@ -662,6 +662,15 @@ pub trait GpuOffloadEngine: Send {
         Err(anyhow!("kv_attend_partial: unsupported"))
     }
 
+    /// Upload an additive score mask `(h_q, 1, len)` (0 / −∞) onto a
+    /// resident session; it is added to the `q·kᵀ` scores before the
+    /// softmax max. Used by the ragged batched decode cover (Option B,
+    /// chronicle §25) to mask each row's padded key slots in a single
+    /// batched attend. Default: unsupported.
+    fn kv_set_mask(&self, _id: KvSessionId, _mask: ArrayView3<f32>) -> Result<()> {
+        Err(anyhow!("kv_set_mask: unsupported"))
+    }
+
     /// Replace the resident cache with a fresh `(heads, n_kv, d_head)`
     /// K/V (e.g. after the TEE re-applies the block cover) and reset len.
     fn kv_refresh_block(
@@ -1334,6 +1343,13 @@ pub trait TrustedExecutor {
         _scale: f32,
     ) -> Result<(Array3<f32>, Array3<f32>, Array3<f32>)> {
         Err(anyhow!("resident_kv_attend_partial: unsupported"))
+    }
+
+    /// Upload an additive padded-key score mask onto a resident session
+    /// (ragged batched decode cover, Option B). Default unsupported;
+    /// `InProcessTrustedExecutor` delegates to the engine's `kv_set_mask`.
+    fn resident_kv_set_mask(&mut self, _id: KvSessionId, _mask: ArrayView3<f32>) -> Result<()> {
+        Err(anyhow!("resident_kv_set_mask: unsupported"))
     }
 
     /// Free a resident session (end of generation).

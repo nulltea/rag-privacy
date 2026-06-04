@@ -35,8 +35,15 @@ use ndarray::{Array2, Array3, ArrayView2, s};
 /// path (perm-attn-gpu-offload). Sampled **once** when the covered resident
 /// session is built and reused every step (no per-step re-derivation).
 pub struct DecodeCover {
-    /// Frozen-prefix length; the tail `[prefix_len..len)` stays in-TEE.
+    /// Padded frozen-prefix length = batch-max valid length (the GPU
+    /// session's key dimension). For ragged batches the shorter rows are
+    /// zero-padded to this length and masked in the attend (Option B,
+    /// chronicle §25). Equals every row's length on a uniform batch.
     pub prefix_len: usize,
+    /// Per-sequence *real* prefix lengths (one per batch row). The in-TEE
+    /// decode tail for row `b` is `[valid_lens[b]..len_b)`; the GPU prefix
+    /// attend covers `valid_lens[b]` real keys (the rest masked).
+    pub valid_lens: Vec<usize>,
     /// Shared feature rotation on Q/K (cancels in the score; always orthogonal).
     pub o_qk: Array2<f32>,
     /// Value cover on V — the κ-bounded invertible `C_v` (orthogonal `O_v` at

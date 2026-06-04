@@ -734,14 +734,18 @@ fn build_covered_prefix_session(
     kv_cache: &mut KvCache,
     batch_size: usize,
     nkvh: usize,
+    nqh: usize,
     dh: usize,
     sigma: f32,
 ) -> Result<()> {
     let cover_seed = cover_session_seed(exec);
-    let (k_cov, v_cov, cover) =
-        build_covered_prefix_cpu(layer_idx, kv_cache, batch_size, nkvh, dh, sigma, cover_seed)?;
+    let (k_cov, v_cov, mask, cover) =
+        build_covered_prefix_cpu(layer_idx, kv_cache, batch_size, nkvh, nqh, dh, sigma, cover_seed)?;
     let cap = kv_cache.capacity();
     let id = exec.resident_kv_create(k_cov.view(), v_cov.view(), cap)?;
+    if let Some(m) = &mask {
+        exec.resident_kv_set_mask(id, m.view())?;
+    }
     kv_cache.set_gpu_session(layer_idx, id);
     kv_cache.set_gpu_cover(layer_idx, cover);
     Ok(())
@@ -759,10 +763,11 @@ fn build_covered_prefix_cpu(
     kv_cache: &KvCache,
     batch_size: usize,
     nkvh: usize,
+    nqh: usize,
     dh: usize,
     sigma: f32,
     cover_seed: u64,
-) -> Result<(Array3<f32>, Array3<f32>, DecodeCover)> {
+) -> Result<(Array3<f32>, Array3<f32>, Option<Array3<f32>>, DecodeCover)> {
     use rand::SeedableRng;
     use rand::seq::SliceRandom;
     use rand_chacha::ChaCha20Rng;
@@ -784,13 +789,34 @@ fn build_covered_prefix_cpu(
     let kv_views: Vec<(ArrayView2<'_, f32>, ArrayView2<'_, f32>)> = (0..batch_size)
         .map(|b| kv_cache.view_b(layer_idx, b))
         .collect::<Result<Vec<_>>>()?;
-    let prefix_len = kv_views[0].0.nrows();
-    let (k_st, v_st) = stack_cache(&kv_views, batch_size, nkvh, dh);
+    // Option B (chronicle §25): pad every row's prefix to the batch-max
+    // length and mask the padding, so one stacked session + one batched
+    // attend serve ragged batches. `valid_lens[b]` = row b's real prefix;
+    // `prefix_len` = padded length L_max (the GPU session's key dim).
+    let valid_lens: Vec<usize> = kv_views.iter().map(|(k, _)| k.nrows()).collect();
+    let prefix_len = valid_lens.iter().copied().max().unwrap_or(0);
+    let ragged = valid_lens.iter().any(|&l| l != prefix_len);
+    let bh = batch_size * nkvh;
+    // Padded stack (B·nkvh, L_max, dh): rows ≥ valid_lens[b] stay zero.
+    let mut k_st = Array3::<f32>::zeros((bh, prefix_len, dh));
+    let mut v_st = Array3::<f32>::zeros((bh, prefix_len, dh));
+    for b in 0..batch_size {
+        let (kb, vb) = kv_views[b];
+        for hi in 0..nkvh {
+            let idx = b * nkvh + hi;
+            for j in 0..valid_lens[b] {
+                for c in 0..dh {
+                    k_st[(idx, j, c)] = kb[(j, hi * dh + c)];
+                    v_st[(idx, j, c)] = vb[(j, hi * dh + c)];
+                }
+            }
+        }
+    }
     // perm (row gather) + σ on K — O4(a): row-level copies, per-head ChaCha
-    // noise, parallel over the B·nkvh heads.
+    // noise, parallel over the B·nkvh heads. One shared perm over L_max;
+    // attention is order-invariant over keys, so the perm is purely a cover.
     let mut perm: Vec<usize> = (0..prefix_len).collect();
     perm.shuffle(&mut crng);
-    let bh = batch_size * nkvh;
     let noise_seed = rand::RngCore::next_u64(&mut crng);
     let mut kp = Array3::<f32>::zeros((bh, prefix_len, dh));
     let mut vp = Array3::<f32>::zeros((bh, prefix_len, dh));
@@ -820,7 +846,26 @@ fn build_covered_prefix_cpu(
     // GQA-broadcast-consistent).
     let k_cov = rotate_heads(kp.view(), o_qk.view());
     let v_cov = rotate_heads(vp.view(), c_v.view());
-    Ok((k_cov, v_cov, DecodeCover { prefix_len, o_qk, c_v, c_v_inv }))
+    // Per-row additive key mask (h_q, 1, L_max): permuted slot `i` holds
+    // original row `perm[i]`, which is padding for row `b` iff
+    // `perm[i] >= valid_lens[b]` → −∞ (excluded from that row's softmax).
+    // Only needed when ragged (uniform → no padding → no mask).
+    let mask = if ragged {
+        let mut m = Array3::<f32>::zeros((batch_size * nqh, 1, prefix_len));
+        for b in 0..batch_size {
+            for i in 0..prefix_len {
+                if perm[i] >= valid_lens[b] {
+                    for h in 0..nqh {
+                        m[(b * nqh + h, 0, i)] = f32::NEG_INFINITY;
+                    }
+                }
+            }
+        }
+        Some(m)
+    } else {
+        None
+    };
+    Ok((k_cov, v_cov, mask, DecodeCover { prefix_len, valid_lens, o_qk, c_v, c_v_inv }))
 }
 
 /// Build covered resident prefixes for **all GLOBAL layers** at the
@@ -833,7 +878,8 @@ fn build_covered_prefix_all_global(
     kv_cache: &mut KvCache,
     batch_size: usize,
 ) -> Result<()> {
-    let (nkvh, dh) = (cfg.num_key_value_heads, cfg.head_dim_value());
+    let (nkvh, nqh, dh) =
+        (cfg.num_key_value_heads, cfg.num_attention_heads, cfg.head_dim_value());
     let sigma = resident_cover_sigma();
     let pending: Vec<usize> = (0..cfg.num_hidden_layers)
         .filter(|&li| {
@@ -851,20 +897,24 @@ fn build_covered_prefix_all_global(
     profile::time("cover:build_covered_prefix+upload", || -> Result<()> {
         use rayon::prelude::*;
         for chunk in pending.chunks(4) {
-            let built: Vec<(usize, (Array3<f32>, Array3<f32>, DecodeCover))> = chunk
+            type BuiltLayer = (Array3<f32>, Array3<f32>, Option<Array3<f32>>, DecodeCover);
+            let built: Vec<(usize, BuiltLayer)> = chunk
                 .par_iter()
                 .map(|&li| {
                     Ok((
                         li,
                         build_covered_prefix_cpu(
-                            li, kv_cache, batch_size, nkvh, dh, sigma, cover_seed,
+                            li, kv_cache, batch_size, nkvh, nqh, dh, sigma, cover_seed,
                         )?,
                     ))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            for (li, (k_cov, v_cov, cover)) in built {
+            for (li, (k_cov, v_cov, mask, cover)) in built {
                 let cap = kv_cache.capacity();
                 let id = exec.resident_kv_create(k_cov.view(), v_cov.view(), cap)?;
+                if let Some(m) = &mask {
+                    exec.resident_kv_set_mask(id, m.view())?;
+                }
                 kv_cache.set_gpu_session(li, id);
                 kv_cache.set_gpu_cover(li, cover);
             }
@@ -1044,11 +1094,8 @@ fn decoder_block_cached_batched(
             // Create the covered session once; O is sampled here and CACHED
             // (re-deriving the Gram-Schmidt O every step is pure waste).
             if kv_cache.gpu_session(layer_idx as usize).is_none() {
-                // One-time covered-prefix build + upload (the session-fixed
-                // "re-permute" cost, paid once per layer; amortized over K).
-                // Lazy fallback — normally built at the prefill→decode handoff
-                // (O5, `build_covered_prefix_all_global`); this fires only if
-                // that hoist was skipped.
+                // One-time covered-prefix build + upload (lazy fallback;
+                // normally hoisted to the handoff, build_covered_prefix_all_global).
                 profile::time("cover:build_covered_prefix+upload", || {
                     build_covered_prefix_session(
                         exec,
@@ -1056,31 +1103,38 @@ fn decoder_block_cached_batched(
                         kv_cache,
                         batch_size,
                         nkvh,
+                        nqh,
                         dh,
                         sigma,
                     )
                 })?;
             }
             let id = kv_cache.gpu_session(layer_idx as usize).unwrap();
-            // Cached cover (clone the O matrices — ~128 KB, cheap — to release
-            // the kv_cache borrow across the exec/view_b calls below).
-            let (o_qk, c_v_inv, prefix_len) = {
+            // Cached cover; `prefix_len` = padded L_max (GPU session key dim),
+            // `valid_lens[b]` = row b's real prefix (Option B, chronicle §25).
+            let (o_qk, c_v_inv, valid_lens) = {
                 let c = kv_cache.gpu_cover(layer_idx as usize).unwrap();
-                (c.o_qk.clone(), c.c_v_inv.clone(), c.prefix_len)
+                (c.o_qk.clone(), c.c_v_inv.clone(), c.valid_lens.clone())
             };
 
-            // Prefix partial on GPU: q covered by O_qk (+σ), uncover acc by O_vᵀ.
+            // Prefix partial: q covered by O_qk (+ per-row σ), ONE batched
+            // masked attend over the padded L_max prefix (each row's padding
+            // masked to −∞ in the session), uncover by C_vᵀ.
             let q_cov = profile::time("cover:q_cover_tee", || {
                 let mut qn = q_st.clone();
                 if sigma > 0.0 {
-                    let mut qrng = ChaCha20Rng::seed_from_u64(
-                        SALT ^ cover_session ^ (layer_idx as u64)
-                            ^ ((prefix_len as u64) << 20)
-                            ^ q_pos_offsets[0] as u64,
-                    );
-                    for e in qn.iter_mut() {
-                        let z: f32 = StandardNormal.sample(&mut qrng);
-                        *e += sigma * z;
+                    for b in 0..batch_size {
+                        let mut qrng = ChaCha20Rng::seed_from_u64(
+                            SALT ^ cover_session
+                                ^ (layer_idx as u64)
+                                ^ ((valid_lens[b] as u64) << 20)
+                                ^ q_pos_offsets[b] as u64,
+                        );
+                        let mut blk = qn.slice_mut(ndarray::s![b * nqh..(b + 1) * nqh, .., ..]);
+                        for e in blk.iter_mut() {
+                            let z: f32 = StandardNormal.sample(&mut qrng);
+                            *e += sigma * z;
+                        }
                     }
                 }
                 rotate_heads(qn.view(), o_qk.view())
@@ -1092,38 +1146,50 @@ fn decoder_block_cached_batched(
                 rotate_heads(acc_a_cov.view(), c_v_inv.view())
             });
 
-            // In-TEE active tail [prefix_len..len): plaintext partial + merge.
+            // Per-sequence in-TEE tail [valid_lens[b]..len_b) + online merge
+            // (lengths differ per row; the GPU prefix attend above was batched).
             let kv_views: Vec<(ArrayView2<'_, f32>, ArrayView2<'_, f32>)> = (0..batch_size)
                 .map(|b| kv_cache.view_b(layer_idx as usize, b))
                 .collect::<Result<Vec<_>>>()?;
-            let n_tail = kv_views[0].0.nrows().saturating_sub(prefix_len);
-            let ctx_st = if n_tail == 0 {
-                // Create step: prefix only → normalise acc_a by l_a.
-                let mut out = acc_a;
-                for h in 0..out.shape()[0] {
-                    let l = l_a[(h, 0, 0)];
-                    let inv = if l > 0.0 { 1.0 / l } else { 0.0 };
-                    out.index_axis_mut(Axis(0), h).mapv_inplace(|x| x * inv);
-                }
-                out
-            } else {
-                let (tk, tv) = profile::time("cover:tail_build_tee", || {
-                    stack_tail_expanded(&kv_views, prefix_len, batch_size, nqh, nkvh, dh)
-                });
-                let (acc_b, m_b, l_b) = profile::time("cover:tail_partial_tee", || {
-                    attention_partial(q_st.view(), tk.view(), tv.view(), scale)
-                });
-                profile::time("cover:merge_tee", || {
-                    merge_attention_partials(
-                        acc_a.view(),
-                        m_a.view(),
-                        l_a.view(),
-                        acc_b.view(),
-                        m_b.view(),
-                        l_b.view(),
-                    )
-                })
-            };
+            let mut ctx_st = Array3::<f32>::zeros((batch_size * nqh, 1, dh));
+            for b in 0..batch_size {
+                let plen = valid_lens[b];
+                let mut acc_a_b =
+                    acc_a.slice(ndarray::s![b * nqh..(b + 1) * nqh, .., ..]).to_owned();
+                let n_tail = kv_views[b].0.nrows().saturating_sub(plen);
+                let ctx_b = if n_tail == 0 {
+                    // Prefix only → normalise acc_a by l_a.
+                    for h in 0..acc_a_b.shape()[0] {
+                        let l = l_a[(b * nqh + h, 0, 0)];
+                        let inv = if l > 0.0 { 1.0 / l } else { 0.0 };
+                        acc_a_b.index_axis_mut(Axis(0), h).mapv_inplace(|x| x * inv);
+                    }
+                    acc_a_b
+                } else {
+                    let qb = q_st.slice(ndarray::s![b * nqh..(b + 1) * nqh, .., ..]);
+                    let (tk, tv) = profile::time("cover:tail_build_tee", || {
+                        stack_tail_expanded(&kv_views[b..b + 1], plen, 1, nqh, nkvh, dh)
+                    });
+                    let (acc_bt, m_bt, l_bt) = profile::time("cover:tail_partial_tee", || {
+                        attention_partial(qb, tk.view(), tv.view(), scale)
+                    });
+                    let m_a_b = m_a.slice(ndarray::s![b * nqh..(b + 1) * nqh, .., ..]);
+                    let l_a_b = l_a.slice(ndarray::s![b * nqh..(b + 1) * nqh, .., ..]);
+                    profile::time("cover:merge_tee", || {
+                        merge_attention_partials(
+                            acc_a_b.view(),
+                            m_a_b,
+                            l_a_b,
+                            acc_bt.view(),
+                            m_bt.view(),
+                            l_bt.view(),
+                        )
+                    })
+                };
+                ctx_st
+                    .slice_mut(ndarray::s![b * nqh..(b + 1) * nqh, .., ..])
+                    .assign(&ctx_b);
+            }
             ctx = unstack_heads(ctx_st.view(), batch_size, nqh, dh);
             Ok(())
         })?;

@@ -2361,6 +2361,10 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
         self.engine.kv_attend_partial(id, q, scale)
     }
 
+    fn resident_kv_set_mask(&mut self, id: KvSessionId, mask: ArrayView3<f32>) -> Result<()> {
+        self.engine.kv_set_mask(id, mask)
+    }
+
     fn resident_kv_drop(&mut self, id: KvSessionId) -> Result<()> {
         self.engine.kv_drop_session(id)
     }

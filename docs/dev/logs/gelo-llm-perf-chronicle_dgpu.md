@@ -1629,10 +1629,34 @@ the HumanEval-20 gate on this changeset: **B=1 = 8/20** (coherent; ≥ the
   `fa7c7ad` and was never gated (the 7/20 ref was B=1). Affects real
   serving (mixed-length prompts), not the uniform perf bench.
 
-Fix options: pad the resident cover to the batch-max prefix + per-sequence
-length-mask the resident attention; or per-sequence resident sessions
-(simpler, mirrors the prefill ragged loop, perf cost at decode). Not yet
-fixed — needs its own B=8 gate.
+**FIXED — Option B (pad-to-max + per-row key mask), landed.** Two
+candidates were tried:
+
+- **Option A — per-sequence resident sessions** (one session/row, B
+  attends in a loop). Correct (ragged parity probe green), but the
+  per-row fan-out cost decode: uniform B=8 K=32 **12.85 → 16.85 s
+  (+31%)**, `cover:prefix_partial_gpu` 1152 → 9216 dispatches. Rejected
+  on perf.
+- **Option B — single padded session + masked attend (landed).** Pad
+  each row's frozen prefix to the batch-max `L_max`, build one stacked
+  covered session, and add a per-row additive `−∞` key mask
+  (`mask[b,i] = −∞ iff perm[i] ≥ valid_len[b]`) to the `q·kᵀ` scores so a
+  query never attends another row's padding. One batched
+  `resident_kv_attend_partial`; the in-TEE tail (lengths differ per row)
+  + online merge stay per-sequence (cheap CPU). New engine surface:
+  `ResidentKvSession.mask` + `kv_set_mask`/`resident_kv_set_mask`
+  (additive, default no-op). `DecodeCover` carries per-row `valid_lens`.
+
+Results (Option B): ragged parity probe **green** (rows of lens
+10/28/7/31 all match B=1); **B=8 ragged gate 2/20 → 8/20** (= the B=1
+reference, ≥ the 7/20 in-TEE bar); **uniform B=8 K=32 decode 12.78 s
+(~0 % vs baseline)** — the uniform batch takes the no-mask path (= the
+original single attend), so the §21–§25 perf numbers are unchanged. The
+greedy output is robust to the cover differing from the per-row B=1
+cover (σ=0.01 doesn't flip argmax; attention is order-invariant over the
+permuted keys). Security: the mask reveals per-row length to the GPU,
+already observable under `GPU-ADV` (dispatch shapes); padding carries no
+activation, and the real-token permutation stays hidden — no new leak.
 
 **Artefacts:** `bench-results/diag-b8-{readback-pool,readback-pool-rerun{1,2},
 timev,gdbsample2}-2026-06-04.{log,samples.txt}`.

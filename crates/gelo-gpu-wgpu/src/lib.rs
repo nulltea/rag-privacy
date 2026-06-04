@@ -292,6 +292,13 @@ pub struct ResidentKvSession {
     v_t: Tensor<CubeWgpu16, 3>,
     len: usize,
     capacity: usize,
+    /// Optional additive score mask `(h_q, 1, len)` (0 / −∞), added to the
+    /// `q·kᵀ` scores before the softmax max. Used by the ragged batched
+    /// decode cover (Option B, chronicle §25): the frozen prefix is padded
+    /// to the batch-max length and each row's padded key slots are masked
+    /// to −∞ so a query never attends another row's padding. `None` on the
+    /// uniform / single-sequence paths (no padding → no mask).
+    mask: Option<Tensor<CubeWgpu16, 3>>,
 }
 
 impl WgpuVulkanEngine {
@@ -315,7 +322,7 @@ impl WgpuVulkanEngine {
         let v_full = Tensor::<CubeWgpu16, 3>::zeros([bh, capacity, d], &self.device);
         let k_t = k_full.slice_assign([0..bh, 0..n0, 0..d], array3_to_tensor_f16(k_prefix, &self.device));
         let v_t = v_full.slice_assign([0..bh, 0..n0, 0..d], array3_to_tensor_f16(v_prefix, &self.device));
-        Ok(ResidentKvSession { k_t, v_t, len: n0, capacity })
+        Ok(ResidentKvSession { k_t, v_t, len: n0, capacity, mask: None })
     }
 
     /// Decode append: write one token's `(B·H, 1, d_head)` K/V row at
@@ -381,6 +388,13 @@ impl WgpuVulkanEngine {
         let q_t = array3_to_tensor_f16(q, &self.device);
         let (k_act, v_act) = self.resident_kv_expanded(session, h_q, d)?;
         let scores = q_t.matmul(k_act.permute([0, 2, 1])).mul_scalar(scale);
+        // Ragged batched decode (Option B): add the per-row padded-key mask
+        // (0 / −∞) before the softmax so a query never attends another
+        // sequence's padding slots. Shape `(h_q, 1, len)`, matches `scores`.
+        let scores = match &session.mask {
+            Some(mask) => scores.add(mask.clone()),
+            None => scores,
+        };
         let m = scores.clone().max_dim(2);
         let shifted = scores.sub(m.clone()).exp();
         let l = shifted.clone().sum_dim(2);
@@ -932,6 +946,15 @@ impl GpuOffloadEngine for WgpuVulkanEngine {
             .get(&id)
             .ok_or_else(|| anyhow!("kv_attend_partial: unknown session {id}"))?;
         self.attend_session_partial(q, s, scale)
+    }
+
+    fn kv_set_mask(&self, id: KvSessionId, mask: ArrayView3<'_, f32>) -> Result<()> {
+        let mut map = self.sessions.lock().expect("sessions mutex");
+        let s = map
+            .get_mut(&id)
+            .ok_or_else(|| anyhow!("kv_set_mask: unknown session {id}"))?;
+        s.mask = Some(array3_to_tensor_f16(mask, &self.device));
+        Ok(())
     }
 
     fn kv_refresh_block(
