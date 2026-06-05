@@ -45,7 +45,7 @@ attacks~\citep{kellaris2016leakage}. The \emph{stored vectors} at rest are thems
 sensitive: an embedding is a lossy encoding of its source document, again invertible. A scheme
 is therefore judged on how many of these three channels---query, access pattern, and at-rest
 index---it actually closes (\cref{ssec:retr-limits}).
-\begin{table}[H]
+\begin{table*}[t!]
   \centering \footnotesize
   \caption{\emph{Dense} retrieval and storage---approximate nearest-neighbour
     (ANN) search over a vector index; all mechanisms. Latency is end-to-end query time
@@ -55,7 +55,7 @@ index---it actually closes (\cref{ssec:retr-limits}).
     (no absolute latency reported); n/r = not reported.}
   \label{tab:crypto-vec}
   \scriptsize\setlength{\tabcolsep}{4pt}
-  \begin{tabular}{@{}llllll@{}}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
     \toprule
     Scheme & Stage & Primitive & Latency & Comm./storage & Fidelity \\
     \midrule
@@ -68,12 +68,12 @@ index---it actually closes (\cref{ssec:retr-limits}).
     SAP/DCPE~\cite{fuchsbauer_sap}            & store,retrieve  & DCPE (symmetric)         & ${\sim}0$\,ms               & ${\approx}1\times$ & approx ($\beta$) \\
     CAPRISE~\cite{ye_caprise}                 & store,retrieve  & conditional ADCPE        & 2339\,vec/s (enc.)          & ${\approx}1\times$ & approx ($\beta$)+DP \\
     \bottomrule
-  \end{tabular}
+  \end{tabular*}
 
   \smallskip
   {\footnotesize $^*$ p\textsuperscript{2}RAG reports 3--300$\times$ vs PRAG;
   RAGtime-PIANO 40$\times$ vs PIR-RAG --- neither gives an absolute query latency.}
-\end{table}
+\end{table*}
 
 \paragraph{Oblivious fetch (PIR).}
 Panther, PIR-RAG, p\textsuperscript{2}RAG, and RAGtime-PIANO retrieve through PIR (single- or
@@ -126,7 +126,7 @@ public graph even under encryption. Third, the \texttt{source\_id} \emph{fan-out
 chunks an entity maps to---links a query to specific source documents. Because these surfaces
 are about \emph{structure and access}, not arithmetic, dense-retrieval primitives do not
 address them and graph retrieval needs a different toolkit (\cref{tab:crypto-graph}).
-\begin{table}[H]
+\begin{table*}[t!]
   \centering \footnotesize
   \caption{\emph{Graph} retrieval and storage---graph-indexed ANN and graph traversal
     (Graph/LightRAG); all mechanisms. Columns as in \cref{tab:crypto-vec}; latency is per
@@ -137,7 +137,7 @@ address them and graph retrieval needs a different toolkit (\cref{tab:crypto-gra
     downstream answer quality is preserved.}
   \label{tab:crypto-graph}
   \scriptsize\setlength{\tabcolsep}{3pt}
-  \begin{tabular}{@{}llllll@{}}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
     \toprule
     Scheme & Stage & Primitive & Latency & Comm./storage & Fidelity \\
     \midrule
@@ -152,12 +152,12 @@ address them and graph retrieval needs a different toolkit (\cref{tab:crypto-gra
     Opal~\cite{kaviani_opal}    & retrieve,gt,e2e   & TEE + Ring-ORAM          & 2.32\,s/q ($1.57\times$) & ORAM (n/r)                & exact ($+13$\,pp) \\
     ARoG~\cite{ning_arog}       & retrieve,gt       & KGQA machine-ID anon     & no crypto cost           & ---                       & SoTA KGQA (lossy) \\
     \bottomrule
-  \end{tabular}
+  \end{tabular*}
 
   \smallskip
   {\footnotesize \needswork{XorMM latency is unreported; we have a XorMM implementation in the
   parent repository and can co-measure its query latency on the LightRAG adjacency workload---fill this cell.}}
-\end{table}
+\end{table*}
 
 \paragraph{Graph-ANN over an oblivious index.}
 Pacmann and Compass serve the entity/relation ANN lookups that open a LightRAG-style
@@ -198,7 +198,7 @@ surface at no cryptographic cost, but it is quality-preserving \emph{obfuscation
 provable-confidentiality guarantee---a heuristic defence whose residual leakage is not
 quantified (the hybrid/anonymization lineage of \cref{sec:hybrid}). 
 
-Together these cover LightRAG's retrieval surface---entity/relation/chunk ANN (Compass, Pacmann, CAPRISE), one-hop adjacency expansion (XorMM, FLASH), and graph storage (PeGraph, GORAM)---which is why retrieval, not crypto inference, anchors the deployable end of the confidential-RAG design space
+\paragraph{} Together these cover LightRAG's retrieval surface---entity/relation/chunk ANN (Compass, Pacmann, CAPRISE), one-hop adjacency expansion (XorMM, FLASH), and graph storage (PeGraph, GORAM)---which is why retrieval, not crypto inference, anchors the deployable end of the confidential-RAG design space
 (\cref{sec:synthesis}).
 
 \subsection{Limitations and Known Attacks}
@@ -240,7 +240,7 @@ close this channel by hiding which node is touched, while GORAM's 3PC sqrt-ORAM 
 billion-edge federated graphs. Where cryptography is too costly, anonymization (PrivGemo)
 instead shrinks and pseudonymizes the structural fingerprint---a heuristic obfuscation, not
 a provable guarantee, with unquantified residual leakage.
-\begin{table}[H]
+\begin{table*}[t!]
   \centering \footnotesize
   \caption{Known attacks on confidential retrieval, separated by index structure (dense vs
     graph; the leakage channels differ). Each row names the attack, the leakage it consumes,
@@ -264,4 +264,4 @@ a provable guarantee, with unquantified residual leakage.
     Structural fingerprinting & unique subgraph topology of the exposed view & anonymized graph views & de-uniqueness sanitization (PrivGemo) \\
     \bottomrule
   \end{tabularx}
-\end{table}
+\end{table*}

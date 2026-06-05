@@ -9,13 +9,13 @@
 % Rows = pipeline stages (ingest, embed, store, retrieve, rerank, generate, +
 % graph construction, graph traversal); columns = mechanism families (§3-§7).
 % Cells = representative schemes. EMPTY / weak cells = open problems.
-\begin{table}[H]
+\begin{table*}[t!]
   \centering \scriptsize
   \caption{Coverage of the inference-and-RAG pipeline by mechanism family. Cell = one
     or two representative schemes (\cref{sec:crypto}--\cref{sec:hybrid}; see those
     tables for the full set); ``---'' = no practical scheme known to us (a gap).}
   \label{tab:gapmap}
-  \begin{tabular}{@{}llllll@{}}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
     \toprule
     Pipeline stage & Crypto/MPC & TEE & Obfuscation & DP & Hybrid split \\
     \midrule
@@ -27,8 +27,8 @@
     Graph construct. & ---                & ---              & ARoG          & ---           & PrivGemo \\
     Graph traverse   & Pacmann/XorMM      & Opal/H$_2$O$_2$RAM & ARoG        & ---           & PrivGemo \\
     \bottomrule
-  \end{tabular}
-\end{table}
+  \end{tabular*}
+\end{table*}
 \needswork{narrate the headline gaps the ``---'' cells expose: obfuscation and DP are
 almost absent from storage/retrieval/rerank; the hybrid split is absent from every
 retrieval stage (it is an inference technique); graph \emph{construction} is a near-total
@@ -51,7 +51,7 @@ stage in the gap-map above, no surveyed scheme reports a standalone private cros
 reranking measurement---the few schemes with a scoring step (p\textsuperscript{2}RAG, TRSE,
 RemoteRAG's HE top-$k$ scoring, Opal's in-enclave scoring) fold it into a retrieval-pipeline
 figure---so private reranking stands as an \emph{open gap} rather than a comparable cost.
-\begin{table*}[t]
+\begin{table*}[t!]
   \centering \footnotesize
   \caption{Performance and fidelity by use case (indicative; normalized per use case,
     \cref{sec:comparison}). ``$\times$'' = overhead vs.\ plaintext; ``exact'' = computes the
@@ -61,7 +61,7 @@ figure---so private reranking stands as an \emph{open gap} rather than a compara
     the originals---so cross-scheme readings here are order-of-magnitude, and open-source
     availability is tracked per scheme in the family tables (\cref{sec:crypto}--\cref{sec:hybrid}).}
   \label{tab:performance}
-  \begin{tabular}{@{}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}p{6.3cm}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{3.6cm}@{}}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}p{6.3cm}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{3.6cm}@{}}
     \toprule
     Use case & Mechanisms (representative) & Overhead (normalized) & Fidelity \\
     \midrule
@@ -78,7 +78,7 @@ figure---so private reranking stands as an \emph{open gap} rather than a compara
                & graph-ANN sub-s--s; KG-anon $\sim$0
                & exact (ORAM/SSE); quality-only (anon) \\
     \bottomrule
-  \end{tabular}
+  \end{tabular*}
 \end{table*}
 \needswork{fill cells with specific cited figures normalized per use case (\cref{sec:comparison});
 mark each co-measured vs indicative; this performance axis is the dimension Bodea
@@ -98,7 +98,7 @@ not maximizing one. This family-level profile is the complement of the per-use-c
 comparison (\cref{tab:performance}): the profiles say what each family is \emph{good at},
 while the use-case view says which family is the deployable choice \emph{for a given
 stage}---together they answer ``what should I deploy for my use case?''
-\begin{table*}[t]
+\begin{table*}[t!]
   \centering \scriptsize\setlength{\tabcolsep}{4pt}
   \caption{Deployment readiness by family, on the three criteria of \cref{sec:intro}, plus
     \emph{client reliance} (thin = enc/dec a query; stateful = holds keys + light work;
@@ -107,7 +107,7 @@ stage}---together they answer ``what should I deploy for my use case?''
     performance basis. \tq{}-marked client cells await the per-scheme review
     (\cref{ssec:deployment}).}
   \label{tab:deployment}
-  \begin{tabular}{@{}llllll@{}}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
     \toprule
     Mechanism family & Performance & Fidelity & Threat-model fit & Client & Deploy.\ readiness \\
     \midrule
@@ -117,7 +117,7 @@ stage}---together they answer ``what should I deploy for my use case?''
     Differential privacy    & H                & M (recall at small $\varepsilon$) & M (formal, prob.) & \tq & M \\
     Hybrid split            & M--H (few$\times$) & H (exact) & M--H (Tier-2; per-batch) & \tq & H \\
     \bottomrule
-  \end{tabular}
+  \end{tabular*}
 \end{table*}
 \needswork{justify each cell from the cited numbers; the headline reading: hybrid split
 and (on cost alone) obfuscation lead, but obfuscation's threat-fit is its liability;

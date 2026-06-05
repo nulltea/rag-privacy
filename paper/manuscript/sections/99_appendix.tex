@@ -36,13 +36,13 @@ obfuscated service I/O, with side channels out of scope and a constrained, reali
 (\cref{tab:validation}); a break under these conditions is a break by the victim's own standard,
 not an artefact of an inflated adversary.
 
-\begin{table}[H]
+\begin{table*}[t!]
   \centering \footnotesize
   \caption{Attack validation of the deployment-ready heuristic-basis schemes. ``Recovery'' is the
     fraction of input tokens an in-regime attacker recovers (higher = weaker protection);
     ``\emph{comp.}'' marks figures reported in the companion paper.}
   \label{tab:validation}
-  \begin{tabular}{@{}lll@{}}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lll@{}}
     \toprule
     Scheme & Leakage surface / attack family & Recovery (reported $\to$ found) \\
     \midrule
@@ -52,8 +52,8 @@ not an artefact of an inflated adversary.
     GELO~\cite{belikov_gelo}              & mixed activations; Gram-matrix / BSS    & per-batch claim $\to$ \emph{comp.} \\
     ObfuscaTune~\cite{frikha_obfuscatune} & obf.\ activations+weights; inversion    & --- $\to$ \emph{comp.} \\
     \bottomrule
-  \end{tabular}
-\end{table}
+  \end{tabular*}
+\end{table*}
 
 \paragraph{Finding.} Across the set, reported resistance overstates real protection: the
 obfuscation surface each scheme treats as its defence is precisely what an in-regime attack

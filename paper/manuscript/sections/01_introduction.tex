@@ -40,7 +40,7 @@ conclusion---hybrid splits and obfuscation are present-day leaders, not way-stat
 per-scheme depth, the retrieval and graph-RAG dimension, and a quantitative
 deployment-readiness lens.
 
-\begin{table*}[t]
+\begin{table*}[t!]
   \centering \footnotesize\setlength{\tabcolsep}{4pt}
   \caption{This SoK against prior surveys and SoKs on related ground.
     $\bullet$ = covered, $\circ$ = partial/shallow, ``---'' = absent. \emph{Threat}: threat-model
@@ -49,7 +49,7 @@ deployment-readiness lens.
     \emph{Code}: code/reproducibility ($\bullet$ = re-benchmark audit, $\circ$ = notes availability).
     \emph{Infer.}, \emph{RAG} (retrieval/storage), \emph{Graph} (graph-RAG): coverage of each layer.}
   \label{tab:prior-soks}
-  \begin{tabular}{@{}lllccccccc@{}}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lllccccccc@{}}
     \toprule
     Survey / SoK & Mechanism families & Threat & Cost & Deploy. & Code & Infer. & RAG & Graph \\
     \midrule
@@ -63,7 +63,7 @@ deployment-readiness lens.
     Chen et al.~\citep{chen_sok_pti}      & MPC/FHE/hybrid             & semi-honest & $\bullet$ & $\circ$   & $\bullet$ & $\bullet$ & ---       & --- \\
     \textbf{This SoK}                     & \textbf{all five}          & 5-axis      & $\bullet$ & $\bullet$ & $\circ$   & $\bullet$ & $\bullet$ & $\bullet$ \\
     \bottomrule
-  \end{tabular}
+  \end{tabular*}
 \end{table*}
 
 Two structural choices follow. First, a \emph{hardware-trust} ladder, defined with the

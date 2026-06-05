@@ -11,7 +11,7 @@
 %
 %  Build (pdflatex + bibtex; NO biber/latexmk):  make    |    make clean
 % =============================================================================
-\documentclass[11pt,letterpaper]{article}
+\documentclass[10pt,letterpaper,twocolumn]{article}
 
 % --- encoding & fonts (pdflatex path) ---------------------------------------
 \usepackage[T1]{fontenc}
@@ -20,7 +20,17 @@
 \usepackage{microtype}
 
 % --- page layout ------------------------------------------------------------
-\usepackage[margin=1in]{geometry}
+\usepackage[margin=0.75in]{geometry}
+\raggedbottom  % two-column: let columns end naturally; avoids \flushbottom stretching paragraphs apart (esp. near full-width floats)
+% Two-column full-width-float placement: accept tall table* at page tops instead of deferring
+% them past the sections that reference them.
+\setcounter{dbltopnumber}{4}        % up to 4 full-width floats at a page top (default 2)
+\renewcommand{\dbltopfraction}{0.9} % a top float may occupy 90% of the page (default 0.7) -> tall tables place in-page
+\renewcommand{\dblfloatpagefraction}{0.7}
+\setcounter{topnumber}{3}
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.7}
 \usepackage{setspace}
 
 % --- math -------------------------------------------------------------------
