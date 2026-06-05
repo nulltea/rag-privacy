@@ -246,7 +246,7 @@ communication at a fixed corpus size for retrieval; and fidelity as the task-acc
     Cryptographic rows give \emph{absolute} latency---per generated token (``/tok'', decoders) or
     per 128-token forward pass (``/inf'', encoders)---and report no vs-plaintext multiplier; TEE,
     obfuscation, DP, and hybrid rows report \emph{$\times$-overhead} vs.\ plaintext on the same
-    hardware (Comm.\ ``---'' = local/negligible). Figures are paper-reported except $\dagger$ =
+    hardware (their communication is local/negligible and omitted). Figures are paper-reported except $\dagger$ =
     extrapolated 1-hop via the cited baseline (\cref{sec:comparison}); cross-row figures are
     indicative, not co-measured (\cref{sec:comparison}). The Fidelity column is the accuracy/utility
     delta vs.\ plaintext; obfuscation/DP privacy claims are discussed in their sections
@@ -254,36 +254,36 @@ communication at a fixed corpus size for retrieval; and fidelity as the task-acc
   \label{tab:inf-perf}
   \begin{tabular}{@{}lllll@{}}
     \toprule
-    Scheme & Setting & Latency / overhead & Comm. & Fidelity ($\Delta$acc) \\
+    Scheme & Technique & Model & Latency / overhead & Fidelity ($\Delta$acc) \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Cryptographic (MPC/FHE)} --- \cref{sec:crypto}}\\
-    PermLLM~\cite{permllm}    & 2PC+dealer, ChatGLM-6B          & 3\,s/tok (1\,Gbps)             & 20\,Mb/tok                          & exact (0) \\
-    SHAFT~\cite{shaft}        & 2PC, BERT-base (110M)           & ${\approx}1.4$\,s/inf$^\dagger$ & ${\approx}0.6$--$0.74$\,GB$^\dagger$ & ${\approx}0$ ($\approx$plain.) \\
-    CryptoMoE~\cite{cryptomoe}& 2PC, MoE (6.9--16.4B; 1.3--2.8B act.) & 22--46\,s/tok (e2e) & 2.8--4.8\,GB/tok & $-0.8\%$ (99.2\%) \\
-    Fission~\cite{fission}    & MPC+evaluators, ModernBERT (149M) & $<$5\,s/inf                  & $<$3\,GB                            & ${\approx}0$ ($\approx$plain.) \\
-    Euston~\cite{euston}      & FHE (non-int.), BERT-base (110M) & ${\approx}10.7$\,s/inf$^\dagger$ & ${\approx}37$\,MB$^\dagger$       & approx.$^\dagger$ \\
+    PermLLM~\cite{permllm}    & 2PC+dealer        & ChatGLM-6B              & 3\,s/tok; 20\,Mb/tok                            & exact (0) \\
+    SHAFT~\cite{shaft}        & 2PC               & BERT-base (110M)        & ${\approx}1.4$\,s/inf$^\dagger$; ${\approx}0.6$--$0.74$\,GB$^\dagger$ & ${\approx}0$ \\
+    CryptoMoE~\cite{cryptomoe}& 2PC (MoE)         & MoE 6.9--16.4B (1.3--2.8B act.) & 22--46\,s/tok; 2.8--4.8\,GB             & $-0.8\%$ \\
+    Fission~\cite{fission}    & MPC+evaluators    & ModernBERT (149M)       & $<$5\,s/inf; $<$3\,GB                          & ${\approx}0$ \\
+    Euston~\cite{euston}      & FHE (non-int.)    & BERT-base (110M)        & ${\approx}10.7$\,s/inf$^\dagger$; ${\approx}37$\,MB$^\dagger$ & approx.$^\dagger$ \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{TEE (Tier 3, baseline)} --- \cref{sec:tee}}\\
-    H100 CC~\cite{h100cc}     & GPU-TEE (H100 CC), Llama2 7--70B    & $1.04$--$1.08\times$            & PCIe-AES        & exact \\
-    PipeLLM~\cite{pipellm}    & GPU-TEE+CVM, OPT 13--175B           & ${\approx}1.2\times$ ($<$19.6\%) & PCIe (int.)    & exact \\
+    H100 CC~\cite{h100cc}     & GPU-TEE (H100 CC) & Llama2 7--70B           & $1.04$--$1.08\times$                            & exact \\
+    PipeLLM~\cite{pipellm}    & GPU-TEE+CVM       & OPT 13--175B            & ${\approx}1.2\times$ ($<$19.6\%)                & exact \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Static obfuscation} --- \cref{sec:obfuscation}}\\
-    AloePri~\cite{lin_aloepri}& covariant data+weight, Qwen/Llama $\le$671B & ${\approx}1\times$     & ---             & 0--3.5\% acc.\ loss \\
-    SGT~\cite{roberts_sgt}    & learned embed.\ transform, Llama-1B/Qwen3 & ${\approx}1\times$ ($\approx$0\,ms) & --- & $-0.4\%$ util \\
-    OSNIP~\cite{cao_osnip}    & semantic null-space, Llama-3.2/Qwen3 & ${\approx}1\times$ (0.96\,ms)  & ---             & near-lossless \\
-    Eguard~\cite{eguard}      & MI-loss projector, T5/MPNet/RoBERTa & ${\approx}1.7\times$           & ---             & ${>}98\%$ task acc \\
+    AloePri~\cite{lin_aloepri}& covariant data+weight & Qwen/Llama $\le$671B & ${\approx}1\times$                              & 0--3.5\% acc.\ loss \\
+    SGT~\cite{roberts_sgt}    & learned embed.\ transform & Llama-1B/Qwen3   & ${\approx}1\times$ ($\approx$0\,ms)             & $-0.4\%$ util \\
+    OSNIP~\cite{cao_osnip}    & semantic null-space & Llama-3.2/Qwen3       & ${\approx}1\times$ (0.96\,ms)                   & near-lossless \\
+    Eguard~\cite{eguard}      & MI-loss projector & T5/MPNet/RoBERTa        & ${\approx}1.7\times$                            & ${>}98\%$ task acc \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Differential privacy} --- \cref{sec:dp}}\\
-    DP-Forward~\cite{du_dpforward} & matrix-Gaussian fwd, BERT enc. & ${\approx}1\times$             & ---             & ${\approx}94\%$ SST2 \\
-    SPARSE~\cite{sparse_dp}   & metric-DP mask, GTR/SBERT enc.      & ${\approx}1\times$             & ---             & 65\% util @$\varepsilon{=}5$ \\
-    DP-KSA~\cite{tang_dprag}  & output-DP, Qwen2.5-3B/Llama         & ${\approx}N\times$ gen.\ calls & ---             & F1 $+3.5$ @$\varepsilon{=}8$ \\
+    DP-Forward~\cite{du_dpforward} & matrix-Gaussian fwd & BERT enc.         & ${\approx}1\times$                              & ${\approx}94\%$ SST2 \\
+    SPARSE~\cite{sparse_dp}   & metric-DP mask    & GTR/SBERT enc.          & ${\approx}1\times$                              & 65\% util @$\varepsilon{=}5$ \\
+    DP-KSA~\cite{tang_dprag}  & output-DP         & Qwen2.5-3B/Llama        & ${\approx}N\times$ gen.\ calls                  & F1 $+3.5$ @$\varepsilon{=}8$ \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Hybrid split (Tier 2)} --- \cref{sec:hybrid}}\\
-    GELO~\cite{belikov_gelo}  & GPU-TEE + per-batch mix, Llama-2-7B & $1.2$--$1.3\times$ (76\% offl.) & ---            & exact \\
-    TwinShield~\cite{xue_twinshield} & CPU-TEE + SS + U-Verify, BERT/ViT/LLaMA & $4$--$6\times$ vs TEE-only & ---      & exact \\
-    ObfuscaTune~\cite{frikha_obfuscatune} & ${\sim}5\%$ params in TEE, GPT-2 & $1.5$--$4.3\times$       & ---             & exact-ish \\
-    SCX~\cite{zeng_scx}       & GPU-TEE per-session OTK KV-cache, 7B & ${\approx}1\times$ (online)    & ---             & exact \\
-    Portcullis~\cite{portcullis} & TDX PII-anon gateway, LLaMA-2-7B & ${\approx}1.01\times$           & ---             & cosine $>$0.7 \\
+    GELO~\cite{belikov_gelo}  & GPU-TEE + per-batch mix & Llama-2-7B        & $1.2$--$1.3\times$ (76\% offl.)                 & exact \\
+    TwinShield~\cite{xue_twinshield} & CPU-TEE + SS + U-Verify & BERT/ViT/LLaMA & $4$--$6\times$ vs TEE-only                   & exact \\
+    ObfuscaTune~\cite{frikha_obfuscatune} & ${\sim}5\%$ params in TEE & GPT-2 & $1.5$--$4.3\times$                             & exact-ish \\
+    SCX~\cite{zeng_scx}       & per-session OTK KV-cache & 7B decoder       & ${\approx}1\times$ (online)                     & exact \\
+    Portcullis~\cite{portcullis} & TDX PII-anon gateway & LLaMA-2-7B        & ${\approx}1.01\times$                           & cosine $>$0.7 \\
     \bottomrule
   \end{tabular}
 
