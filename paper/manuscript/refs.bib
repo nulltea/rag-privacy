@@ -299,6 +299,43 @@
   year   = {2024}
 }
 
+@inproceedings{obfuslm,
+  author    = {Lin, Yu and Yang, Ruining and Mao, Yunlong and Zhang, Qizhi and Hong, Jue and Cai, Quanwei and Wu, Ye and Liu, Huiqi and Chen, Zhiyu and Duan, Bing and Zhong, Sheng},
+  title     = {{ObfusLM}: Privacy-preserving Language Model Service against Embedding Inversion Attacks},
+  booktitle = {Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (ACL)},
+  year      = {2025},
+  note      = {[verified-EdgeQuake] $(k,\epsilon)$-anonymity vocab+embedding+head permutation; protects both input and generated output; classification + generation. ByteDance and Nanjing Univ. ACL 2025 long paper (2025.acl-long.58)}
+}
+
+@misc{codecipher,
+  author    = {Lin, Yalan and Wan, Chengcheng and Fang, Yixiong and Gu, Xiaodong},
+  title     = {{CodeCipher}: Learning to Obfuscate Source Code against {LLMs}},
+  year      = {2024},
+  note      = {[verified-EdgeQuake] token-to-token confusion mapping on the embedding matrix, discrete-optimized; preserves code-task output on CodeLlama-7B. Domain-specific (code LLMs). arXiv:2410.05797}
+}
+
+@misc{buban_ee,
+  author    = {Buban, James and Zhang, Hongyang and Angione, Claudio and Yang, Harry and Farhan, Ahmad and Sultanov, Seyfal and Du, Michael and Ma, Xuran and Wang, Zihao and Zhao, Yue and Owlia, Arria and Johnston, Fielding and Colangelo, Patrick},
+  title     = {Encrypted Large Model Inference: The Equivariant Encryption Paradigm},
+  year      = {2025},
+  note      = {[verified-EdgeQuake] Equivariant Encryption (EE): layer-specific transforms preserving linear ops and a prescribed set of non-linear ops (ReLU/GeLU/SiLU/RMSNorm/LayerNorm); near-zero overhead, exact. No formal security proof (``large combinatorial space''); commercial (Nesa Research). arXiv:2502.01013}
+}
+
+@inproceedings{ioi,
+  author    = {Yao, Yixiang and Wang, Fei and Ravi, Srivatsan and Chen, Muhao},
+  title     = {Privacy-Preserving Language Model Inference with Instance Obfuscation},
+  booktitle = {Findings of the Association for Computational Linguistics: NAACL},
+  year      = {2024},
+  note      = {[verified-EdgeQuake] instance obfuscation via mixup with dummy obfuscators; protects decision/output privacy for black-box text classification; cost is $2mn$ inference calls per instance. USC and UC Davis}
+}
+
+@misc{centaur,
+  author    = {{Centaur authors}},
+  title     = {Centaur: Bridging the Impossible Trinity of Privacy, Efficiency, and Performance in Privacy-Preserving Transformer Inference},
+  year      = {2024},
+  note      = {static random permutation replaces SMPC non-linears; plaintext-speed. Broken by Hidden-No-More (multi-run reconstruction). Cautionary lineage. arXiv:2412.10652. TODO: verify authors, venue}
+}
+
 @misc{translinkguard,
   author = {{TransLinkGuard authors}},
   title  = {{TransLinkGuard}: Hardening Edge Deployment against Model Stealing via Static-Key Obfuscation},

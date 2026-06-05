@@ -198,6 +198,10 @@ PipeLLM/STIP from their preprints --- re-confirm at submission}
     SGT~\cite{roberts_sgt}    & learned embed.\ transform & Llama-1B/Qwen3   & ${\approx}1\times$ ($\approx$0\,ms)             & $-0.4\%$ util \\
     OSNIP~\cite{cao_osnip}    & semantic null-space & Llama-3.2/Qwen3       & ${\approx}1\times$ (0.96\,ms)                   & near-lossless \\
     Eguard~\cite{eguard}      & MI-loss projector & T5/MPNet/RoBERTa        & ${\approx}1.7\times$                            & ${>}98\%$ task acc \\
+    KV-Cloak~\cite{luo_shadowcache} & KV-cache per-block perm & LLaMA-3.1-8B    & ${\approx}1\times$ ($<$0.45\% prefill)          & lossless \\
+    ObfusLM~\cite{obfuslm}    & $(k,\varepsilon)$-anon embed+head & BERT/Llama3-8B & ${\approx}1\times$ (1.29\,s/inf)             & $-4\%$ clf / $-6\%$ gen \\
+    CodeCipher~\cite{codecipher} & token confusion map (code) & CodeLlama-7B   & ${\approx}1\times$ (offline opt.)               & $-3$\,pp Pass@1 \\
+    EE~\cite{buban_ee}        & equivariant layer transform & generic LLM/CNN & ${\approx}1\times$ (near-zero)                  & exact \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Differential privacy} --- \cref{sec:dp}}\\
     DP-Forward~\cite{du_dpforward} & matrix-Gaussian fwd & BERT enc.         & ${\approx}1\times$                              & ${\approx}94\%$ SST2 \\

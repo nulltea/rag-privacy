@@ -152,6 +152,11 @@ obfuscation and DP leave the model graph unmodified, they drop into an existing 
 stack (vLLM, llama.cpp) with no bespoke runtime, whereas MPC, FHE, and TEE each demand a dedicated
 serving path. The deployable choice is thus \emph{use-case dependent} (\cref{tab:performance})---a
 frontier across which different families win different stages, not a single endpoint.
+Obfuscation's place on that frontier is, however, conditional on a design discipline that
+the attack record makes explicit (\cref{sec:obfusc-attacks},~\cref{sec:hybrid}): the schemes
+that survive refresh their hiding randomness per query or per batch, while every broken
+scheme reuses a static permutation or key that a white-box adversary averages across queries
+to recover.
 
 \subsection{Graph-RAG as a Retrieval Setting}
 Graph-RAG systems such as LightRAG~\citep{guo_lightrag} index a corpus as a knowledge

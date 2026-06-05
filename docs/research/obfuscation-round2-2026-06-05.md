@@ -77,26 +77,6 @@ ZJU + Huawei) — already in EdgeQuake (`9ed851a6...`, completed, 38 chunks).
 - **Protecting Privacy in Classifiers by Token Manipulation** (Harel et al. 2024, 2407.01334) — token-mapping, minor/lineage.
 - **SecMoE** — OT-based private MoE (crypto, §3 lineage alongside CryptoMoE, not obfuscation).
 
-## Confirmation pass (2026-06-05, §7 write-up trigger) — 2 new items
-
-Re-ran OpenAlex (0 hits — MCP not indexing 2025/26 arXiv preprints), WebSearch,
-EdgeQuake full-text. The round above holds. Two additions:
-
-| Scheme/attack | Ref | Finding | Status |
-|---|---|---|---|
-| **CMIF** (Confidential & efficient Model Inference Framework) | 2509.09091 (2025) | **TEE + DP hybrid split**: client-side CPU-TEE runs the **embedding layer**; later layers on untrusted GPU; optimized **Report-Noisy-Max** protects inputs. LLaMA-series. Offload protection = **DP, not obfuscation** → §6 (DP) or §7-adjacent, NOT a TEE+obfusc member. | **Not in corpus**; new |
-| **Precomputed-Noise break** | Saini, Jiang, Liu 2026 (2602.11088) | Already in `survey-corpus` attack list — but note it **explicitly breaks SOTER** (and TSQP): reuse of a static secret basis → full confidentiality break + integrity bypass; recovers a LLaMA-3-8B layer in ~6 min. **SOTER is named in our §7 lineage** → cite here in §7 Limitations as "why static-basis splits fail," parallel to TEESlice. | known attack; new §7 cross-link |
-
-Confirmations (no change): **SecureInfer (2510.19979)** = SGX+GPU but threat model is
-**model-extraction / model-IP** (defends weights from device owner) → correctly **dropped**
-as on-device lineage. **Speculative-Decoding split leak (2602.16760, Cunningham)** already
-catalogued (negative result, MLP inversion 59% top-1).
-
-**Net for §7 (TEE + Obfuscation):** the comparison set is unchanged —
-GELO · TwinShield · ObfuscaTune · SCX · Portcullis. Lineage additions: **KV-Shield**
-(broken, KV-cache TEE-GPU), SOTER-via-2602.11088. **KV-Cloak → §5, not §7.**
-CMIF is TEE+DP (→ §6). FedRAG is federated-RAG (→ §7/§8 border).
-
 ## Recommended actions
 1. Patch primer "§5 Static Obfuscation — DEFERRED": KV-Cloak = §5 obfusc (TEE key-custody),
    not §7 TEE-anchored; unblock ObfusLM only on its own EdgeQuake upload.
