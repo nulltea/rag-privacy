@@ -10,46 +10,35 @@ that motivates the field (\citealp{morris2023vec2text} inversion;
 \citealp{kellaris2016leakage} access patterns; the Yu-Lin obfuscated-embedding
 inversion attack from the corpus)}
 
-\subsection{Why a New SoK}
-% The field has many point solutions (crypto/MPC/FHE, TEE, static obfuscation,
-% DP, hybrid split) but no systematization that unifies MECHANISM + THREAT MODEL
-% + PERFORMANCE. The closest prior work, Bodea et al. \cite{bodea_sok}, is
-% RISK-centric, scoped to NAIVE RAG, omits a performance axis, and treats
-% crypto/TEE inference only shallowly. We occupy the complementary ground.
-Privacy in confidential Transformer inference and RAG has drawn several recent surveys, but
-each occupies a narrower slice than the mechanism\,$\times$\,threat-model\,$\times$\,cost ground we
-systematize (\cref{tab:prior-soks}). The closest, Bodea et al.~\citep{bodea_sok}, is a
-\emph{risk}-centric SoK of RAG privacy---it catalogs attacks and mitigations over naive RAG, but
-carries no performance axis and explicitly excludes graph-RAG. A second cluster surveys
-\emph{cryptographic} private Transformer inference: Li et al.~\citep{li_pti_survey}---the most
-detailed, with a layer-wise MPC/HE taxonomy and a communication/runtime/accuracy table---an earlier
-MPC/FHE/hybrid survey~\citep{pti_survey_2024}, Luo et al.~\citep{luo_cplm_survey} (a
-cryptographic lifecycle view that also spans training), and Chen et al.~\citep{chen_sok_pti}, who
-add a reproducibility audit that re-benchmarks 61 crypto frameworks under standardized hardware. All
-of these are confined to MPC/FHE and to \emph{inference}, touching neither the TEE, obfuscation, and
-DP families nor the RAG retrieval/storage layer. FHE-specific SoKs~\citep{xue_fhe_sok,albadawi_ckks_sok}
-go deep on a single primitive, and broad lifecycle treatments~\citep{ma_semantic_sok} stay high-level
-on defenses without a cost axis. Closest in \emph{spirit}, Andreoletti et
-al.~\citep{andreoletti_ppi_practice} share our deployability lens, but theirs is a \emph{meta}-survey
-organized at the level of PET \emph{families} (a few representative systems per family with qualitative
-trade-off tables), not a per-scheme comparison; it is especially thin on information-theoretic and
-obfuscation methods (its ``information-reduction'' family reduces to client-side DP and span redaction,
-omitting the learned-transform/covariant-obfuscation lineage and its published inversions), and it
-covers neither RAG retrieval nor graph-RAG.
+\subsection{Scope and Positioning}
+% Merged Why-a-New-SoK + Scope (goal-first). Positioning compressed: the table carries
+% per-SoK detail; prose = one clause each + the sharp Andreoletti contrast.
+Our organizing goal is \emph{deployment readiness}: how likely a scheme is to be adopted in
+a real deployment, on three criteria---\textbf{performance} (overhead and latency),
+\textbf{fidelity} (impact on output quality), and \textbf{threat-model fit} (an adversary
+model \emph{appropriate} to the deployment, not maximal). The aim is not to crown a winning
+family but to make this trade explicit; which schemes sit near the deployable frontier is a
+\emph{finding} of the synthesis (\cref{sec:synthesis}), not an assumption. Threat-model fit
+is set by the taxonomy of \cref{sec:threat}; performance and fidelity are reported per family
+(\cref{sec:crypto}--\cref{sec:hybrid}) and drawn together in \cref{sec:synthesis}.
 
-We are \emph{complementary} to most of these and \emph{differ sharply} from the one that shares our
-lens. No prior survey places all five mechanism families on one threat-model and deployment-cost
-frame, and none covers private RAG retrieval, storage, or graph-RAG. For the fine-grained
-systematization of MPC/FHE inference protocols we \emph{refer the reader to} Li et
-al.~\citep{li_pti_survey} and Chen et al.~\citep{chen_sok_pti}, keeping only enough crypto-inference
-depth---a few frontier exemplars (\cref{sec:crypto})---to locate cryptography on our cross-family cost
-frontier. Against Andreoletti et al.~\citep{andreoletti_ppi_practice} the contrast is substantive, not
-just of scope: where they survey families and argue a single trust-minimising trajectory
-(TEE\,$\to$\,crypto-augmentation\,$\to$\,FHE), we score \emph{individual schemes} on a quantitative
-deployment-readiness frontier and reach a different conclusion (\cref{ssec:deployment})---one in which
-the hybrid split and obfuscation are present-day leaders rather than way-stations. Our distinctive
-contribution is thus the breadth across mechanisms, the per-scheme depth, the retrieval and graph-RAG
-dimension, and the quantitative deployment-readiness lens.
+No prior survey occupies this ground (\cref{tab:prior-soks}); each covers a slice. A
+risk-centric SoK catalogs attacks over naive RAG~\citep{bodea_sok}; a cluster of surveys
+treats \emph{cryptographic} private inference, confined to
+MPC/FHE~\citep{li_pti_survey,pti_survey_2024,luo_cplm_survey,chen_sok_pti}; others go deep on
+a single FHE primitive~\citep{xue_fhe_sok,albadawi_ckks_sok} or stay high-level across the
+lifecycle~\citep{ma_semantic_sok}. For MPC/FHE-inference protocol depth we \emph{refer the
+reader to} Li et al.~\citep{li_pti_survey} and Chen et al.~\citep{chen_sok_pti} (the latter
+adding a reproducibility re-benchmark), keeping only a few frontier exemplars
+(\cref{sec:crypto}). The one prior work sharing our deployability lens, Andreoletti et
+al.~\citep{andreoletti_ppi_practice}, differs substantively: it is a \emph{meta}-survey at the
+level of PET \emph{families} (qualitative trade-offs, thin on information-theoretic and
+obfuscation methods, no retrieval or graph-RAG), and where it argues one trust-minimising
+trajectory (TEE\,$\to$\,FHE) we score \emph{individual schemes} and reach a different
+conclusion---hybrid splits and obfuscation are present-day leaders, not way-stations
+(\cref{ssec:deployment}). Our contribution is thus breadth across all five families,
+per-scheme depth, the retrieval and graph-RAG dimension, and a quantitative
+deployment-readiness lens.
 
 \begin{table*}[t]
   \centering \footnotesize\setlength{\tabcolsep}{4pt}
@@ -76,29 +65,6 @@ dimension, and the quantitative deployment-readiness lens.
     \bottomrule
   \end{tabular}
 \end{table*}
-
-\subsection{Scope}
-% Transformer inference AND RAG, including graph-RAG (a setting Bodea excludes).
-% Five mechanism families. Semi-honest baseline (range to malicious documented in §2).
-%
-% ORGANIZING GOAL = DEPLOYMENT READINESS (decision of record 2026-06-02): assess the
-% whole field by likelihood of real-world adoption on 3 criteria -- (1) performance,
-% (2) fidelity (output quality), (3) threat-model FIT (appropriate, not maximal). We do
-% NOT champion one family; hybrid-split/obfuscation lead as a FINDING (good perf-to-threat
-% ratio), established in §8, not assumed here. Hardware-trust TIERS (Tier1 none / Tier2
-% CPU-TEE / Tier3 confidential accelerator) feed criteria 1+3; Tier3 = baseline, deferred
-% to accel_tee_sok. PRACTICAL-FRONTIER restriction = a consequence of the lens.
-Our organizing goal is \emph{deployment readiness}: we assess the field by how likely a
-scheme is to be adopted in a real deployment, on three criteria---\textbf{performance}
-(overhead and latency), \textbf{fidelity} (impact on output accuracy and quality), and
-\textbf{threat-model fit} (an adversary model \emph{appropriate} to the deployment, not
-maximal in a purely academic sense). The aim is not to crown a winning family but to
-make this trade explicit; which schemes sit near the deployable frontier is a
-\emph{finding} of the synthesis (\cref{sec:synthesis}), not an assumption. Of the
-three criteria, threat-model fit is determined by the categorical taxonomy of
-\cref{sec:threat}, while performance and fidelity are quantitative---reported with
-each family (\cref{sec:crypto}--\cref{sec:hybrid}) and drawn together in
-\cref{sec:synthesis}.
 
 Two structural choices follow. First, a \emph{hardware-trust} ladder, defined with the
 trust-anchor axis of our taxonomy (\cref{sec:threat}), feeds the performance and

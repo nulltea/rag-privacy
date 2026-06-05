@@ -34,102 +34,68 @@ point in this space.
 We classify each scheme along five axes.
 
 \paragraph{1. Adversary behavior.}
-\emph{Honest-but-curious} (HbC): the operator runs the protocol faithfully but
-mines every observable for private information. \emph{Malicious/active}: the
-operator may additionally deviate---drop, replay, reorder, or tamper with
-computation. The obfuscation and TEE-split schemes we study---AloePri
-\citep{lin_aloepri}, GELO \citep{belikov_gelo}, TwinShield
-\citep{xue_twinshield}, ObfuscaTune \citep{frikha_obfuscatune}---adopt the HbC
-model standard in cloud settings. Opal \citep{kaviani_opal} is the outlier: it
-defends a malicious host that may tamper with everything outside the enclave.
-Behavior decides whether confidentiality alone suffices or integrity machinery
-is also required.
+\emph{Honest-but-curious} (HbC): the operator runs the protocol faithfully but mines every
+observable for private information---the standard cloud model, adopted by most schemes here.
+\emph{Malicious/active}: the operator may additionally deviate (drop, replay, reorder, tamper),
+requiring integrity machinery on top of confidentiality. Behavior decides whether
+confidentiality alone suffices.
 
 \paragraph{2. Trust anchor (TCB).}
-What the scheme roots its guarantees in. We distinguish: \emph{none} (purely
-cryptographic or obfuscation-based---AloePri assumes no trusted hardware); a
-\emph{CPU-TEE} (Intel SGX/TDX, e.g.\ TwinShield's root of trust); a
-\emph{GPU-TEE} (a confidential H100/H200/B200-class accelerator, e.g.\ GELO's
-trusted device); and \emph{multi-party non-collusion} (the assumption
-underlying MPC schemes such as PermLLM \citep{permllm}). A larger TCB buys
-performance or simplicity at the price of a stronger trust assumption.
-
-These anchors collapse onto a three-level \emph{hardware-trust} ladder that we use to
+What the scheme roots its guarantees in: \emph{none} (purely cryptographic, statistical, or
+obfuscation-based); a \emph{CPU-TEE} (Intel SGX/TDX, AMD SEV-SNP); a \emph{GPU-TEE} (a
+confidential H100/H200/B200-class accelerator); or \emph{multi-party non-collusion} (the MPC
+assumption). A larger TCB buys performance or simplicity at the price of a stronger trust
+assumption. These anchors collapse onto a three-level \emph{hardware-trust} ladder we use to
 organize the systematization and its scope (\cref{sec:intro}):
 \begin{description}
   \item[Tier 1.] \emph{No trusted hardware}---confidentiality rests on cryptography or
-        statistics alone (MPC/FHE, static obfuscation, DP); trust anchor \emph{none}.
-        ``None'' is a statement about what must be \emph{trusted not to leak}---no trusted
-        third party or hardware---not about where the \emph{work} runs: several Tier-1
-        schemes are not thin-client. Client-side-PIR/ORAM retrieval (Pacmann, Compass) and
-        2PC inference where the user is a compute party (PermLLM) make the client
-        \emph{load-bearing}---it stores access state and runs the oblivious-access or
-        traversal loop, delegating only bulk storage to the server. We mark these
-        ``none; client-relied'' and report the resulting client burden, a first-order
-        deployment factor, in \cref{sec:synthesis}.
-  \item[Tier 2.] \emph{CPU-TEE only}---a commodity CPU enclave (Intel SGX/TDX, AMD
-        SEV-SNP) is trusted; any GPU used for acceleration is \emph{untrusted}.
-  \item[Tier 3.] \emph{Confidential accelerator}---a confidential GPU (NVIDIA H100/B200
-        CC) or other accelerator-TEE is trusted end-to-end.
+        statistics alone (MPC/FHE, static obfuscation, DP). ``None'' constrains what must be
+        \emph{trusted not to leak}, not where the \emph{work} runs: several Tier-1 schemes are
+        not thin-client---client-side PIR/ORAM retrieval, or 2PC where the user is a compute
+        party, make the client load-bearing, a deployment factor we revisit in
+        \cref{sec:synthesis}.
+  \item[Tier 2.] \emph{CPU-TEE only}---a commodity CPU enclave is trusted; any GPU is untrusted.
+  \item[Tier 3.] \emph{Confidential accelerator}---a confidential GPU or accelerator-TEE trusted
+        end-to-end.
 \end{description}
-The Tier-2$\to$Tier-3 jump is the sharpest trust escalation on this axis---trusting the
-accelerator silicon end-to-end---so a scheme's tier is the single most consequential
-entry in its row. The hybrid split's defining move (\cref{sec:hybrid}) is to deliver
-Tier-3-class GPU performance while remaining at Tier~2.
+The Tier-2$\to$Tier-3 jump---trusting the accelerator silicon end-to-end---is the sharpest
+escalation on this axis, so a scheme's tier is the single most consequential entry in its row;
+the hybrid split's defining move (\cref{sec:hybrid}) is to deliver Tier-3-class GPU performance
+at Tier~2.
 
 \paragraph{3. Attacker knowledge.}
-\emph{Black-box} (queries only), \emph{white-box on weights} (knows the public
-model---the realistic case for open-weight Transformer models), or \emph{white-box plus the
-obfuscation scheme} (knows the algorithm, ignorant only of an ephemeral
-per-session secret). We adopt Kerckhoffs's principle throughout: across the
-corpus the adversary knows the model and the method and is denied only the
-fresh secret---AloePri's token permutation, GELO's per-batch mixing matrix.
-This is the honest assumption for open-weight deployments, and precisely the
-regime in which static schemes are most stressed: STIP \citep{stip} and
-related static-permutation designs are secure only while the weights are
-private, and collapse once an attacker who knows the public weights $W$ can
-solve for the secret transform from the obfuscated $W'$ \citep{belikov_gelo}.
+\emph{Black-box} (queries only), \emph{white-box on weights} (knows the public model---the
+realistic case for open-weight Transformers), or \emph{white-box plus the obfuscation scheme}
+(knows the algorithm, ignorant only of an ephemeral per-session secret). We adopt Kerckhoffs's
+principle throughout: the adversary knows the model and method and is denied only the fresh
+secret. This is the honest assumption for open-weight deployments, and the regime in which
+static schemes are most stressed---a transform secure only while the weights are private
+collapses once an attacker who knows the public weights can solve for it (\cref{sec:obfuscation}).
 
 \paragraph{4. Confidentiality scope.}
-What the scheme keeps hidden, and what it concedes---two faces of one question.
-The protected \emph{asset} may be the input prompt; the input \emph{and} output
-(AloePri protects both); the model weights as well (ObfuscaTune and TwinShield
-additionally shield a proprietary model from the cloud); or the access pattern
-over a corpus (Opal and the RAG-storage schemes). Its dual is the \emph{residual
-leakage}---what the adversary still observes despite the scheme: obfuscated
-service I/O (AloePri), mixed activations in untrusted VRAM (GELO, ObfuscaTune,
-the TEE-split designs), bounded storage access patterns (RemoteRAG
-\citep{cheng2025remoterag}), or cosine-distance structure (Caprise's
-DCPE \citep{ye_caprise}). The access-pattern-hiding schemes (Opal, Pacmann,
-Compass) sit on the protection side of this dual, not the leakage side: ORAM and
-PIR are precisely what reduce their residual leak to an operation type or
-nothing at all. Microarchitectural, cache, timing, and power
-side channels are a residual-leakage category that \emph{every} surveyed scheme
-places out of scope---a uniformity we elevate to a finding
-(\cref{ssec:sidechannel}) rather than carry as a per-scheme cell. Two schemes
-that agree on every other axis can diverge sharply here, and as the validation case study
-(\cref{app:validation}) shows, it is the residual leakage---not the stated
-protection goal---that an attack ultimately exploits.
+What the scheme keeps hidden and what it concedes---two faces of one question. The protected
+\emph{asset} may be the input, the input \emph{and} output, the model weights, or the access
+pattern over a corpus. Its dual is the \emph{residual leakage}---what the adversary still
+observes despite the scheme (obfuscated I/O, mixed activations in untrusted VRAM, bounded
+access patterns, or distance structure). Microarchitectural, cache, timing, and power side
+channels are a residual category \emph{every} surveyed scheme places out of scope---a
+uniformity we elevate to a finding (\cref{ssec:sidechannel}) rather than carry as a per-scheme
+cell. Two schemes agreeing on every other axis can diverge sharply here, and as the case study
+(\cref{app:validation}) shows, it is the residual leakage---not the stated protection
+goal---that an attack ultimately exploits.
 
 \paragraph{5. Security basis.}
-What the confidentiality guarantee \emph{rests on}---the form of the argument and
-the assumption behind it---independent of \emph{which} entity is trusted
-(axis~2). We distinguish: \emph{cryptographic} (provable under a
-computational-hardness assumption, as in FHE and MPC under LWE/OT);
-\emph{information-theoretic} (no computational assumption, as in one-time
-masking); \emph{differential privacy} (a formal $(\varepsilon,\delta)$ or metric
-bound); \emph{hardware-enforced} (security reduces to TEE isolation and
-attestation correctness); and \emph{heuristic} (no formal guarantee---resistance
-is shown experimentally, as in most static obfuscation). This axis separates
-schemes the others cannot: an FHE scheme and a static-obfuscation scheme can
-share an identical row on axes~1--4---trust anchor \emph{none},
-honest-but-curious, white-box, protecting the input---yet the former offers
-cryptographic indistinguishability while the latter offers only an empirically
-measured resistance that the case study (\cref{app:validation}) shows can be far
-weaker than its authors report. Security basis is thus the sharpest predictor of
-whether a confidentiality claim survives scrutiny, and it is the axis the
-deployment-readiness criterion of \emph{threat-model fit} (\cref{sec:intro})
-reads most heavily.
+What the guarantee \emph{rests on}, independent of \emph{which} entity is trusted (axis~2):
+\emph{cryptographic} (provable under a hardness assumption, as in FHE/MPC under LWE/OT);
+\emph{information-theoretic} (no computational assumption, as in one-time masking);
+\emph{differential privacy} (a formal $(\varepsilon,\delta)$ or metric bound);
+\emph{hardware-enforced} (reduces to TEE isolation and attestation); and \emph{heuristic}
+(resistance shown only experimentally, as in most static obfuscation). This axis separates
+schemes the others cannot: an FHE scheme and a static-obfuscation scheme can share an identical
+row on axes~1--4 yet differ as cryptographic indistinguishability versus an empirically
+measured resistance the case study (\cref{app:validation}) shows can be far weaker than
+reported. Security basis is thus the sharpest predictor of whether a confidentiality claim
+survives scrutiny, and the axis that \emph{threat-model fit} (\cref{sec:intro}) reads most heavily.
 
 \subsubsection{The Landscape}
 \label{sec:threat-landscape}
@@ -199,41 +165,26 @@ PipeLLM/STIP from their preprints --- re-confirm at submission}
 \subsubsection{The Attacker's Capability Budget}
 \label{sec:threat-budget}
 
-The five axes say what an adversary \emph{is}; they do not say how \emph{much}
-it can spend. Yet the capability budget---compute, and especially the
-observation horizon (a single inference vs.\ many adaptive runs)---is decisive,
-because the surveyed schemes claim security against markedly different budgets.
-AloePri is explicit that it ``aims to provide adjustable security for
-constrained attackers in real-world scenarios, rather than offering ideal-world
-security guarantees against worst-case attackers'' \citep{lin_aloepri}; its
-protection rests on per-inference noise calibrated to a Rényi-metric DP budget.
-GELO's guarantee is narrower still: per-batch non-identifiability under a fresh,
-never-reused mixing matrix, so the attacker faces a \emph{single-batch} blind
-source separation problem and---by GELO's own analysis---gains nothing across
-batches \citep{belikov_gelo}. A worst-case adversary with unbounded compute and
-unlimited adaptive observation defeats every \emph{static}-obfuscation scheme here
-outright; a per-batch design like GELO still concedes nothing \emph{across} batches,
-leaving only a single-batch blind-source-separation problem (hard, but not
-information-theoretically precluded---and SGT's stronger information-theoretic claim is
-itself contested, \cref{sec:obfuscation}). An evaluation that assumed such an adversary
-would therefore measure nothing interesting and would strawman schemes that never
-claimed that bar.
+The five axes say what an adversary \emph{is}, not how \emph{much} it can spend---yet the
+capability budget (compute, and especially the observation horizon: a single inference vs.\
+many adaptive runs) is decisive, because the surveyed schemes target markedly different
+budgets. AloePri is explicit that it ``aims to provide adjustable security for constrained
+attackers $\ldots$ rather than $\ldots$ worst-case attackers'' \citep{lin_aloepri}; GELO's
+guarantee is per-batch non-identifiability under a fresh mixing matrix, conceding nothing
+\emph{across} batches but leaving a single-batch blind-source-separation problem
+\citep{belikov_gelo}. A worst-case adversary with unbounded compute and unlimited adaptive
+observation defeats every static-obfuscation scheme here; an evaluation assuming one would
+measure nothing interesting and strawman schemes that never claimed that bar. This is why
+\emph{threat-model fit}---not maximality---is a deployment-readiness criterion: a scheme
+defending an adversary stronger than its deployment faces overpays in performance, one
+defending a weaker adversary fails to protect, and the deployable point is the calibrated one,
+on which we score families in \cref{sec:synthesis}.
 
-This is why \emph{threat-model fit}---not threat-model maximality---is one of the three
-deployment-readiness criteria. A scheme that defends an adversary
-stronger than a deployment faces (an unbounded, fully-adaptive attacker, or
-microarchitectural side-channels most operators accept or mitigate out-of-band) pays for
-that protection in performance and may price itself out of use; a scheme that defends
-too weak an adversary fails to protect. The deployable point is the one whose adversary
-is \emph{calibrated} to the deployment---an argument that right-sizes security rather
-than relaxing it, and that we apply when scoring families in \cref{sec:synthesis}.
-
-We treat the budget as an explicit, per-scheme parameter rather than a hidden
-constant. Crucially, the ``what breaks'' case study of \cref{app:validation} attacks each
-scheme \emph{strictly within its own constrained-attacker regime}: the attacker is white-box
-on weights and method, is denied the per-session secret, and operates under the same compute
-and observation horizon the scheme's own evaluation permits. A break under those conditions is
-a break by the victim's own standard, not an artefact of an inflated adversary.
+We therefore treat the budget as an explicit per-scheme parameter. The ``what breaks'' case
+study (\cref{app:validation}) accordingly attacks each scheme \emph{within its own
+constrained-attacker regime}---white-box on weights and method, denied the per-session secret,
+under the compute and observation horizon the scheme's own evaluation permits---so a break
+there is a break by the victim's own standard, not an artefact of an inflated adversary.
 
 \subsection{Cost: Performance and Fidelity}
 \label{sec:comparison}
@@ -245,64 +196,44 @@ sizes, datasets, and metrics, so a raw side-by-side can mislead. We fix here a c
 \emph{reference metrics} for both, and state how we group schemes when we compare them.
 
 \paragraph{Normalizing performance.}
-Wherever a paper reports its own plaintext baseline, we express cost as an
-\emph{overhead multiplier} ($\times$ vs.\ plaintext on the same hardware and model),
-which cancels the hardware and model to first order and is the most portable figure
-across papers. Where only absolute numbers exist, we compare only \emph{within a
-regime}---a (model-size class $\times$ hardware class) bucket (e.g.\ BERT-base encoder
-on a single GPU; a 7B decoder over WAN; ANN at a fixed corpus size)---never across
-regimes. Every cross-scheme figure here is \emph{indicative} by default: each is drawn from its own
-paper's testbed---different hardware, model, and dataset---so it conveys an order of magnitude,
-not a precise ratio. The one exception is a figure we mark \emph{co-measured}: two or more
-schemes benchmarked \emph{together, in one paper on one testbed}, where a direct comparison is
-sound. We flag co-measured figures explicitly; every unflagged figure is indicative.
-Even \emph{within} a regime, three further conditions must match before a comparison is fair,
-and we hold them fixed or flag a mismatch: the \emph{number of computing parties} (a 2PC, 3PC,
-or dealer-aided protocol carries different cost structure), the \emph{numerical regime}
-(quantized vs.\ full-precision schemes are not directly comparable), and the \emph{network
-setting}---Chen et al.~\citep{chen_sok_pti} re-benchmark crypto-inference systems and find that
-several tuned for one bandwidth/latency profile do not reach their reported performance under a
-different one, so a WAN figure and a LAN figure are not interchangeable inside the same
-model-and-hardware bucket.
+Wherever a paper gives a plaintext baseline we express cost as an \emph{overhead multiplier}
+($\times$ vs.\ plaintext on the same hardware and model); otherwise we compare only \emph{within
+a regime}---a (model-size $\times$ hardware) bucket (e.g.\ BERT-base on one GPU; a 7B decoder
+over WAN)---never across regimes. Cross-scheme figures are \emph{indicative} by default (each
+from its own testbed: an order of magnitude, not a precise ratio); only figures we flag
+\emph{co-measured} (benchmarked together in one paper) support direct comparison. Even within a
+regime, a comparison is fair only when the number of parties, the numerical precision, and the
+network setting match---Chen et al.~\citep{chen_sok_pti} find WAN-tuned schemes miss their
+reported numbers under other network profiles, so LAN and WAN figures are not interchangeable.
 
 \paragraph{One-hop relative normalization.}
-Cryptographic-inference schemes overwhelmingly report cost \emph{relative to a prior secure
-scheme}, not to plaintext. Where a scheme $A$ reports a $k\times$ factor against a baseline
-$B$, and $B$ reports an absolute figure in the \emph{same} regime, we recover $A$'s absolute
-cost as ${\approx}\,\mathrm{cost}(B)/k$ and flag it \emph{extrapolated} (1-hop via $B$); we
-never chain beyond one hop, nor extrapolate across regimes. Because these baseline chains
-terminate at other \emph{secure} schemes rather than plaintext, a vs-plaintext multiplier for
-cryptographic inference is reported only as an order-of-magnitude estimate against a stated
-plaintext reference for the same regime, and flagged as such.
+Cryptographic-inference papers report cost \emph{relative to a prior secure scheme}, not
+plaintext. Where a scheme $A$ reports a $k\times$ factor over a baseline $B$ that gives an
+absolute figure in the \emph{same} regime, we recover $A$'s absolute cost as
+${\approx}\,\mathrm{cost}(B)/k$ and flag it \emph{extrapolated} (1-hop); we never chain further
+or extrapolate across regimes. Since these chains terminate at secure schemes rather than
+plaintext, a vs-plaintext multiplier for crypto inference is only an order-of-magnitude
+estimate, flagged as such.
 
 \paragraph{Normalizing fidelity.}
-Fidelity is the impact on output quality relative to the \emph{plaintext} model. Schemes
-that compute the true function---cryptography, TEE, and invertible-mask hybrid
-splits---are \emph{exact} (zero quality loss) and we mark them so. Approximate schemes
-(obfuscation, DP, polynomial-approximation MPC) are reported as a \emph{delta} against
-the plaintext baseline in the quality metric appropriate to the use case
-(\cref{tab:yardstick}), so a recall drop in retrieval and an accuracy drop in generation
-are never conflated.
+Schemes that compute the true function (cryptography, TEE, invertible-mask hybrid splits) are
+\emph{exact}; approximate schemes (obfuscation, DP, polynomial-approximation MPC) are reported
+as a \emph{delta} against the plaintext baseline in the use-case-appropriate metric
+(\cref{tab:yardstick}), so a retrieval recall drop and a generation accuracy drop are never
+conflated.
 
 \paragraph{Grouping: by use case, not by family.}
-We \emph{systematize} the field by mechanism family (\cref{sec:crypto}--\cref{sec:hybrid})
-because that is how the design space is structured. But we \emph{compare} performance and
-fidelity \textbf{by use case}, because that is how a deployment decision is actually
-made: an operator who needs private \emph{generation} weighs every mechanism that serves
-generation---MPC, TEE, obfuscation, hybrid split---against one another, not the FHE
-family against the obfuscation family in the abstract. Grouping by use case puts the real
-alternatives side by side. We use four deployment use cases, aligned with the pipeline
-stages of the gap-map (\cref{sec:synthesis}): \emph{generation} (decoder inference),
-\emph{embedding} (encoder inference), and \emph{retrieval}, which we split by index
-structure into \emph{vector retrieval} (flat/IVF nearest-neighbour search and vector
-storage) and \emph{graph retrieval} (graph-based ANN and graph-semantic search/storage),
-since the two impose different costs and threat surfaces. Each scheme is grouped by the
-model class it actually evaluates---an encoder-only scheme is an embedding scheme, a
-decoder scheme a generation one. \emph{Reranking} (cross-encoder scoring) is a pipeline
-stage we track in the gap-map, but no surveyed scheme reports a standalone
-private-reranking measurement, so we treat it as an open gap (\cref{sec:synthesis}) rather
-than a cost bucket. \cref{tab:yardstick} fixes the canonical performance metric, fidelity
-metric, and plaintext baseline for each.
+We \emph{systematize} by mechanism family (\cref{sec:crypto}--\cref{sec:hybrid}) but
+\emph{compare} performance and fidelity \textbf{by use case}, since a deployment decision weighs
+every mechanism that serves a stage against the others (private generation pits MPC, TEE,
+obfuscation, and hybrid split against each other, not FHE against obfuscation in the abstract).
+We use four use cases aligned with the gap-map stages (\cref{sec:synthesis}): \emph{generation}
+(decoder) and \emph{embedding} (encoder) inference, and retrieval split by index structure into
+\emph{vector} (flat/IVF ANN and vector storage) and \emph{graph} (graph-based ANN and
+graph-semantic search), which impose different costs and threat surfaces; each scheme is grouped
+by the model class it evaluates. \emph{Reranking} has no standalone private measurement in the
+corpus, so it stays an open gap (\cref{sec:synthesis}), not a cost bucket. \cref{tab:yardstick}
+fixes the canonical metric and plaintext baseline for each.
 
 \begin{table}[t]
   \centering \footnotesize
