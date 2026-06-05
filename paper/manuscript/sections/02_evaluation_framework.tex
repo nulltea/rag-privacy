@@ -257,11 +257,11 @@ communication at a fixed corpus size for retrieval; and fidelity as the task-acc
     Scheme & Technique & Model & Latency / overhead & Fidelity ($\Delta$acc) \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Cryptographic (MPC/FHE)} --- \cref{sec:crypto}}\\
+    SHAFT~\cite{shaft}        & 2PC               & BERT-base (110M)        & ${\approx}1.4$\,s/inf$^\dagger$; ${\approx}0.6$\,GB/inf$^\dagger$ & ${\approx}0$ \\
+    Fission~\cite{fission}    & MPC+evaluators    & ModernBERT (149M)       & $<$5\,s/inf; $<$3\,GB/inf                          & ${\approx}0$ \\
+    Euston~\cite{euston}      & FHE (non-int.)    & BERT-base (110M)        & ${\approx}10.7$\,s/inf$^\dagger$; ${\approx}37$\,MB/inf$^\dagger$ & approx.$^\dagger$ \\
     PermLLM~\cite{permllm}    & 2PC+dealer        & ChatGLM-6B              & 3\,s/tok; 20\,Mb/tok                            & exact (0) \\
-    SHAFT~\cite{shaft}        & 2PC               & BERT-base (110M)        & ${\approx}1.4$\,s/inf$^\dagger$; ${\approx}0.6$--$0.74$\,GB$^\dagger$ & ${\approx}0$ \\
-    CryptoMoE~\cite{cryptomoe}& 2PC (MoE)         & MoE 6.9--16.4B (1.3--2.8B act.) & 22--46\,s/tok; 2.8--4.8\,GB             & $-0.8\%$ \\
-    Fission~\cite{fission}    & MPC+evaluators    & ModernBERT (149M)       & $<$5\,s/inf; $<$3\,GB                          & ${\approx}0$ \\
-    Euston~\cite{euston}      & FHE (non-int.)    & BERT-base (110M)        & ${\approx}10.7$\,s/inf$^\dagger$; ${\approx}37$\,MB$^\dagger$ & approx.$^\dagger$ \\
+    CryptoMoE~\cite{cryptomoe}& 2PC (MoE)         & OLMoE-7B-A1B & 22\,s/tok; 2.8\,GB/tok             & $-0.8\%$ \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{TEE (Tier 3, baseline)} --- \cref{sec:tee}}\\
     H100 CC~\cite{h100cc}     & GPU-TEE (H100 CC) & Llama2 7--70B           & $1.04$--$1.08\times$                            & exact \\
