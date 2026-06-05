@@ -3,14 +3,7 @@
 
 % --- scope-framing (short role-framing) ---
 Static obfuscation transforms the data and/or weights so the server sees only
-values it cannot interpret, with no---or minimal---trusted hardware. The family is
-sometimes split into \emph{data-only} obfuscation (perturb the input, leave the model
-untouched) and \emph{covariant} obfuscation (jointly transform data and weights), but the
-only genuinely data-only variant is token substitution (e.g.\ SANTEXT/RANTEXT), which is
-text-level sanitization we treat as out of scope; every representation-level scheme we
-survey transforms the weights as well. We therefore organize this section by
-\emph{mechanism} rather than by that axis.
-Obfuscation is the cheapest family in our taxonomy (near-plaintext cost, no trusted
+values it cannot interpret, with no---or minimal---trusted hardware. Obfuscation is the cheapest family in our taxonomy (near-plaintext cost, no trusted
 hardware---Tier~1), which is precisely why its privacy claims deserve the most scrutiny:
 the obfuscation is \emph{fixed}, so a white-box adversary can analyze it in advance. We make
 that scrutiny concrete in \cref{app:validation}, and the published inversions in
@@ -19,7 +12,11 @@ their authors report. On the deployment-readiness criteria, obfuscation leads on
 and fidelity, but \emph{threat-model fit} is its weak axis. A second deployment advantage is
 infrastructural: because the model runs unmodified, static obfuscation slots into production
 inference stacks (vLLM, llama.cpp) directly---unlike crypto or TEE schemes, which require a
-bespoke serving path.
+bespoke serving path. The Tier-1 label is nonetheless qualified for the schemes that
+obfuscate the \emph{weights}: someone trusted must generate and hold the secret, and sharing
+the resulting obfuscated model across tenants likely forces that step into a TEE---whereas
+the input-transform schemes keep a stock, shareable model and a client-side secret. We return
+to this split in \cref{ssec:deployment}.
 
 \subsection{Approaches}
 Every scheme in this family makes the same design choice: a client-side transform of the
@@ -31,13 +28,19 @@ white-box operator, and the observation surface is the obfuscated input/output (
 KV-cache schemes, the externalized cache). The schemes differ in \emph{what} they transform
 and \emph{how} the hiding randomness is structured.
 
-\textbf{AloePri}~\citep{lin_aloepri} applies a secret token-level permutation to the
-embedding and output head and absorbs it into the remaining weights via invertible matrices
-plus Gaussian noise, so the server computes blindly on a stock-shaped graph. Its hiding
-strength is set by a keymat half-expansion $h$ that widens the residual stream to
-$d_{\text{obs}}{=}d{+}2h$: larger $h$ buys more heuristic hiding but raises the transform's
-condition number (compounding through depth) and the compute width, the three-way knob that
-makes its trade-off concrete. \textbf{SGT}~\citep{roberts_sgt} (Stained Glass) applies an
+\textbf{ObfusLM}~\citep{obfuslm} permutes and re-synthesizes the vocabulary, embedding, and
+head under a \emph{provable} $(k,\varepsilon)$-anonymity guarantee (cluster size $k$, DP
+budget $\varepsilon$)---a formal footing rare in this otherwise heuristic family---and,
+because the vocabulary itself is permuted, protects the \emph{generated output} as well as
+the input, at the cost of fine-tuning the model on the obfuscated embeddings before serving.
+\textbf{AloePri}~\citep{lin_aloepri}, its covariant successor, carries the secret token
+permutation beyond the embedding and head into the \emph{remaining} weights via invertible
+matrices plus Gaussian noise, so the server computes blindly on a stock-shaped graph with no
+fine-tuning; the client likewise decodes the permuted response, so it too protects the output. Its hiding strength is set by a keymat half-expansion $h$ that
+widens the residual stream to $d_{\text{obs}}{=}d{+}2h$: larger $h$ buys more heuristic
+hiding but raises the transform's condition number (compounding through depth) and the
+compute width, the three-way knob that makes its trade-off concrete.
+\textbf{SGT}~\citep{roberts_sgt} (Stained Glass) applies an
 offline-trained, input-conditioned affine/Gaussian transform to the embedding sequence,
 optimized under a mutual-information loss; the model runs unmodified on the transformed
 embeddings. \textbf{OSNIP}~\citep{cao_osnip} projects the input embedding onto an obfuscated
@@ -50,23 +53,16 @@ $K'{=}S\,\hat{P}\,(K{+}A)\,M$---persistent invertible $S,M$ fused offline into t
 weights, a one-time permutation $\hat{P}$ refreshed \emph{per PagedAttention block}, and an
 additive beacon mask $A$ enabling stateless permutation recovery---with the secret matrices
 held in a TEE for key custody only (no compute is offloaded to the enclave); it adds
-$<$0.45\% to prefill and is lossless. \textbf{ObfusLM}~\citep{obfuslm} permutes and
-re-synthesizes the vocabulary, embedding, and head under a $(k,\varepsilon)$-anonymity
-guarantee (cluster size $k$, DP budget $\varepsilon$)---the only surveyed scheme that
-protects the \emph{generated output} as well as the input---at the cost of fine-tuning the
-model on the obfuscated embeddings before serving.
+$<$0.45\% to prefill and is lossless.
 
 Output- and domain-specific variants extend the family. Equivariant Encryption
-(EE)~\citep{buban_ee} swaps each layer's operators for transformed equivalents that preserve
+(\textbf{EE})~\citep{buban_ee} swaps each layer's operators for transformed equivalents that preserve
 the linear maps and a fixed set of non-linearities at near-zero overhead, but offers no
 formal security argument beyond the size of its key space---a commercial proposal we include
-with that caveat. CodeCipher~\citep{codecipher} learns a token-to-token confusion map
-specialized to source-code LLMs. IOI~\citep{ioi} obfuscates the \emph{decision} of a
-black-box classifier by mixing each instance with dummies, at an $O(mn)$ inference-call
-multiplier and confined to classification. These inference schemes are collected in the
-shared performance table (\cref{tab:inf-perf}); ARoG~\citep{ning_arog}, a KGQA
-entity$\to$machine-ID anonymization, is a graph-RAG defense catalogued with the retrieval
-schemes (\cref{tab:crypto-graph}).
+with that caveat. \textbf{CodeCipher}~\citep{codecipher} targets the source-code domain: a
+token-to-token confusion map (learned on the embedding matrix) that disguises code sent to a
+cloud coding assistant while preserving the model's task output (completion, summarization,
+translation).
 
 \subsection{Performance and Accuracy}
 \label{sec:obfusc-perf}
@@ -81,11 +77,15 @@ and AloePri are near-zero, the learned transforms add milliseconds at the client
 Eguard pays a visible ${\approx}1.7\times$ by running its projection at inference. The
 deployment-relevant cost is therefore \emph{offline}, and it splits the family in two. The
 covariant matrix schemes (AloePri, KV-Cloak) and EE need only a one-time weight transform,
-computed in minutes with no training; the learned transforms pay a real training bill---SGT
-trains a transform network (hours to days), OSNIP and Eguard train an encryptor/projection
-network ($1.6$--$3.4\times$ the base training), and ObfusLM additionally fine-tunes the model
-on the obfuscated embeddings (server-side hours) before it can serve, tying the obfuscation
-to one checkpoint. The headline ``${\approx}0$ inference overhead'' thus conceals a setup
+computed in minutes with no training; the learned transforms pay a real training bill---each
+trains a small add-on network on top of the frozen pretrained model, not the model itself.
+SGT trains an input-conditioned transform (hours to days), OSNIP trains a client-side
+encryptor, and Eguard inserts a $24$-layer encoder between the embedding and the secured
+space---making each training step $1.6$--$3.4\times$ slower than the same step without the
+defense, the extra cost being that encoder's forward/backward pass and its
+mutual-information objective. ObfusLM is the heaviest: it additionally fine-tunes the model
+itself on the obfuscated embeddings (server-side hours) before it can serve, tying the
+obfuscation to one checkpoint. The headline ``${\approx}0$ inference overhead'' thus conceals a setup
 cost for half the family. Set against this, the infrastructural advantage is genuine: because
 the served model is a stock checkpoint, AloePri and KV-Cloak drop into vLLM/SGLang and inherit
 KV-cache and paged-attention optimizations that crypto and TEE serving paths cannot.
@@ -135,8 +135,6 @@ ObfusLM & cluster $k$, budget $\varepsilon$ & $-4\%$ clf / $-6\%$ gen; $\downarr
 EE & key-space size & exact (decoupled) & near-zero (security unverified) \\
 \addlinespace[4pt]
 CodeCipher & PPL/obfuscation threshold & $-3$\,pp Pass@1 & ${\approx}0$ online; offline opt. \\
-\addlinespace[4pt]
-IOI & group size $n$, classes $|C|$ & decision-resolution noise & $2mn\times$ inference calls \\
 \bottomrule
 \end{tabularx}
 \end{table*}

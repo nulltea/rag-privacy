@@ -2,7 +2,7 @@
 
 Source: `pdfannots` extraction of the annotated `main.pdf` (8 annotations; markdown bucket
 showed 6, 2 free-floating Text notes recovered from JSON). All comments target §5 Static
-Obfuscation (the round just written). **8 of 8 resolved** (7 ✅ · 1 ℹ️; 1 answered without a manuscript edit). Committed in `<pending>`.
+Obfuscation (the round just written). **8 of 8 resolved** (7 ✅ · 1 ℹ️; 1 answered without a manuscript edit). Committed in `9cfdedf`.
 
 Legend: ✅ done · ℹ️ answered, no change · ⏸ deferred (reason + where tracked) · ❌ won't-fix (reason) · ⬜ pending (transient).
 

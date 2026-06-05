@@ -139,6 +139,27 @@ on server trust can be the most demanding to actually field. A full per-scheme
 classification (thin/stateful/thick) across all families is the natural next step;
 \cref{tab:deployment} fills it for cryptography and flags the rest (\tq).
 
+\paragraph{Finding: obfuscation's hidden trusted base.}
+The same asymmetry refines the ``Tier~1, no trusted hardware'' label on static obfuscation
+(\cref{sec:obfuscation}), and it splits the family by \emph{what} carries the secret. The
+\emph{weight-obfuscation} schemes---AloePri, ObfusLM, and KV-Cloak---bake the secret transform
+into the model weights, so the obfuscated model running on the cloud is itself the
+secret-bearing artifact. Whoever performs that one-time obfuscation is a trusted computing
+base: the key is the entire secret, so a single leak makes every subsequent query recoverable
+by the white-box server, and because the obfuscated weights are bound to one client the cloud
+can no longer share a model across tenants. Either the client absorbs the setup (ObfusLM's
+fine-tune) and the cloud forfeits the multi-tenant economics that make inference affordable,
+or the obfuscation is moved into a \emph{TEE} on the serving side---exactly KV-Cloak's
+``secret matrices in a TEE for key custody'' arrangement---at which point the headline
+advantage of needing no trusted hardware is gone: multi-tenant weight obfuscation is, in
+deployment, a Tier-2 scheme. The \emph{input-transform} schemes---SGT, OSNIP, Eguard---escape
+this: they leave the model a stock, shareable checkpoint and apply a client-held transform to
+the embeddings, so the secret never reaches the cloud and multi-tenancy survives; their cost
+reappears instead as a thicker client (above), and, except for Eguard---which argues for
+robustness even when its mechanism is known---the transform must still be kept from the cloud.
+As with client reliance, the cost has not vanished, only moved---here from the latency budget
+to the trust budget.
+
 \paragraph{Cross-comparison: a frontier, not a trajectory.}
 Andreoletti et al.~\citep{andreoletti_ppi_practice} survey an overlapping set of families through
 the same deployability lens and conclude with a single trust-minimising \emph{trajectory}---TEE as
