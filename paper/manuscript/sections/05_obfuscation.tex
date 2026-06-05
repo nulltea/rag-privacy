@@ -27,23 +27,13 @@ which require a bespoke serving path.
 \needswork{describe the obfuscation family and the privacy-vs-accuracy tension}
 
 \subsection{Representative Schemes}
-\begin{table}[H]
-  \centering \footnotesize
-  \caption{Static-obfuscation schemes.}
-  \label{tab:obfusc}
-  \begin{tabular}{@{}lll@{}}
-    \toprule
-    Scheme & Technique & Reported privacy/accuracy \\
-    \midrule
-    AloePri~\cite{lin_aloepri}                & covariant (data+weight)         & 0--3.5\% acc.\ loss; $<$5--15\% TTRSR (claimed) \\
-    Collab.\ Obfusc~\cite{lin_collaborative_obfusc} & dynamic covariance masks  & near-plaintext \\
-    SGT~\cite{roberts_sgt}                    & learned input-conditioned transform & $\sim$0\,ms; $-$0.4\% util \\
-    OSNIP~\cite{cao_osnip}                    & obfuscated semantic null space  & 0.96\,ms; KNN attack 0.000 \\
-    Eguard~\cite{eguard}                      & MI-loss projector vs Vec2Text   & $\sim$0; F1 94$\to$5 \\
-    ARoG~\cite{ning_arog}                     & KGQA entity$\to$machine-ID anon & no crypto cost \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+The static-obfuscation \emph{inference} schemes---AloePri (covariant data+weight), SGT
+(learned input-conditioned transform), OSNIP (obfuscated semantic null space), and Eguard
+(MI-loss projector vs.\ Vec2Text)---are reported in the shared inference table
+(\cref{tab:inf-perf}); all run at near-plaintext cost, and their (contested) privacy claims are
+examined below and in \cref{app:validation}. ARoG~\cite{ning_arog}, a KGQA entity$\to$machine-ID
+anonymization, is a graph-RAG defense catalogued with the retrieval schemes
+(\cref{tab:crypto-graph}).
 \needswork{note the cautionary lineage --- static-permutation/static-key schemes
 (STIP~\citep{stip}, TransLinkGuard~\citep{translinkguard}) collapse once public
 weights let an attacker solve for the secret transform; cited in prose, excluded

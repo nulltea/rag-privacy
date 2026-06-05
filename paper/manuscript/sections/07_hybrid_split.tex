@@ -33,31 +33,13 @@ a \emph{naive}, un-obfuscated split leaks under public weights.
 untrusted accelerator over obfuscated activations)}
 
 \subsection{Representative Schemes}
-\begin{table}[H]
-  \centering \scriptsize
-  \caption{Hybrid split (TEE + obfuscation) schemes.}
-  \label{tab:hybrid}
-  \begin{tabular}{@{}lll@{}}
-    \toprule
-    Scheme & Split & Reported overhead / security \\
-    \midrule
-    GELO~\cite{belikov_gelo}        & per-batch invertible mixing $U=AH$; QKV(O) offloaded
-                & 20--30\%; $\sim$76\% offloaded; single-batch BSS \\
-    TwinShield~\cite{xue_twinshield}& CPU-TEE root + SS for linear \emph{and} non-linear; U-Verify
-                & 4--6$\times$ vs TEE-only; 87\% offload \\
-    ObfuscaTune~\cite{frikha_obfuscatune} & $\sim$5\% params in TEE; obfuscated layers offloaded
-                & 1.5--4.3$\times$ \\
-    SecureInfer~\cite{secureinfer}  & XOR-OTP heterogeneous split
-                & 4.7$\times$ vs TEE-only; 2.06$\times$ vs GPU \\
-    SCX~\cite{zeng_scx}             & per-session one-time-key KV-cache; $(\varepsilon,0)$-DP
-                & near-zero online \\
-    Amulet~\cite{amulet}            & per-round fresh invertible masks, all layers
-                & 2.8--4.8$\times$ vs GPU; 8--9$\times$ vs TEE \\
-    Portcullis~\cite{portcullis}    & TEE-attested PII-anonymization gateway
-                & 96$\times$ vs Hide-and-Seek \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+The hybrid-split \emph{inference} schemes---GELO (per-batch invertible mixing $U{=}AH$, QKV/O
+offloaded), TwinShield (CPU-TEE root + secret sharing for linear \emph{and} non-linear, with
+U-Verify integrity), ObfuscaTune ($\sim$5\% of parameters kept in the TEE), SCX (per-session
+one-time-key KV-cache, $(\varepsilon,0)$-DP), and Portcullis (TEE-attested PII-anonymization
+gateway)---are reported in the shared inference table (\cref{tab:inf-perf}). On-device
+model-protection splits (SecureInfer~\cite{secureinfer}, Amulet~\cite{amulet}) defend the
+\emph{model} from the device owner and are out of scope (\cref{sec:intro}).
 The graph-RAG anonymization scheme PrivGemo (dual-tower KG with HMAC session identifiers)
 applies the same anonymization lineage to the \emph{retrieval} layer; it is covered with the
 other graph-retrieval schemes in \cref{sec:retrieval}.

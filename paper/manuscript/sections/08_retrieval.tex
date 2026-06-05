@@ -149,6 +149,8 @@ address them and graph retrieval needs a different toolkit (\cref{tab:crypto-gra
     H$_2$O$_2$RAM~\cite{h2o2ram}& store,retrieve,gt & doubly-oblivious RAM (TEE) & ${\sim}1000\times$ vs O$_2$RAM & n/r                & exact \\
     GORAM~\cite{goram}         & retrieve,gt       & 3PC sqrt-ORAM (reserve)  & 58\,ms--36\,s @1.4B      & n/r; init ${<}3$\,min     & exact \\
     PrivGemo~\cite{tan_privgemo}& retrieve,gt       & dual-tower KG anon (HMAC) & no crypto cost          & ${\approx}70\%$ subgraph  & lossy; QA-pres. \\
+    Opal~\cite{kaviani_opal}    & retrieve,gt,e2e   & TEE + Ring-ORAM          & 2.32\,s/q ($1.57\times$) & ORAM (n/r)                & exact ($+13$\,pp) \\
+    ARoG~\cite{ning_arog}       & retrieve,gt       & KGQA machine-ID anon     & no crypto cost           & ---                       & SoTA KGQA (lossy) \\
     \bottomrule
   \end{tabular}
 

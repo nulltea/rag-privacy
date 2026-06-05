@@ -48,20 +48,9 @@ where TEE schemes concentrate; step~(iv), together with token-streaming and meta
 targets.
 
 \subsection{Representative Schemes}
-\begin{table}[H]
-  \centering \footnotesize
-  \caption{TEE-based schemes.}
-  \label{tab:tee}
-  \begin{tabular}{@{}llll@{}}
-    \toprule
-    Scheme & Pipeline stage & TEE / hardware & Reported overhead \\
-    \midrule
-    H100 CC baseline~\cite{h100cc}  & embed, generate     & GPU-TEE (H100 CC)      & 4--8\% \\
-    PipeLLM~\cite{pipellm}          & generate            & GPU-TEE (PCIe-AES)     & $<$19.6\% \\
-    Opal~\cite{kaviani_opal}        & retrieve, generate, gt, e2e & TDX + B200 + ORAM & 29$\times$ lower infra vs secure baseline \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+The pure-TEE inference baselines---H100~CC (whole-GPU enclave) and PipeLLM (speculative
+pipelined PCIe encryption)---are reported in the shared inference table (\cref{tab:inf-perf}),
+at $4$--$8\%$ and $<$19.6\% overhead respectively.
 Opal is an end-to-end graph-RAG system and the corpus's strongest adversary (a
 \emph{malicious host}, hiding access patterns via ORAM; cf.\ \cref{tab:threat-taxonomy}); we
 keep it here as the TEE baseline and detail its retrieval role with the other RAG schemes in
