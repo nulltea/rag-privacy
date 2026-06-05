@@ -20,7 +20,7 @@ protocols are the subject of dedicated recent surveys~\citep{li_pti_survey,pti_s
 we do not re-systematize the protocols themselves---Li et al.~\citep{li_pti_survey} survey
 that space in depth (layer-wise, MPC-vs-HE), and Chen et al.~\citep{chen_sok_pti} add a
 reproducibility re-benchmark of the same protocol space. We cover the sub-family briefly, through a few
-frontier exemplars (\cref{tab:crypto-inf}) that locate it on our deployment-cost frontier.
+frontier exemplars (\cref{tab:inf-perf}) that locate it on our deployment-cost frontier.
 On the deployment-readiness criteria, cryptographic inference
 scores highest on threat-model fit and fidelity (exact computation under a TCB of none or
 non-collusion) but lowest on performance (\cref{sec:synthesis}).
@@ -55,7 +55,7 @@ searchable encryption, distance-preserving encryption) that protect the RAG retr
 layer are introduced in \cref{sec:retrieval}.
 
 We keep five
-frontier exemplars (\cref{tab:crypto-inf}) chosen to span the design space: a two-party
+frontier exemplars (\cref{tab:inf-perf}) chosen to span the design space: a two-party
 protocol (SHAFT), a 2PC protocol with an offline dealer (PermLLM), distributed MPC with
 evaluator nodes (Fission), private mixture-of-experts routing (CryptoMoE), and
 non-interactive FHE (Euston). Together they locate cryptography on our deployment-cost
@@ -72,30 +72,38 @@ GBs per token or inference, at exact (MPC) or near-exact (FHE) fidelity. None of
 papers reports overhead against plaintext---they benchmark against prior \emph{secure}
 schemes, and Li et al.\ likewise do not normalize to plaintext: they tabulate each
 scheme's self-reported latency, communication, and task accuracy, anchored to a common
-model (BERT-base) where possible. The absolute figures in \cref{tab:crypto-inf} are
+model (BERT-base) where possible. The absolute figures in \cref{tab:inf-perf} are
 therefore paper-reported where available and otherwise recovered by one-hop extrapolation
 (\cref{sec:comparison}).
 \begin{table}[H]
   \centering \footnotesize
-  \caption{Cryptographic-inference exemplars. Latency and communication are paper-reported where
-    available and \emph{extrapolated} ($\dagger$; 1-hop via the cited baseline, \cref{sec:comparison})
-    where the paper gives only relative figures. No scheme reports a vs-plaintext multiplier.
+  \caption{\textbf{Inference performance across mechanism families} (exemplars). This is the shared
+    inference cost table; cryptographic rows are shown here, and TEE, obfuscation, and hybrid-split
+    rows are added as those families are covered (\cref{sec:tee}--\cref{sec:hybrid}). Latency and
+    communication are paper-reported where available and \emph{extrapolated} ($\dagger$; 1-hop via the
+    cited baseline, \cref{sec:comparison}) where the paper gives only relative figures. No
+    cryptographic scheme reports a vs-plaintext multiplier.
     Latency unit: \emph{decoder} rows (PermLLM, CryptoMoE) are per generated token (``/tok'');
     \emph{encoder} rows (SHAFT, Fission, Euston) are one forward pass over a 128-token sequence
     (``/inf''). For MoE, ``B'' is total parameters; active parameters per token are far fewer.
     $\Delta$acc is task-accuracy loss vs.\ plaintext (the plain/enc/loss convention of
     Li et al.~\citep{li_pti_survey}). Latencies are paper-reported on \emph{differing hardware}
     (the $\dagger$ anchors are GPU) and are not co-measured.}
-  \label{tab:crypto-inf}
+  \label{tab:inf-perf}
   \begin{tabular}{@{}lllll@{}}
     \toprule
     Scheme & Setting & Latency & Comm. & Fidelity ($\Delta$acc) \\
     \midrule
+    \multicolumn{5}{@{}l}{\emph{Cryptographic (MPC/FHE)} --- \cref{sec:crypto}}\\
     PermLLM~\cite{permllm}    & 2PC+dealer, ChatGLM-6B          & 3\,s/tok (1\,Gbps)             & 20\,Mb/tok                          & exact (0) \\
     SHAFT~\cite{shaft}        & 2PC, BERT-base (110M)           & ${\approx}1.4$\,s/inf$^\dagger$ & ${\approx}0.6$--$0.74$\,GB$^\dagger$ & ${\approx}0$ ($\approx$plain.) \\
     CryptoMoE~\cite{cryptomoe}& 2PC, MoE (6.9--16.4B; 1.3--2.8B act.) & 22--46\,s/tok (e2e) & 2.8--4.8\,GB/tok & $-0.8\%$ (99.2\%) \\
     Fission~\cite{fission}    & MPC+evaluators, ModernBERT (149M) & $<$5\,s/inf                  & $<$3\,GB                            & ${\approx}0$ ($\approx$plain.) \\
     Euston~\cite{euston}      & FHE (non-int.), BERT-base (110M) & ${\approx}10.7$\,s/inf$^\dagger$ & ${\approx}37$\,MB$^\dagger$       & approx.$^\dagger$ \\
+    % --- future bands appended as families are written: ---
+    % \multicolumn{5}{@{}l}{\emph{TEE (Tier 3)} --- \cref{sec:tee}}\\  ... PipeLLM, H100-CC ...
+    % \multicolumn{5}{@{}l}{\emph{Static obfuscation} --- \cref{sec:obfuscation}}\\  ... AloePri, SGT, OSNIP ...
+    % \multicolumn{5}{@{}l}{\emph{Hybrid split} --- \cref{sec:hybrid}}\\  ... GELO, SCX ...
     \bottomrule
   \end{tabular}
 

@@ -39,11 +39,11 @@ schemes were excluded as off-target for retrieval-style graph-RAG.}
 
 \subsection{Performance Comparison (by Use Case)}
 % Grouped BY USE CASE per \cref{sec:comparison} (deployment decisions are per use case),
-% normalized to \cref{tab:yardstick}. Numbers are indicative / self-reported unless marked.
+% normalized per use case. Numbers are indicative / self-reported unless marked.
 Following \cref{sec:comparison}, we compare \emph{by use case}---the unit of a deployment
 decision---rather than by family, putting the mechanisms that actually compete for a given
-stage side by side. Figures are normalized to the canonical metrics of
-\cref{tab:yardstick} and are indicative (each from its own paper's testbed---different
+stage side by side. Figures are normalized to each use case's canonical metric
+(\cref{sec:comparison}) and are indicative (each from its own paper's testbed---different
 hardware, model, dataset) unless marked \emph{co-measured} (benchmarked together in one
 paper); the non-comparability caveat of \cref{sec:comparison} stands.
 \emph{Reranking} is absent from \cref{tab:performance} by design: although it is a pipeline
@@ -53,8 +53,8 @@ RemoteRAG's HE top-$k$ scoring, Opal's in-enclave scoring) fold it into a retrie
 figure---so private reranking stands as an \emph{open gap} rather than a comparable cost.
 \begin{table*}[t]
   \centering \footnotesize
-  \caption{Performance and fidelity by use case (indicative; normalized to
-    \cref{tab:yardstick}). ``$\times$'' = overhead vs.\ plaintext; ``exact'' = computes the
+  \caption{Performance and fidelity by use case (indicative; normalized per use case,
+    \cref{sec:comparison}). ``$\times$'' = overhead vs.\ plaintext; ``exact'' = computes the
     true function. Cross-paper figures are indicative, not co-measured. All figures are
     \emph{paper-reported}; we do not independently reproduce them, and Chen et
     al.~\citep{chen_sok_pti} find that re-benchmarked crypto-inference numbers can diverge from
@@ -80,8 +80,8 @@ figure---so private reranking stands as an \emph{open gap} rather than a compara
     \bottomrule
   \end{tabular}
 \end{table*}
-\needswork{fill cells with specific cited, normalized figures (\cref{tab:yardstick}); mark
-each co-measured vs indicative; this performance axis is the dimension Bodea
+\needswork{fill cells with specific cited figures normalized per use case (\cref{sec:comparison});
+mark each co-measured vs indicative; this performance axis is the dimension Bodea
 \cite{bodea_sok} explicitly omits}
 
 \subsection{Deployment Readiness}

@@ -218,9 +218,8 @@ estimate, flagged as such.
 \paragraph{Normalizing fidelity.}
 Schemes that compute the true function (cryptography, TEE, invertible-mask hybrid splits) are
 \emph{exact}; approximate schemes (obfuscation, DP, polynomial-approximation MPC) are reported
-as a \emph{delta} against the plaintext baseline in the use-case-appropriate metric
-(\cref{tab:yardstick}), so a retrieval recall drop and a generation accuracy drop are never
-conflated.
+as a \emph{delta} against the plaintext baseline in the use-case-appropriate metric, so a
+retrieval recall drop and a generation accuracy drop are never conflated.
 
 \paragraph{Grouping: by use case, not by family.}
 We \emph{systematize} by mechanism family (\cref{sec:crypto}--\cref{sec:hybrid}) but
@@ -232,24 +231,7 @@ We use four use cases aligned with the gap-map stages (\cref{sec:synthesis}): \e
 \emph{vector} (flat/IVF ANN and vector storage) and \emph{graph} (graph-based ANN and
 graph-semantic search), which impose different costs and threat surfaces; each scheme is grouped
 by the model class it evaluates. \emph{Reranking} has no standalone private measurement in the
-corpus, so it stays an open gap (\cref{sec:synthesis}), not a cost bucket. \cref{tab:yardstick}
-fixes the canonical metric and plaintext baseline for each.
-
-\begin{table}[t]
-  \centering \footnotesize
-  \caption{Reference metrics: per-use-case canonical metrics against which
-    \cref{sec:crypto}--\cref{sec:hybrid} report and \cref{sec:synthesis} compares.}
-  \label{tab:yardstick}
-  \begin{tabular}{@{}llll@{}}
-    \toprule
-    Use case & Performance metric & Fidelity metric & Plaintext baseline \\
-    \midrule
-    Generation & latency/token; $\times$ overhead & task acc.\ / perplexity / BLEU $\Delta$ & plaintext decode \\
-    Embedding (encoder) & latency/seq; $\times$ overhead   & downstream task-acc.\ $\Delta$  & plaintext encode \\
-    Vector retrieval & latency/query @corpus-size; comm & recall@$k$ $\Delta$               & plaintext flat/IVF ANN \\
-    Graph retrieval  & latency/query; comm              & recall@$k$ / answer-acc.\ $\Delta$ & plaintext graph search/ANN \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-\needswork{once the per-family numbers are filled, confirm each is normalized to the
-matching row of \cref{tab:yardstick} and flagged co-measured vs indicative}
+corpus, so it stays an open gap (\cref{sec:synthesis}), not a cost bucket. Each use case has a
+canonical metric: latency and $\times$-overhead for generation and embedding; latency/query and
+communication at a fixed corpus size for retrieval; and fidelity as the task-accuracy
+(generation/embedding) or recall@$k$ (retrieval) delta against the plaintext baseline.
