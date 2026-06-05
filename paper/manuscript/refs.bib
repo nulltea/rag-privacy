@@ -778,3 +778,61 @@
             (EMNLP 2025?), year, id (doc cites arXiv 2410.05779)},
   year   = {2025}
 }
+
+% ====== Hybrid-split lineage (CNN-era roots + TEE-partition analyses) ========
+
+@inproceedings{tramer_slalom,
+  author    = {Tram{\`e}r, Florian and Boneh, Dan},
+  title     = {Slalom: Fast, Verifiable and Private Execution of Neural Networks in Trusted Hardware},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2019},
+  note      = {[verified-web] CNN-era root: TEE delegates linear layers to untrusted co-processor; arXiv:1806.03287}
+}
+
+@inproceedings{hashemi_darknight,
+  author    = {Hashemi, Hanieh and Wang, Yongqin and Annavaram, Murali},
+  title     = {{DarKnight}: An Accelerated Framework for Privacy and Integrity Preserving Deep Learning Using Trusted Hardware},
+  booktitle = {54th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO)},
+  year      = {2021},
+  note      = {[verified-web] matrix-masking input obfuscation in TEE, offload to GPU; DOI 10.1145/3466752.3480112; arXiv:2207.00083}
+}
+
+@inproceedings{sun_shadownet,
+  author    = {Sun, Zhichuang and Sun, Ruimin and Liu, Changming and Roy Chowdhury, Amrita and Lu, Long and Jha, Somesh},
+  title     = {{ShadowNet}: A Secure and Efficient On-device Model Inference System for Convolutional Neural Networks},
+  booktitle = {IEEE Symposium on Security and Privacy (S\&P)},
+  year      = {2023},
+  note      = {[verified-web] weight-transform offload of linear layers, restore in TEE; arXiv:2011.05905}
+}
+
+@inproceedings{shen_soter,
+  author    = {Shen, Tianxiang and Qi, Ji and Jiang, Jianyu and Wang, Xian and Wen, Siyuan and Chen, Xusheng and Zhao, Shixiong and Wang, Sen and Chen, Li and Luo, Xiapu and Zhang, Fengwei and Cui, Heming},
+  title     = {{SOTER}: Guarding Black-box Inference for General Neural Networks at the Edge},
+  booktitle = {USENIX Annual Technical Conference (ATC)},
+  pages     = {723--738},
+  year      = {2022},
+  note      = {[verified-web] associative-operator parameter morphing, offload to untrusted GPU, restore in TEE. Static-basis integrity broken by arXiv:2602.11088}
+}
+
+@inproceedings{zhang_teeslice,
+  author    = {Zhang, Ziqi and others},
+  title     = {No Privacy Left Outside: On the (In-)Security of {TEE}-Shielded {DNN} Partition for On-Device {ML}},
+  booktitle = {IEEE Symposium on Security and Privacy (S\&P)},
+  year      = {2024},
+  note      = {[verified-web] benchmarks TEE-shielded DNN partition (TSDP) under model-stealing/MIA; the analysis showing naive partition leaks; proposes TEESlice partition-before-training. arXiv:2310.07152}
+}
+
+@inproceedings{kvshield,
+  author    = {Yang, Huan and Zhang, Deyu and Zhao, Yudong and Li, Yuanchun and Liu, Yunxin},
+  title     = {A First Look At Efficient and Secure On-Device {LLM} Inference Against {KV} Leakage},
+  booktitle = {Workshop on Mobility in the Evolving Internet Architecture (MobiArch)},
+  year      = {2024},
+  note      = {[verified-web] KV-Shield: secret permutation R in TEE, permuted weights $W_P{=}WR$ on GPU. Broken: open-weights solve $W_P{=}WR$; Collision Attack (Shadow-in-the-Cache); RoPE-incompatible. DOI 10.1145/3691555.3696827; arXiv:2409.04040}
+}
+
+@misc{saini_precomp_break,
+  author = {Saini, Abhishek and Jiang, Haolin and Liu, Hang},
+  title  = {Vulnerabilities in Partial {TEE}-Shielded {LLM} Inference with Precomputed Noise},
+  note   = {[verified-web] static secret-basis reuse $\Rightarrow$ full confidentiality break + integrity bypass of SOTER and TSQP; recovers a LLaMA-3-8B layer in ${\sim}6$ min, scales to 405B. arXiv:2602.11088. NOTE: the existing `tsqp' key mis-cites this same arXiv id --- 2602.11088 is the ATTACK on TSQP, not TSQP.},
+  year   = {2026}
+}

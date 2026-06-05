@@ -19,9 +19,11 @@ commodity GPU} over obfuscated activations---no confidential GPU required---comb
 near-baseline performance with exact fidelity at Tier-2 trust. It thus sits between
 pure-TEE (\cref{sec:tee}: near-plaintext, but needs a confidential GPU at scale) and
 cryptography (\cref{sec:crypto}: no special hardware, but $100$--$1000\times$). We
-cover the modern practical schemes below; the CNN-era roots (Slalom, DarKnight,
-ShadowNet, SOTER) are lineage only, and TEESlice is cited as the analysis showing why
-a \emph{naive}, un-obfuscated split leaks under public weights.
+cover the modern practical schemes below; the CNN-era roots
+(Slalom~\citep{tramer_slalom}, DarKnight~\citep{hashemi_darknight},
+ShadowNet~\citep{sun_shadownet}, SOTER~\citep{shen_soter}) are lineage only, and
+TEESlice~\citep{zhang_teeslice} is the analysis showing why a \emph{naive},
+un-obfuscated split leaks under public weights.
 
 \subsection{Approach}
 % Keep a small trusted core in a TEE; offload the heavy linear algebra to an
@@ -29,8 +31,34 @@ a \emph{naive}, un-obfuscated split leaks under public weights.
 % speed on the bulk with obfuscation's cheapness, bounded by what the accelerator
 % can infer from mixed activations. Map onto §2: TCB = GPU-TEE (small); HbC +
 % white-box; observation surface = accelerator activations.
-\needswork{describe the split pattern (boundary layers in TEE, bulk GEMM on
-untrusted accelerator over obfuscated activations)}
+Every scheme in this family makes the same two-part design choice: \emph{what} to keep
+in a hardware enclave, and \emph{how} to hide the rest. A small trusted core---a
+CPU-TEE (SGX/TDX) or a confidential GPU---holds the secrets and runs the operations
+that are cheap but disclosive: a secret transform and its inverse, the non-linearities,
+or merely the obfuscation keys. The bulk of the cost, the dense linear algebra of the
+QKV and output projections and the feed-forward GEMMs, is offloaded to an
+\emph{untrusted, commodity} accelerator that never sees plaintext. Correctness is
+recovered exactly inside the TEE, so unlike DP (\cref{sec:dp}) the family pays no
+fidelity tax. In the \cref{sec:framework} taxonomy the TCB is the enclave alone (small),
+the adversary is an honest-but-curious, white-box operator, and the observation surface
+is the stream of obfuscated activations crossing the PCIe boundary.
+
+The schemes differ only in those two knobs. GELO~\citep{belikov_gelo} mixes each batch's
+hidden states by a \emph{fresh} secret invertible matrix $A$ ($U{=}AH$), offloads the
+projections on $U$, and unmixes by $A^{-1}$ in the TEE; security rests on the
+single-batch blind-source-separation hardness of recovering $H$ from $U$.
+TwinShield~\citep{xue_twinshield} secret-shares \emph{both} linear and non-linear layers
+across a CPU-TEE root and the accelerator, adding U-Verify integrity checks (a Freivalds
+generalization, the first to verify even the non-linear SoftMax) so the accelerator may
+be \emph{malicious}. ObfuscaTune~\citep{frikha_obfuscatune} keeps only ${\sim}5\%$ of the
+parameters in the TEE and offloads obfuscated activations and weights under a one-time
+obfuscation matrix. SCX~\citep{zeng_scx} encodes the KV-cache statelessly under a
+per-session one-time key ($(\varepsilon,0)$-DP). Portcullis~\citep{portcullis} narrows the
+trusted core to a TDX-attested NER gateway that strips PII before any text reaches a
+third-party LLM. The common thread---and the family's security argument---is that the
+hiding randomness is \emph{dynamic and never reused}, not that the hardware conceals the
+GPU: this is precisely what the static-partition lineage lacked
+(\cref{sec:hybrid}, Limitations).
 
 \subsection{Representative Schemes}
 The hybrid-split \emph{inference} schemes---GELO (per-batch invertible mixing $U{=}AH$, QKV/O
@@ -47,12 +75,53 @@ other graph-retrieval schemes in \cref{sec:retrieval}.
 optimizations + a unified static+dynamic design). Here we survey it only.}
 
 \subsection{Performance (Reported)}
-\needswork{the offload fraction vs overhead trade; why this family is the
-practical frontier for confidential inference}
+The reported numbers (\cref{tab:inf-perf}) trace a single curve: the more linear algebra
+a scheme can safely offload, the closer it runs to plaintext. GELO offloads
+${\approx}76\%$ of the linear-algebra cost of a Llama-2-7B configuration at a
+$20$--$30\%$ overhead over \emph{insecure} offloading ($1.2$--$1.3\times$ end-to-end);
+TwinShield pushes the offloaded fraction to $87\%$, trading a $5.4\times$ slowdown
+versus TEE-only for the addition of verifiable integrity (still $4.0$--$6.1\times$
+faster than prior verifiable inference). At the cheap end, ObfuscaTune reports
+$1.5$--$4.3\times$ over unprotected inference, while SCX and Portcullis are effectively
+free online ($\sim$$1\times$ and $\sim$$1.01\times$), having moved their one-time key or
+matrix setup offline. Every scheme preserves exact (or near-exact, modulo
+conditioning) fidelity.
+
+This profile is why the hybrid split is the practical frontier for confidential
+inference: it needs only a CPU-TEE---SGX/TDX, already shipping in commodity
+servers---plus ordinary untrusted GPUs, where pure-TEE inference at scale demands a
+\emph{confidential} accelerator (\cref{sec:tee}) and cryptography pays
+$100$--$1000\times$ (\cref{sec:crypto}). The family thus occupies a Tier-2 niche:
+near-baseline latency and exact fidelity without specialized confidential-compute
+hardware. GELO is the partial exception, anchoring its trusted core in a confidential
+H200 while still offloading to commodity L40S GPUs.
 
 \subsection{Limitations and Known Attacks}
 % GELO names its own leakage: Gram-matrix invariants under orthogonal mixing
 % (U^T U = H^T H), mitigated by non-orthogonal A or shield vectors. Security is
 % single-batch only.
-\needswork{Gram-leak + mitigations \citep{belikov_gelo}; co-located TEE+GPU
-requirement; per-batch-only guarantee}
+Three limitations recur across the family. \emph{First, the obfuscation leaks
+second-order structure.} GELO names its own channel: under an orthogonal mixing $A$ the
+Gram matrix is invariant ($U^{\top}U{=}H^{\top}H$), exposing pairwise inner products of
+the hidden states; the mitigation is a non-orthogonal $A$ or appended shield vectors,
+and the guarantee holds only \emph{per batch}---freshness is load-bearing, and key reuse
+collapses it~\citep{belikov_gelo}.
+
+\emph{Second, the partition is not the protection.} The static-partition lineage is a
+cautionary tale: TEESlice~\citep{zhang_teeslice} shows that a naive TEE-shielded
+partition falls to model-stealing and membership-inference once the public part is
+observable; SOTER's static parameter-morphing basis is fully broken---confidentiality
+and integrity---by reuse cryptanalysis that recovers a LLaMA-3-8B layer in
+${\sim}6$~minutes~\citep{saini_precomp_break}; and KV-Shield's fixed weight permutation
+$W_P{=}WR$ is solvable under public weights and falls to the KV-cache Collision Attack
+(\cref{sec:obfuscation})~\citep{kvshield}. The surviving schemes earn their security from
+dynamic, never-reused randomness (GELO's per-batch mixing, SCX's per-session key), not
+from the split itself.
+
+\emph{Third, the trust and hardware assumptions are real.} Security is honest-but-curious
+and white-box by default---only TwinShield's U-Verify extends to a malicious
+accelerator---and the co-located TEE-plus-GPU design carries the cost of encrypting the
+activation stream across PCIe, with residual exposure from unencrypted HBM on some
+confidential-GPU parts. The externalized KV-cache that this family deliberately leaves
+outside the enclave for throughput is itself a reconstruction surface, attacked and
+defended in \cref{sec:obfuscation}.
