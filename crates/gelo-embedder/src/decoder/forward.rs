@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
 use ndarray::{Array1, Array2, Array3, ArrayView2, ArrayView3, Axis};
+use std::sync::Arc;
 
 use gelo_protocol::profile;
 use gelo_protocol::tee_matmul_bf16;
@@ -328,33 +329,6 @@ pub fn run_decode_step_batched(
     )
 }
 
-/// **M1.11 D1.3** — Batched cache-aware decoder block. Mirror of
-/// [`decoder_block_cached`] for `B` parallel sequences each with their
-/// own KV cache prefix length. Differences from the single-sequence
-/// version:
-///
-/// 1. `hidden` shape is `(B, hidden)` — one new token row per sequence.
-/// 2. `q_pos_offsets[b]` is per-sequence; RoPE applies row `b`'s
-///    rotation at its own absolute position.
-/// 3. KV cache append uses `append_decode` (one row per sequence,
-///    placed at each sequence's current `lens[b]`).
-/// 4. Attention runs per-sequence in-TEE over each sequence's full
-///    cached prefix (`tee:attn_cached_inplace_many` — same stopgap
-///    pattern as `decoder_block_batched`'s prefill attention). R1.4
-///    would replace this with a single batched-kernel dispatch.
-#[allow(clippy::too_many_arguments)]
-/// Phase-4 perf wire-up flag (perm-attn-gpu-offload): route GLOBAL-layer
-/// decode attention through the GPU-resident K/V session. Default off
-/// (`GELO_GPU_RESIDENT_ATTN` ∈ {1, true}). Read once.
-fn gpu_resident_attn_enabled() -> bool {
-    static EN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *EN.get_or_init(|| {
-        std::env::var("GELO_GPU_RESIDENT_ATTN")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-    })
-}
-
 /// Explicit override for the prefill-attention GPU offload
 /// (perm-attn-gpu-offload Phase 6): route GLOBAL-layer prefill self-attention
 /// through the fused `cubek` kernel under the value cover (`O_qk` + the
@@ -481,9 +455,23 @@ fn correct_unfold_into(
 fn stack_heads(x: ArrayView2<'_, f32>, b: usize, h: usize, d: usize) -> Array3<f32> {
     let mut out = Array3::<f32>::zeros((b * h, 1, d));
     for bi in 0..b {
+        let src_row = x.row(bi); // (h·d,)
+        let src = src_row.as_slice();
         for hi in 0..h {
-            for c in 0..d {
-                out[(bi * h + hi, 0, c)] = x[(bi, hi * d + c)];
+            let mut slab = out.index_axis_mut(Axis(0), bi * h + hi); // (1, d)
+            // Contiguous d-run memcpy (the per-element index paid an ndarray
+            // bounds check per f32); fall back if either side isn't contiguous.
+            let fast = match (src, slab.as_slice_mut()) {
+                (Some(s), Some(dst)) => {
+                    dst.copy_from_slice(&s[hi * d..(hi + 1) * d]);
+                    true
+                }
+                _ => false,
+            };
+            if !fast {
+                for c in 0..d {
+                    slab[(0, c)] = x[(bi, hi * d + c)];
+                }
             }
         }
     }
@@ -494,38 +482,27 @@ fn stack_heads(x: ArrayView2<'_, f32>, b: usize, h: usize, d: usize) -> Array3<f
 fn unstack_heads(x: ArrayView3<'_, f32>, b: usize, h: usize, d: usize) -> Array2<f32> {
     let mut out = Array2::<f32>::zeros((b, h * d));
     for bi in 0..b {
+        let mut dst_row = out.row_mut(bi); // (h·d,)
         for hi in 0..h {
-            for c in 0..d {
-                out[(bi, hi * d + c)] = x[(bi * h + hi, 0, c)];
-            }
-        }
-    }
-    out
-}
-
-/// Stack per-`(layer, b)` cache views `(n_kv, kv_heads·d)` into the
-/// un-replicated session shape `(B·kv_heads, n_kv, d)` (b-major).
-fn stack_cache(
-    views: &[(ArrayView2<'_, f32>, ArrayView2<'_, f32>)],
-    b: usize,
-    kvh: usize,
-    d: usize,
-) -> (Array3<f32>, Array3<f32>) {
-    let n_kv = views[0].0.nrows();
-    let mut k_st = Array3::<f32>::zeros((b * kvh, n_kv, d));
-    let mut v_st = Array3::<f32>::zeros((b * kvh, n_kv, d));
-    for bi in 0..b {
-        let (kb, vb) = views[bi];
-        for hi in 0..kvh {
-            for j in 0..n_kv {
+            let src2d = x.index_axis(Axis(0), bi * h + hi); // (1, d)
+            let src = src2d.as_slice();
+            // Contiguous d-run memcpy into the head's column block; fall back
+            // if either side isn't contiguous.
+            let fast = match (src, dst_row.as_slice_mut()) {
+                (Some(s), Some(dst)) => {
+                    dst[hi * d..(hi + 1) * d].copy_from_slice(s);
+                    true
+                }
+                _ => false,
+            };
+            if !fast {
                 for c in 0..d {
-                    k_st[(bi * kvh + hi, j, c)] = kb[(j, hi * d + c)];
-                    v_st[(bi * kvh + hi, j, c)] = vb[(j, hi * d + c)];
+                    dst_row[hi * d + c] = x[(bi * h + hi, 0, c)];
                 }
             }
         }
     }
-    (k_st, v_st)
+    out
 }
 
 /// Explicit override for the permuted-cover tail-in-TEE decode path
@@ -920,7 +897,18 @@ fn build_covered_prefix_cpu(
     } else {
         None
     };
-    Ok((k_cov, v_cov, mask, DecodeCover { prefix_len, valid_lens, o_qk, c_v, c_v_inv }))
+    Ok((
+        k_cov,
+        v_cov,
+        mask,
+        DecodeCover {
+            prefix_len,
+            valid_lens,
+            o_qk: Arc::new(o_qk),
+            c_v,
+            c_v_inv: Arc::new(c_v_inv),
+        },
+    ))
 }
 
 /// Build covered resident prefixes for **all GLOBAL layers** at the
@@ -978,6 +966,21 @@ fn build_covered_prefix_all_global(
     })
 }
 
+/// **M1.11 D1.3** — Batched cache-aware decoder block. Mirror of
+/// [`decoder_block_cached`] for `B` parallel sequences each with their
+/// own KV cache prefix length. Differences from the single-sequence
+/// version:
+///
+/// 1. `hidden` shape is `(B, hidden)` — one new token row per sequence.
+/// 2. `q_pos_offsets[b]` is per-sequence; RoPE applies row `b`'s
+///    rotation at its own absolute position.
+/// 3. KV cache append uses `append_decode` (one row per sequence,
+///    placed at each sequence's current `lens[b]`).
+/// 4. Attention runs per-sequence in-TEE over each sequence's full
+///    cached prefix (`tee:attn_cached_inplace_many` — same stopgap
+///    pattern as `decoder_block_batched`'s prefill attention). R1.4
+///    would replace this with a single batched-kernel dispatch.
+#[allow(clippy::too_many_arguments)]
 fn decoder_block_cached_batched(
     cfg: &DecoderConfig,
     layer: &DecoderLayerWeights,
@@ -1111,18 +1114,13 @@ fn decoder_block_cached_batched(
     let q_dim = cfg.num_attention_heads * cfg.head_dim_value();
     let mut ctx = Array2::<f32>::zeros((batch_size, q_dim));
 
-    // Phase-4 perf wire-up (perm-attn-gpu-offload): route GLOBAL-layer
-    // decode attention through the GPU-resident K/V session — create once
-    // (first decode step, from the full cache) then append one row/step
-    // and attend on-device, instead of the in-TEE per-sequence kernel.
-    // Gated (default off → the in-TEE path below is unchanged); SWA layers
-    // always stay in-TEE. NO cover/tail-in-TEE yet (those need the σ-vs-N
-    // spike) — this measures the resident-attention decode-wall lever only.
+    // perm-attn-gpu-offload: route GLOBAL-layer decode attention through the
+    // GPU-resident K/V session under the permuted value cover — the frozen
+    // prefix attends on-device (partial stats), the newest tokens in-TEE, and
+    // the two merge online. On by default whenever the executor supports the
+    // fused offload (capability default); SWA layers always stay in-TEE.
     let use_gpu_cover = gpu_resident_cover_override()
         .unwrap_or_else(|| exec.supports_offloaded_attention())
-        && matches!(layer_class, AttentionClass::Global);
-    let use_gpu_resident = !use_gpu_cover
-        && gpu_resident_attn_enabled()
         && matches!(layer_class, AttentionClass::Global);
     if use_gpu_cover {
         // Permuted-cover tail-in-TEE decode (perm-attn-gpu-offload, full
@@ -1176,8 +1174,10 @@ fn decoder_block_cached_batched(
             // masked attend over the padded L_max prefix (each row's padding
             // masked to −∞ in the session), uncover by C_vᵀ.
             let q_cov = profile::time("cover:q_cover_tee", || {
-                let mut qn = q_st.clone();
                 if sigma > 0.0 {
+                    // Per-row σ noise (Hidden-No-More) before the rotation —
+                    // needs a mutable copy of q_st.
+                    let mut qn = q_st.clone();
                     for b in 0..batch_size {
                         let mut qrng = ChaCha20Rng::seed_from_u64(
                             SALT ^ cover_session
@@ -1191,8 +1191,12 @@ fn decoder_block_cached_batched(
                             *e += sigma * z;
                         }
                     }
+                    rotate_heads(qn.view(), o_qk.view())
+                } else {
+                    // σ=0 (exact-parity path): no per-row noise, so rotate q_st
+                    // directly — skip the (B·nqh,1,dh) copy.
+                    rotate_heads(q_st.view(), o_qk.view())
                 }
-                rotate_heads(qn.view(), o_qk.view())
             });
             let (acc_a_cov, m_a, l_a) = profile::time("cover:prefix_partial_gpu", || {
                 exec.resident_kv_attend_partial(id, q_cov.view(), scale)
@@ -1209,11 +1213,12 @@ fn decoder_block_cached_batched(
             let mut ctx_st = Array3::<f32>::zeros((batch_size * nqh, 1, dh));
             for b in 0..batch_size {
                 let plen = valid_lens[b];
-                let mut acc_a_b =
-                    acc_a.slice(ndarray::s![b * nqh..(b + 1) * nqh, .., ..]).to_owned();
+                let acc_a_b = acc_a.slice(ndarray::s![b * nqh..(b + 1) * nqh, .., ..]);
                 let n_tail = kv_views[b].0.nrows().saturating_sub(plen);
                 let ctx_b = if n_tail == 0 {
-                    // Prefix only → normalise acc_a by l_a.
+                    // Prefix only → normalise acc_a by l_a. Owned copy here only
+                    // because this branch mutates in place.
+                    let mut acc_a_b = acc_a_b.to_owned();
                     for h in 0..acc_a_b.shape()[0] {
                         let l = l_a[(b * nqh + h, 0, 0)];
                         let inv = if l > 0.0 { 1.0 / l } else { 0.0 };
@@ -1249,43 +1254,6 @@ fn decoder_block_cached_batched(
                     .slice_mut(ndarray::s![b * nqh..(b + 1) * nqh, .., ..])
                     .assign(&ctx_b);
             }
-            ctx = unstack_heads(ctx_st.view(), batch_size, nqh, dh);
-            Ok(())
-        })?;
-    } else if use_gpu_resident {
-        let (nqh, nkvh, dh) = (
-            cfg.num_attention_heads,
-            cfg.num_key_value_heads,
-            cfg.head_dim_value(),
-        );
-        let scale = 1.0_f32 / (dh as f32).sqrt();
-        profile::time("tee:attn_resident_gpu", || -> Result<()> {
-            let q_st = stack_heads(q.view(), batch_size, nqh, dh); // (B·nqh, 1, dh)
-            let id = match kv_cache.gpu_session(layer_idx as usize) {
-                None => {
-                    // First decode step: create the session from the full
-                    // cache (already includes this step's appended row).
-                    let (k_st, v_st) = {
-                        let kv_views: Vec<(ArrayView2<'_, f32>, ArrayView2<'_, f32>)> = (0
-                            ..batch_size)
-                            .map(|b| kv_cache.view_b(layer_idx as usize, b))
-                            .collect::<Result<Vec<_>>>()?;
-                        stack_cache(&kv_views, batch_size, nkvh, dh)
-                    };
-                    let cap = kv_cache.capacity();
-                    let id = exec.resident_kv_create(k_st.view(), v_st.view(), cap)?;
-                    kv_cache.set_gpu_session(layer_idx as usize, id);
-                    id
-                }
-                Some(id) => {
-                    // Later steps: append just this step's new K/V row.
-                    let k_row = stack_heads(k.view(), batch_size, nkvh, dh);
-                    let v_row = stack_heads(v.view(), batch_size, nkvh, dh);
-                    exec.resident_kv_append(id, k_row.view(), v_row.view())?;
-                    id
-                }
-            };
-            let ctx_st = exec.resident_kv_attend(id, q_st.view(), scale)?; // (B·nqh, 1, dh)
             ctx = unstack_heads(ctx_st.view(), batch_size, nqh, dh);
             Ok(())
         })?;

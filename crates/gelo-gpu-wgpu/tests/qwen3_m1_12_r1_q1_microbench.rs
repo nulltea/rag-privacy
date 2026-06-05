@@ -303,23 +303,6 @@ fn batch_size_from_env() -> usize {
         .unwrap_or(8)
 }
 
-/// Force the **batched** forward path (`run_prefill_batched` /
-/// `run_decode_step_batched`) even at B=1. The single-stream path
-/// (`run_prefill` / `run_decode_step`, used by default when B=1) runs
-/// Global attention **in-TEE** (`tee:attn_permuted_cached` /
-/// `tee:attn_cached`); only the batched path carries the secure
-/// GPU-offloaded attention (`tee:attn_prefill_offload` +
-/// `prefill_cover:*` for prefill, `tee:attn_resident_cover` +
-/// `cover:*` for decode). Set `GELO_BENCH_FORCE_BATCHED=1` to measure a
-/// single sequence (B=1) *through* the offload path — a batch of one
-/// driven by the batched machinery. No effect when B>1 (already
-/// batched).
-fn force_batched_from_env() -> bool {
-    std::env::var("GELO_BENCH_FORCE_BATCHED")
-        .map(|v| v != "0" && !v.is_empty())
-        .unwrap_or(false)
-}
-
 /// Replica of the in-TEE `compute_logits` loop, wrapped in the same
 /// `profile::time("tee:compute_logits", …)` bucket the library uses.
 /// Inlined here so the bench can drive prefill and decode loops
@@ -622,16 +605,9 @@ fn gelo_llm_prefill_decode_breakdown() -> Result<()> {
     let n_prompt = prompt_size_from_env();
     let max_tokens = max_tokens_from_env();
     let batch_size = batch_size_from_env();
-    // Route through the batched forward path (which carries the secure
-    // GPU-offloaded attention) whenever B>1 OR the force knob is set.
-    // At B=1 with the knob, this measures a single sequence *through*
-    // the offload — the single-stream path would otherwise run
-    // attention in-TEE. See `force_batched_from_env`.
-    let use_batched = batch_size > 1 || force_batched_from_env();
-
     eprintln!("=== Gelo-LLM per-op breakdown — prefill + decode (R3 LM-head GPU offload) ===");
     eprintln!(
-        "variant: {:?} ({})  B: {batch_size}  n_prompt: {n_prompt}  max_tokens: {max_tokens}  batched_path: {use_batched}",
+        "variant: {:?} ({})  B: {batch_size}  n_prompt: {n_prompt}  max_tokens: {max_tokens}  batched_path: always",
         variant,
         variant.hf_model_id(),
     );
@@ -668,30 +644,19 @@ fn gelo_llm_prefill_decode_breakdown() -> Result<()> {
     // the decode-step autotune (autotune keys on shape, not token count).
     if std::env::var("GELO_BENCH_WARMUP").is_ok() {
         eprintln!("[warmup] discarded forward to populate autotune cache…");
-        let _ = if !use_batched {
-            run_prefill_decode(
-                "warmup", &cfg, &weights, &rope, &mut exec, &single_prompt, 2, true,
-            )?
-        } else {
-            run_prefill_decode_batched(
-                "warmup", &cfg, &weights, &rope, &mut exec, &prompts, 2, true,
-            )?
-        };
+        let _ = run_prefill_decode_batched(
+            "warmup", &cfg, &weights, &rope, &mut exec, &prompts, 2, true,
+        )?;
         eprintln!("[warmup] done; measured pass follows.");
     }
 
     // R3 (LM-head GPU offload) is the production default; this bench
     // profiles that single path — one prefill of `n`, then `K` decode
     // steps.
-    let (prefill, decode) = if !use_batched {
-        run_prefill_decode(
-            "R3", &cfg, &weights, &rope, &mut exec, &single_prompt, max_tokens, true,
-        )?
-    } else {
-        run_prefill_decode_batched(
-            "R3", &cfg, &weights, &rope, &mut exec, &prompts, max_tokens, true,
-        )?
-    };
+    // Always batched: B=1 runs as a batch-of-one through the offload path.
+    let (prefill, decode) = run_prefill_decode_batched(
+        "R3", &cfg, &weights, &rope, &mut exec, &prompts, max_tokens, true,
+    )?;
 
     prefill.snap.dump(&format!(
         "{:?} prefill profile (B={batch_size} n={n_prompt})",
@@ -1099,8 +1064,8 @@ fn m1_12_sweep_cell() -> Result<()> {
 /// Ragged-batch parity regression (chronicle §25). Greedy is deterministic,
 /// so each prompt must yield identical tokens whether generated standalone
 /// (B=1) or as a row of a mixed-length batch. Reproduces the B=8 HumanEval
-/// garbage in seconds: ragged batches hit `stack_cache`/`build_covered_prefix_cpu`,
-/// which assume a uniform per-sequence prefix length (`views[0].nrows()`) —
+/// garbage in seconds: ragged batches hit `build_covered_prefix_cpu`,
+/// which assumed a uniform per-sequence prefix length (`views[0].nrows()`) —
 /// shorter sequences panic (OOB), longer ones get a truncated prefix → garbage.
 /// RED until the ragged resident-cover bug is fixed.
 ///   GELO_GPU_PREFILL_OFFLOAD=1 GELO_GPU_RESIDENT_COVER=1 GELO_RESIDENT_SIGMA=0.01 \
@@ -1161,8 +1126,8 @@ fn batched_parity_b1_vs_bN() -> Result<()> {
     eprintln!("[b8parity] ALL_ROWS_MATCH_B1={all_match}");
     anyhow::ensure!(
         all_match,
-        "ragged batch diverged from per-prompt B=1 — stack_cache/build_covered_prefix_cpu \
-         assume a uniform prefix length (chronicle §25)"
+        "ragged batch diverged from per-prompt B=1 — build_covered_prefix_cpu \
+         assumes a uniform prefix length (chronicle §25)"
     );
     Ok(())
 }

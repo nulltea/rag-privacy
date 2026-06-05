@@ -1311,25 +1311,6 @@ pub trait TrustedExecutor {
         Err(anyhow!("resident_kv_create: this executor has no GPU session support"))
     }
 
-    /// Append one decode token's `(heads, 1, d_head)` K/V row.
-    fn resident_kv_append(
-        &mut self,
-        _id: KvSessionId,
-        _k_row: ArrayView3<f32>,
-        _v_row: ArrayView3<f32>,
-    ) -> Result<()> {
-        Err(anyhow!("resident_kv_append: unsupported"))
-    }
-
-    /// Attend `(heads, n_q, d_head)` Q over the resident session.
-    fn resident_kv_attend(
-        &mut self,
-        _id: KvSessionId,
-        _q: ArrayView3<f32>,
-        _scale: f32,
-    ) -> Result<Array3<f32>> {
-        Err(anyhow!("resident_kv_attend: unsupported"))
-    }
 
     /// Partial-stats attend over the resident prefix â returns the
     /// unnormalised online-softmax state `(acc, m, l)` for the TEE-side

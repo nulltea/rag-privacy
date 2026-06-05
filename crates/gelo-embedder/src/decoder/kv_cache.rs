@@ -30,6 +30,7 @@
 
 use anyhow::{Result, anyhow};
 use ndarray::{Array2, Array3, ArrayView2, s};
+use std::sync::Arc;
 
 /// Session-fixed cover operands for the permuted-cover tail-in-TEE decode
 /// path (perm-attn-gpu-offload). Sampled **once** when the covered resident
@@ -45,13 +46,15 @@ pub struct DecodeCover {
     /// attend covers `valid_lens[b]` real keys (the rest masked).
     pub valid_lens: Vec<usize>,
     /// Shared feature rotation on Q/K (cancels in the score; always orthogonal).
-    pub o_qk: Array2<f32>,
+    /// `Arc` so the per-step decode read is a pointer-bump, not a `dh×dh` copy.
+    pub o_qk: Arc<Array2<f32>>,
     /// Value cover on V — the κ-bounded invertible `C_v` (orthogonal `O_v` at
     /// κ=1). Non-orthogonal at κ>1 to break the `WEIGHTS-PUB` value norm/Gram
     /// dictionary; see docs/dev/logs/perm-attn-gpu-offload.md.
     pub c_v: Array2<f32>,
     /// `C_v⁻¹` (= `O_vᵀ` at κ=1), applied TEE-side to uncover the output.
-    pub c_v_inv: Array2<f32>,
+    /// `Arc` for the same per-step pointer-bump-clone reason as `o_qk`.
+    pub c_v_inv: Arc<Array2<f32>>,
 }
 
 /// Backing storage for one layer's K/V.

@@ -598,13 +598,23 @@ fn array3_to_tensor_f16(view: ArrayView3<'_, f32>, device: &Dev) -> Tensor<CubeW
     let b = view.shape()[0];
     let m = view.shape()[1];
     let k = view.shape()[2];
-    // SIMD f32→f16 (F16C vcvtps2ph) — see array2_to_tensor_f16. This is
-    // the K/V upload hot path; the convert was ~75% of the per-call
-    // upload cost as a scalar loop (gate-1 decomposition).
+    // Parallel SIMD f32→f16 (F16C vcvtps2ph) — mirrors array2_to_tensor_f16.
+    // This is the K/V upload hot path; the convert was ~75% of the per-call
+    // upload cost as a scalar loop (gate-1 decomposition). The 2D sibling
+    // was parallelised but this 3D path was left single-threaded; fan the
+    // SIMD convert across cores via par_chunks into an uninit buffer (f16 is
+    // a POD u16 wrapper, every element is written, so set_len is sound).
     let std = view.as_standard_layout();
     let src = std.as_slice().expect("standard-layout slice is contiguous");
-    let mut dst = vec![f16::ZERO; src.len()];
-    dst.convert_from_f32_slice(src);
+    let mut dst: Vec<f16> = Vec::with_capacity(src.len());
+    unsafe {
+        dst.set_len(src.len());
+    }
+    use rayon::prelude::*;
+    const CHUNK: usize = 1 << 16;
+    dst.par_chunks_mut(CHUNK)
+        .zip(src.par_chunks(CHUNK))
+        .for_each(|(d, s)| d.convert_from_f32_slice(s));
     Tensor::<CubeWgpu16, 3>::from_data(TensorData::new(dst, [b, m, k]), device)
 }
 
@@ -723,9 +733,13 @@ fn tensor_data_to_array3_f16(data: TensorData, dims: (usize, usize, usize)) -> R
 }
 
 fn tensor_data_to_array_f16(data: TensorData, rows: usize, cols: usize) -> Result<Array2<f32>> {
-    let v_f16: Vec<f16> = data
-        .into_vec()
-        .map_err(|e| anyhow!("burn f16 TensorData -> Vec<f16>: {e:?}"))?;
+    // `engine:matmul:readback` — host DtoH copy out of the device result
+    // (same sub-bucket as the f16-out path; the f16→f32 widen below is the
+    // f32-output path's extra, kept out of the bucket).
+    let v_f16: Vec<f16> = gelo_protocol::profile::time("engine:matmul:readback", || {
+        data.into_vec()
+            .map_err(|e| anyhow!("burn f16 TensorData -> Vec<f16>: {e:?}"))
+    })?;
     let v: Vec<f32> = v_f16.into_iter().map(|x| x.to_f32()).collect();
     Array2::from_shape_vec((rows, cols), v).map_err(|e| anyhow!("Array2 from tensor data: {e}"))
 }
@@ -809,7 +823,11 @@ fn execute_registered_many_f16(
         out_dims.push((d[0], d[1]));
         tx = tx.register(out);
     }
-    tx.execute()
+    // `engine:matmul:drain` — GPU sync (kernel enqueue is lazy; this is where
+    // the matmuls run + are read back). Same sub-bucket as the f16-out path,
+    // so decode (f32-output) and prefill (f16-out) report consistently.
+    let datas = gelo_protocol::profile::time("engine:matmul:drain", || tx.execute());
+    datas
         .into_iter()
         .zip(out_dims)
         .map(|(data, (rows, cols))| tensor_data_to_array_f16(data, rows, cols))
@@ -1494,24 +1512,29 @@ const BLACKBOX_SEQ_Q_ALIGN: usize = 16;
 /// Resolve the cubek attend strategy for a problem with `n_kv` keys, and whether
 /// it is the tensor-core (`blackbox`) kernel.
 ///
-/// **Default: blackbox** (cooperative-matmul / tensor cores) on the CUDA backend
-/// for `n_kv ≥ BLACKBOX_MIN_NKV`; **Unit** (portable, ragged-safe) otherwise —
-/// i.e. on Vulkan (where blackbox is NaN-broken), for tiny `n_kv` below the tile
-/// floor, and for an explicit `CUBEK_STRATEGY=unit`. `CUBEK_STRATEGY`
-/// (`blackbox`/`unit`) overrides the backend default, but the tiny-`n_kv` guard
-/// still applies so blackbox is never launched below the floor. cubek 0.2.0's
-/// `BlackboxAcceleratedStrategy` is no longer `Default`, so the `Inferred` hint
-/// supplies minimal partition counts (1 each).
+/// **Default: blackbox** (cooperative-matmul / tensor cores) on **both** the CUDA
+/// and Vulkan backends for `n_kv ≥ BLACKBOX_MIN_NKV`; **Unit** (portable,
+/// ragged-safe) for tiny `n_kv` below the tile floor and for an explicit
+/// `CUBEK_STRATEGY=unit`. `CUBEK_STRATEGY` (`blackbox`/`unit`) overrides the
+/// default, but the tiny-`n_kv` guard still applies so blackbox is never launched
+/// below the floor. cubek 0.2.0's `BlackboxAcceleratedStrategy` is no longer
+/// `Default`, so the `Inferred` hint supplies minimal partition counts (1 each).
+///
+/// Blackbox was NaN-broken on the cubecl-wgpu / Vulkan backend on cubecl 0.9.0
+/// (data-independent NaN for all n≥3 — a SPIR-V cooperative-matrix codegen bug,
+/// not an f16 overflow); the cubek 0.2.0 / cubecl 0.10.0 bump fixed it. Verified
+/// clean on this RTX 5090 via Vulkan (`cubek_gqa_nan_nsweep`, tile-aligned
+/// n=16…2048, 0 NaN), so blackbox is now the default on Vulkan too. Note this is
+/// cooperative-matrix-capable hardware (Nvidia via `VK_KHR_cooperative_matrix`);
+/// Vulkan GPUs without it still need `CUBEK_STRATEGY=unit`.
 fn cubek_strategy(n_kv: usize) -> (cubek_attention::launch::Strategy, bool) {
     use cubek_attention::launch::{BlueprintStrategy, Strategy};
     use cubek_attention::routines::blackbox_accelerated::BlackboxAcceleratedStrategy;
     let want_blackbox = match std::env::var("CUBEK_STRATEGY").as_deref() {
         Ok("blackbox") => true,
         Ok("unit") => false,
-        // Unset → production default: blackbox on CUDA, Unit on Vulkan/non-CUDA
-        // (the `vulkan` feature overrides the default `cuda`, matching the
-        // runtime-alias cfg, since blackbox is NaN-broken on Vulkan).
-        _ => cfg!(all(feature = "cuda", not(feature = "vulkan"))),
+        // Unset → production default: blackbox (tensor cores) on both backends.
+        _ => true,
     };
     if want_blackbox && n_kv >= BLACKBOX_MIN_NKV {
         (
@@ -1584,8 +1607,8 @@ pub fn cubek_attention_folded(
     assert_eq!(v.shape()[2], d);
     let _ = scale; // cubek derives scale = 1/sqrt(head_dim) internally.
 
-    // Resolve the cubek strategy (blackbox tensor cores by default on CUDA for
-    // n_kv ≥ the tile floor; Unit otherwise). For blackbox, zero-pad seq_q to the
+    // Resolve the cubek strategy (blackbox tensor cores by default on both
+    // backends for n_kv ≥ the tile floor; Unit otherwise). For blackbox, zero-pad seq_q to the
     // stage tile and slice the real rows back below (ragged-prompt support);
     // no-op for Unit / already-aligned seq_q.
     let (strategy, is_blackbox) = cubek_strategy(n_kv);
@@ -1783,8 +1806,8 @@ pub fn cubek_attention_folded_gqa(
     assert_eq!(hq, hkv * group, "hq must equal hkv·group");
     let _ = scale; // cubek derives scale = 1/sqrt(head_dim) internally.
 
-    // Resolve the cubek strategy (blackbox tensor cores by default on CUDA for
-    // n_kv ≥ the tile floor; Unit otherwise). For blackbox, zero-pad seq_q to the
+    // Resolve the cubek strategy (blackbox tensor cores by default on both
+    // backends for n_kv ≥ the tile floor; Unit otherwise). For blackbox, zero-pad seq_q to the
     // stage tile and slice the real rows back below (ragged-prompt support);
     // no-op for Unit / already-aligned seq_q.
     let (strategy, is_blackbox) = cubek_strategy(n_kv);

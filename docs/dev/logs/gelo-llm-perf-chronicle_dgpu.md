@@ -2,7 +2,7 @@
 type: dev-log
 status: current
 created: 2026-05-29
-updated: 2026-06-04
+updated: 2026-06-05
 tags: [gelo, perf, dgpu, nvidia, rtx5090, vulkan, cuda, attention, offload, cubek, mask, chronicle]
 companion: [gelo-llm-perf-chronicle]
 ---
@@ -1705,3 +1705,159 @@ amortized over only 32 steps.
 **Artefacts:** `bench-results/diag-b8-{readback-pool,readback-pool-rerun{1,2},
 timev,gdbsample2}-2026-06-04.{log,samples.txt}`,
 `diag-b1-decsweep-K{128,1024}-`, `diag-b1-K512-tailfix-2026-06-04.log`.
+
+## 26. Decode drain re-evaluated at the real `m=16` (2026-06-05) — roofline, the serial-chain bound, and the inherent-vs-engineering split
+
+Re-opening the §25 "decode matmul round-trip" floor with a sharper question:
+what *exactly* bounds `engine:matmul:drain` (37.5 ms/step, B=1 K=1024), and how
+much is removable? The headline correction: **the offloaded decode matmul is
+`m=16`, not `m=1`.** `gelo:shield_stack` pads the single real token with the
+shield decoy rows, so every projection the GPU sees is an `(m=16, K)·(K, N)`
+**GEMM** (`MatmulKind::General`), never an `m=1` mat-vec. Any optimisation
+premised on `m=1` is moot in the shielded path (see the col-major dead-end
+below).
+
+**Roofline.** Arithmetic intensity = `m` = 16 FLOP/byte ≪ the 5090 ridge
+(~223), so decode is firmly memory-bound. Weight traffic is `m`-independent
+(8.04 GB/step), giving a floor of **4.5 ms/step** at peak BW; compute is ~0.6 ms
+(irrelevant). This is why shielding to `m=16` did not change wall vs the `m=1`
+microbench — both share the same `m`-independent weight-read floor.
+
+**Three-layer decomposition** (isolated burn microbench at the real shapes +
+`nvidia-smi dmon` on a live decode):
+
+| stage | ms/step | ×floor | bound by |
+|---|---|---|---|
+| roofline floor | 4.5 | 1.0 | weight streaming at 100% BW |
+| back-to-back kernels | 14.4 | 3.2 | kernel under-saturation |
+| production drain | 37.5 | 8.3 | + serial-chain dispatch latency |
+
+- **Kernel under-saturation (4.5 → 14.4).** Per-shape effective BW at `m=16`:
+  K/V 8%, Q/O ~25%, down 31%, gate∥up 47%, LM-head 56% of peak. Cause: at small
+  `m` the tiled GEMM emits `⌈16/Tm⌉≈1` M-tile → grid ≈ `N/Tn` blocks (~20 for
+  the small projections) → only ~12% of the ~170 SMs occupied → the memory
+  system is under-fed. An `m`-sweep on `down` puts the sweet spot at **m=8–16
+  (33–35%)**; `m=1` is the scalar-VecMat cliff (12%), and >m=64 degrades — so
+  the shield's `m=16` happens to sit near this kernel family's best point. A
+  split-K kernel would lift occupancy, **but this layer is nearly moot**: the
+  GPU is 80% idle (below), so a faster kernel barely moves wall.
+- **Serial-chain dispatch latency (14.4 → 37.5).** The 145 matmuls are
+  synchronous `tx.execute()` calls separated by in-TEE cover/uncover work, which
+  drains the GPU queue between every launch → each launch pays an
+  un-pipelined host↔device round-trip. `dmon` during steady decode: **SM
+  18–20%, mem 9%, SM clock 2850/3105 MHz, mem clock 13801/14001** — the GPU is
+  **starved, not throttled**. Of the 37.5 ms drain, ~20 ms is GPU-compute and
+  ~17 ms is the host blocked in `cuEventSynchronize` with the GPU idle. Fusing
+  145 executes into one saves only **1.2×** → the per-launch *latency* is small;
+  the cost is that it is **not hideable** (roadmap §4.D / R4: strict serial
+  data dependency `apply M_{i+1}` ← unapplied output of `M_i`; nothing to
+  overlap). This refines §25's "host-marshalling lever" — at decode the lever is
+  *round-trip count*, not transfer volume.
+
+**Negative result — col-major weight layout (m=1 VecMat fix) does not help
+decode.** cubek-matmul 0.2.0 has no good *row-major* VecMat kernel ("We don't
+have good algos for row major vecmat" — its own source); storing weights
+col-major makes an isolated `m=1` matmul 2.3–8.5× faster (`vecmat_plane_parallel`
+selected; cubek #154/#180). But end-to-end it is **neutral** (drain 37.5→37.7)
+because real decode is `m=16`, where col-major is neutral-to-**harmful** (LM-head
+`m=16`: col-major 3.7× *slower*). Reverted. **Do not re-attempt `m=1`
+matmul-kernel optimisations while the shield forces `m=16`.** The `m=16` finding
+also undercuts the in-TEE-decode-matmul lever floated in §25/handoffs: at 16×
+the `m=1` FLOPs (~128 GFLOP/step), CPU BLIS is ~an order of magnitude slower
+than the (idle-but-fast) GPU — in-TEE matmul only becomes attractive if the
+shield count drops too.
+
+**The in-TEE work is almost entirely inherent.** The drain is only 30% of the
+124 ms step; the ~93 ms of in-TEE work is what starves the GPU and sets the real
+ceiling — and it is threat-model-mandated, not removable engineering:
+
+| inherent (threat-model — cannot remove without violating the model) |
+|---|
+| cover exists: `mask_apply` before / `mask_unapply` after every offload (the cover invariant) — this *is* the serial round-trip |
+| shield exists (`m=16` decoy rows — membership hiding under `WEIGHTS-PUB`/`GPU-ADV`) |
+| in-TEE attention over secret K/V (tail attend, merge) |
+| cover rotations `rotate_heads` by `O_qk` / `C_v⁻¹` (consume secret covers) |
+| the serial dependency chain itself (no overlap — R4) |
+
+**Engineering headroom — measured, and it is marginal (correction).** A
+follow-up sweep of the candidate "bad-engineering" items found the hot paths
+already optimised, so they are *not* recoverable:
+
+- shield Gaussian fill is **already SIMD** (`gaussian::fill_gaussian` — polar,
+  bulk-byte draw, contiguous lanes); generating `k·d` decoys is inherent, not a
+  scalar-loop bug.
+- the batched mask path (`build_per_sequence_masked`) already uses a
+  **scratch-reuse pool** + **in-place slice mask** + **rayon-per-block** — the
+  pad/`to_owned` allocs are already eliminated (degenerates to single-thread at
+  B=1 only; production is B=8).
+- `rotate_heads` is already rayon-parallel; tail attention was fused/parallel in
+  §25.
+- the only confirmed micro-item is the `q_cover` σ-noise **scalar** loop
+  (`forward.rs` ~1189) vs the SIMD `fill_gaussian` — measured **0.19 ms/step**
+  (1.5×), **below the canonical-bench noise floor**. Clones are KB-scale at
+  decode. Not worth the parity risk.
+
+**Bottom line.** Decode is serial-cover-chain-bound and CPU/TEE-dominated; the
+matmul drain has no exploitable concurrency (R4) and no cheap in-TEE escape at
+`m=16`. There is **no meaningful micro-optimisation headroom** left in the
+in-TEE path — it is already tuned. The only genuinely recoverable cost is
+**structural**: `cover:tail_attend_tee` grows O(K) (§22/§25), capped by a
+**periodic tail-fold** (deferred in §25; see §27). The two levers on the
+*inherent* floor — fewer shield rows (smaller `m`), coarser cover/offload
+granularity (fewer round-trips) — are threat-model trade-offs, not engineering.
+
+**Method (reproduce):** isolated burn microbench at the Qwen3-4B decode shapes
+(`m∈{1,8,16,32,64,128,256,512}`, row- vs col-major weight, separate-vs-fused
+`Transaction::execute`); a one-shot `lhs.dims()` + stored-vs-contiguous probe in
+`execute_registered_many_f16` confirmed the production `m=16`; `nvidia-smi dmon
+-s uc` over a live `gelo_llm_prefill_decode_breakdown` run
+(`GELO_BENCH_FORCE_BATCHED=1` + the resident-cover flag set) gave the SM-idle /
+clock evidence.
+
+## 27. Periodic tail-fold — scoped + microbenched (2026-06-05): the one real decode lever, and it's an *incremental append*, not a rebuild
+
+The only genuinely-recoverable decode cost (§26) is the O(K)-growing in-TEE
+tail. §22 framed the fix as a periodic *rebuild* of the covered prefix (~322 ms,
+amortised). The key realisation here: the cover comment in
+`build_covered_prefix_cpu` says the position permutation is *"purely a cover"* —
+**attention is order-invariant over keys**. So a newly value-covered token can be
+**appended** to the resident prefix at the end (no re-permute, no rebuild); the
+fold is **incremental O(F)**, not O(prefix).
+
+**Measured constants** (`tailfold_microbench`, Qwen3-4B GQA nkvh=8 dh=128 B=1, +
+the §22-style decode-length sweep):
+
+| constant | value | source |
+|---|---|---|
+| `c_tail` (in-TEE tail attend, CPU) | **0.046 ms/tok/step** | tail_attend mean ÷ (K/2): K=256→0.050, K=1024→0.045 (linear) |
+| `c_append` (incremental fold) | 0.0183 ms/row → **0.66 ms/step** (×36 layers) | `kv_append` 1 row |
+| `c_prefix_gpu` (folded token's attend, GPU) | ~0.002–0.0033 ms/tok/step (×36) | `kv_attend_partial` slope L=512→2048 (note: jumps at L=3072 — watch a kernel transition past ~2k) |
+
+**The decisive ratio:** a token costs **0.046 ms/step on the CPU tail** but only
+**~0.003 ms/step on the GPU prefix** — **~14× cheaper, forever after** (and on
+the otherwise-80%-idle GPU). So folding is not a cadence trade-off to tune; it
+**always** pays to move a token off the tail.
+
+**Break-even (fold-every-token, F=1).** Per-step delta vs no-fold at generated
+position `t`: `+0.66 (append) +~0.15 (cover one K/V row) +0.0033·t (prefix
+growth) −0.046·t (tail removed)` = `+0.81 −0.043·t` ms. **Crosses zero at
+t ≈ 19 tokens**; beyond that the advantage grows ~0.043 ms/step per token. F=1 is
+optimal (append is 1-row and cheap, so there's no reason to batch into spiky
+folds); the design is simply *keep the covered prefix current*.
+
+**Projected impact.** Tail total = `c_tail·K²/2`; at K=1024 that's the measured
+~24 s of the 126 s decode. Folding replaces it with `≈0.81·K + c_prefix·K²/2` →
+at K=1024, decode per-step **124 → ~103 ms (~9.7 tok/s** from 8.1), and — the
+headline — **flat in K** instead of quadratic. The win compounds for long
+generations: at K=2048 the un-folded tail alone is ~96 s; folded stays ~flat.
+This converts the §20/§22/§25 "~10 tok/s decreasing-with-length floor" into a
+length-independent floor.
+
+**Open design points before implementing:** (a) cover one new K/V row per step
+with the *stored* `DecodeCover` (`C_v` rotation + per-row σ on K) and extend the
+per-row key mask by one valid slot — no re-permute; (b) confirm `kv_append`
+capacity headroom (prefix grows to `n_prompt + K`); (c) security sign-off that
+appending value-covered-but-unpermuted tokens leaks no more than decode timing
+already does (new-token position is revealed by arrival timing regardless); (d)
+re-tune the GPU attend past ~2 k prefix (the L=3072 jump). Parity gate
+(`batched_parity_b1_vs_bN`) is the correctness check.

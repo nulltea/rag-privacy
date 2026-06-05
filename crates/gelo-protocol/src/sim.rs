@@ -186,6 +186,15 @@ pub struct InProcessTrustedExecutor<E: GpuOffloadEngine> {
     /// inside every offload — strictly safer but ~48-140× more QR
     /// work per text). Toggled via [`Self::with_per_forward_mask`].
     per_forward_mask: bool,
+    /// Decode-step mask topology: `false` (default) gives each sequence
+    /// its own per-sequence mask `A_b`; `true` mixes all `B` current-token
+    /// rows under one shared dense `A` (`begin_decode_pass`). The shared-A
+    /// path is a perf experiment still behind the AloePri
+    /// `c5_batched_decode_shared_a` security gate (cross-sequence cover),
+    /// so it defaults off. Seeded once at construction from
+    /// `BATCHED_DECODE_SHARED_A`; set directly in tests via
+    /// [`Self::with_shared_decode_a`].
+    shared_a: bool,
     /// Active session mask. `Some` between `begin_forward_pass`
     /// (or `begin_prefill_pass` / `begin_decode_pass`) and
     /// `end_forward_pass` when `per_forward_mask` is enabled.
@@ -317,6 +326,7 @@ impl<E: GpuOffloadEngine + Clone> Clone for InProcessTrustedExecutor<E> {
             verify_probes: self.verify_probes,
             weights: self.weights.clone(),
             per_forward_mask: self.per_forward_mask,
+            shared_a: self.shared_a,
             session: None,
             stacked_scratch: HashMap::new(),
             per_seq_apply_scratch: HashMap::new(),
@@ -438,6 +448,11 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
             verify_probes: 0,
             weights: HashMap::new(),
             per_forward_mask: true,
+            // Decode shared-A topology: seeded once here from the
+            // experiment flag (default off — c5 security gate still open;
+            // see the field doc). Read at construction so the decode hot
+            // path never touches `environ`.
+            shared_a: std::env::var("BATCHED_DECODE_SHARED_A").as_deref() == Ok("1"),
             session: None,
             stacked_scratch: HashMap::new(),
             per_seq_apply_scratch: HashMap::new(),
@@ -490,6 +505,8 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
             verify_probes: 0,
             weights: HashMap::new(),
             per_forward_mask: false,
+            // Legacy per-offload path never runs batched decode.
+            shared_a: false,
             session: None,
             stacked_scratch: HashMap::new(),
             per_seq_apply_scratch: HashMap::new(),
@@ -752,6 +769,17 @@ impl<E: GpuOffloadEngine> InProcessTrustedExecutor<E> {
         self.session = None;
         self.stacked_scratch.clear();
         self.per_seq_apply_scratch.clear();
+        self
+    }
+
+    /// Select the decode-step mask topology: `true` uses the shared dense
+    /// `A` over all `B` current-token rows; `false` (default) keeps the
+    /// per-sequence `A_b`. Mirrors the `BATCHED_DECODE_SHARED_A` construction
+    /// seed; primarily for tests that need the shared-A path without touching
+    /// process env. Still behind the AloePri `c5_batched_decode_shared_a`
+    /// gate, so production leaves it off.
+    pub fn with_shared_decode_a(mut self, on: bool) -> Self {
+        self.shared_a = on;
         self
     }
 
@@ -1913,10 +1941,10 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
     /// `(1 + shield_k, 1 + shield_k)` — the shape-adaptive shield
     /// overlay (k=15 at n=1) lands stacked_n=16 HD₃-aligned per b.
     ///
-    /// Opt-in shared-A path (env `BATCHED_DECODE_SHARED_A=1`, gated
-    /// on AloePri `c5_batched_decode_shared_a`): one Single mask of
-    /// size `(B + k, B + k)` with `k = shield_k_for_batch(B, 8)`.
-    /// Mixes B current-token rows; HD₃-aligned at every B.
+    /// Opt-in shared-A path (`self.shared_a`, gated on AloePri
+    /// `c5_batched_decode_shared_a`): one Single mask of size
+    /// `(B + k, B + k)` with `k = shield_k_for_batch(B, 8)`. Mixes B
+    /// current-token rows; HD₃-aligned at every B.
     fn begin_decode_pass(&mut self, batch_size: usize) -> Result<()> {
         if !self.per_forward_mask {
             return Ok(());
@@ -1925,9 +1953,7 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
             return Err(anyhow!("begin_decode_pass: batch_size must be > 0"));
         }
 
-        let shared = std::env::var("BATCHED_DECODE_SHARED_A").as_deref() == Ok("1");
-
-        if shared {
+        if self.shared_a {
             // Shared dense A — size (B+k, B+k), HD₃ at every B.
             let k_base = self.shield_default.k.max(1);
             let k = crate::shield::shield_k_for_batch(batch_size, k_base);
@@ -2332,24 +2358,6 @@ impl<E: GpuOffloadEngine> TrustedExecutor for InProcessTrustedExecutor<E> {
         capacity: usize,
     ) -> Result<KvSessionId> {
         self.engine.kv_create_session(k, v, capacity)
-    }
-
-    fn resident_kv_append(
-        &mut self,
-        id: KvSessionId,
-        k_row: ArrayView3<f32>,
-        v_row: ArrayView3<f32>,
-    ) -> Result<()> {
-        self.engine.kv_append(id, k_row, v_row)
-    }
-
-    fn resident_kv_attend(
-        &mut self,
-        id: KvSessionId,
-        q: ArrayView3<f32>,
-        scale: f32,
-    ) -> Result<Array3<f32>> {
-        self.engine.kv_attend(id, q, scale)
     }
 
     fn resident_kv_attend_partial(
@@ -3147,10 +3155,6 @@ mod tests {
     /// trip must match plaintext within f32 mask floor.
     #[test]
     fn begin_decode_pass_default_per_sequence_round_trips() {
-        // Ensure the shared-A env var is OFF for this test.
-        unsafe {
-            std::env::remove_var("BATCHED_DECODE_SHARED_A");
-        }
         let mut rng = ChaCha20Rng::from_seed([91u8; 32]);
         let normal = StandardNormal;
         let batch_size = 4;
@@ -3162,10 +3166,13 @@ mod tests {
         let weight = Array2::<f32>::from_shape_fn((d_in, d_out), |_| normal.sample(&mut rng));
         let handle = WeightHandle::new(0, WeightKind::Q);
 
+        // Per-sequence A_b is the default; pin shared-A off so the test is
+        // independent of the `BATCHED_DECODE_SHARED_A` construction seed.
         let mut exec = InProcessTrustedExecutor::with_seed(
             ReferenceCpuEngine::new(),
             MaskSeed::from_bytes([93u8; 32]),
-        );
+        )
+        .with_shared_decode_a(false);
         exec.provision_weight(handle, weight.view()).unwrap();
         exec.begin_decode_pass(batch_size).unwrap();
         let out = exec.offload_linear(handle, hidden.view()).unwrap();
@@ -3187,10 +3194,6 @@ mod tests {
     /// token rows. Same round-trip math at f32 floor.
     #[test]
     fn begin_decode_pass_shared_a_round_trips() {
-        // SAFETY: single-threaded test. We restore the env at end.
-        unsafe {
-            std::env::set_var("BATCHED_DECODE_SHARED_A", "1");
-        }
         let mut rng = ChaCha20Rng::from_seed([95u8; 32]);
         let normal = StandardNormal;
         let batch_size = 6;
@@ -3201,10 +3204,14 @@ mod tests {
         let weight = Array2::<f32>::from_shape_fn((d_in, d_out), |_| normal.sample(&mut rng));
         let handle = WeightHandle::new(0, WeightKind::Q);
 
+        // Drive the shared-A topology via the field, not process env — no
+        // set_var/remove_var race with the per-sequence test under parallel
+        // `cargo test`.
         let mut exec = InProcessTrustedExecutor::with_seed(
             ReferenceCpuEngine::new(),
             MaskSeed::from_bytes([97u8; 32]),
-        );
+        )
+        .with_shared_decode_a(true);
         exec.provision_weight(handle, weight.view()).unwrap();
         exec.begin_decode_pass(batch_size).unwrap();
         // Sanity: shared-A path lands in SessionKind::Single.
@@ -3223,10 +3230,6 @@ mod tests {
                 (got - e).abs() < 5e-3,
                 "decode-batched shared-A b={i} dim {j}: got {got} want {e}",
             );
-        }
-        // Restore.
-        unsafe {
-            std::env::remove_var("BATCHED_DECODE_SHARED_A");
         }
     }
 
