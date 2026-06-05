@@ -525,12 +525,12 @@
   year   = {2025}
 }
 
-@misc{arrowmatch,
-  author = {Wang, Pengli and others},
-  title  = {Game of Arrows: Recovering Obfuscated Weights via Direction Similarity ({ArrowMatch})},
-  note   = {>98\% weight recovery. TODO: verify authors, exact title, venue (USENIX Sec 2025?),
-            year (doc cites arXiv 2602.11088)},
-  year   = {2025}
+@inproceedings{arrowmatch,
+  author    = {Wang, Pengli and others},
+  title     = {Game of Arrows: On the (In-)Security of Weight Obfuscation for On-Device {TEE}-Shielded {LLM} Partition Algorithms},
+  booktitle = {34th USENIX Security Symposium (USENIX Security)},
+  year      = {2025},
+  note      = {[verified-web] $>$98\% obfuscated-weight recovery via direction-similarity to public pretrained weights; breaks static weight-obfuscation TEE-shielded LLM partition (ObfuscaTune-class). Peking Univ.\ + ByteDance + UIUC. DOI 10.5555/3766078.3766093}
 }
 
 % --- §3.5 cryptographic-attack-surface citations (grounded 2026-06-03;
@@ -835,4 +835,29 @@
   title  = {Vulnerabilities in Partial {TEE}-Shielded {LLM} Inference with Precomputed Noise},
   note   = {[verified-web] static secret-basis reuse $\Rightarrow$ full confidentiality break + integrity bypass of SOTER and TSQP; recovers a LLaMA-3-8B layer in ${\sim}6$ min, scales to 405B. arXiv:2602.11088. NOTE: the existing `tsqp' key mis-cites this same arXiv id --- 2602.11088 is the ATTACK on TSQP, not TSQP.},
   year   = {2026}
+}
+
+% ====== §7 round-4 additions (CMIF member + hybrid-split attacks) ============
+
+@misc{cmif,
+  author = {Yu, Honglan and Wang, Yibin and Dai, Feifei and Liu, Dong and Fan, Haihui and Gu, Xiaoyan},
+  title  = {Towards Confidential and Efficient {LLM} Inference with Dual Privacy Protection ({CMIF})},
+  note   = {[verified-EdgeQuake] TEE+DP hybrid: embedding layer in client CPU-TEE; Report-Noisy-Max input-token sanitization ($\varepsilon$-DP) so the GPU runs sanitized tokens with no per-layer TEE return; ${\sim}28$--$38\%$ overhead vs CPU+GPU baseline. arXiv:2509.09091},
+  year   = {2025}
+}
+
+@inproceedings{luo_shadowcache,
+  author    = {Luo, Zhifan and Shao, Shuo and Zhang, Su and Zhou, Lijing and Hu, Yuke and Zhao, Chenxu and Liu, Zhihao and Qin, Zhan},
+  title     = {Shadow in the Cache: Unveiling and Mitigating Privacy Risks of {KV}-cache in {LLM} Inference},
+  booktitle = {Network and Distributed System Security Symposium (NDSS)},
+  year      = {2026},
+  note      = {[verified-EdgeQuake] 3 KV-cache reconstruction attacks (Inversion/Collision/Injection) rebuild the prompt from a leaked cache; proposes KV-Cloak defense. arXiv:2508.09442}
+}
+
+@misc{leftoverlocals,
+  author = {Sorensen, Tyler and Khlaaf, Heidy},
+  title  = {{LeftoverLocals}: Listening to {LLM} Responses Through Leaked {GPU} Local Memory},
+  howpublished = {Trail of Bits; CVE-2023-4969},
+  year   = {2024},
+  note   = {[verified-web] recovers data from GPU local memory across processes/containers $\Rightarrow$ reconstructs LLM responses (${\sim}181$\,MB/query, 7B on llama.cpp) on Apple/Qualcomm/AMD/Imagination GPUs. The enabling VRAM-read threat behind activation-obfuscation. arXiv:2401.16603}
 }

@@ -31,6 +31,12 @@
 \renewcommand{\topfraction}{0.9}
 \renewcommand{\textfraction}{0.07}
 \renewcommand{\floatpagefraction}{0.7}
+% Tighten float<->text separation (defaults ~20pt of rubber leave a big gap above/below
+% top/bottom floats, e.g. under a section heading). Reduce globally for a denser layout.
+\setlength{\textfloatsep}{9pt plus 2pt minus 2pt}      % column-top/bottom float <-> text
+\setlength{\dbltextfloatsep}{10pt plus 2pt minus 2pt}  % full-width table* float <-> text
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}          % between stacked floats
+\setlength{\intextsep}{2pt}         % around [h]/[H] in-text floats
 \usepackage{setspace}
 
 % --- math -------------------------------------------------------------------
@@ -74,6 +80,7 @@
   \def\subsubsectionautorefname{\S\kern-0.15em}
 \fi
 \usepackage{float}  % [H]: pin tables that must not float away from their definition
+\usepackage{stfloats}  % enables [b] bottom placement for full-width table* floats (user-tree install)
 
 % --- drafting scaffolding macros (remove before submission) -----------------
 \newcommand{\needswork}[1]{{\color{red}\textbf{[TODO: #1]}}}

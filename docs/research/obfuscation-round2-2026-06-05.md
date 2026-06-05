@@ -110,3 +110,12 @@ CMIF is TEE+DP (→ §6). FedRAG is federated-RAG (→ §7/§8 border).
    *per-batch fresh mixing* are the design answer to the Shuffling-Defense break — "dynamic,
    never-reused randomness" is what separates surviving obfuscation from broken static
    permutation (STIP/KV-Shield/Centaur). This is the §5→§7 throughline.
+
+## Correction (2026-06-05): "Shuffling-Defense break / 2605.04901" is UNVERIFIED
+The "Shuffling-Defense break (activation alignment), arXiv 2605.04901" listed above could
+**not be confirmed** by web search — no such arXiv id surfaced, and its description
+(align differently-shuffled activations across queries → recover permutation → reconstruct)
+matches **Hidden No More** (Thomas et al., ICML 2025, arXiv **2505.18332**), which is the
+real, verified prompt-reconstruction attack on permutation+noise private inference. **Do not
+cite 2605.04901.** Use `hnm` (2505.18332) for the multi-run reconstruction attack. The §7
+attack table (`tab:hybrid-attacks`) cites HNM + LeftoverLocals (2401.16603) accordingly.

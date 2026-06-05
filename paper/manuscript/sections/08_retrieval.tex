@@ -1,3 +1,4 @@
+\clearpage
 \section{Confidential Retrieval and Storage}
 \label{sec:retrieval}
 
@@ -183,6 +184,32 @@ does) or rotating keys per session. H$_2$O$_2$RAM supplies a doubly-oblivious RA
 (inside a TEE) beneath such a graph store, and GORAM is the heavier-trust 3PC reserve for
 billion-edge federated graphs.
 
+\begin{table*}[b!]
+  \centering \footnotesize
+  \caption{Known attacks on confidential retrieval, separated by index structure (dense vs
+    graph; the leakage channels differ). Each row names the attack, the leakage it consumes,
+    the schemes at risk, and the defending scheme/primitive. PPE = property-preserving
+    encryption; EMM = encrypted multi-map.}
+  \label{tab:retr-attacks}
+  \scriptsize\setlength{\tabcolsep}{5pt}
+  \begin{tabularx}{\textwidth}{@{}Y{1.05}Y{1.0}Y{0.85}Y{1.1}@{}}
+    \toprule
+    Attack (cited) & Leakage exploited & Schemes at risk & Defence \\
+    \midrule
+    \multicolumn{4}{@{}l}{\emph{Dense retrieval}}\\
+    PPE inversion~\citep{naveed_ppe_2015} + Vec2Text~\citep{morris2023vec2text} & ciphertext distance comparisons + aux.\ distribution & SAP/DCPE & CAPRISE (conditional ADCPE + query DP) \\
+    Access-pattern reconstruction~\citep{kellaris2016leakage} & which records are fetched/returned & non-oblivious SE retrieval & PIR (Panther, PIR-RAG); HE scoring (TRSE, RemoteRAG) \\
+    $k$NN query leakage~\citep{kornaropoulos_knn_2019} & $k$-NN result geometry & distance-revealing search & oblivious fetch + query DP (RemoteRAG) \\
+    Volume leakage~\citep{blackstone_revisiting_2020} & result-set size & non-volume-hiding indexes & padding / DP candidate pruning \\
+    \midrule
+    \multicolumn{4}{@{}l}{\emph{Graph retrieval}}\\
+    Volume leakage~\citep{blackstone_revisiting_2020} (bound~\citep{ando_cost_2022}) & adjacency / postings-list size & encrypted multi-maps & volume-hiding EMM (XorMM, FLASH) \\
+    Access-pattern / degree re-identification~\citep{kellaris2016leakage} & node access + adjacency degree signature & encrypted graph stores (PeGraph) & ORAM (Compass), doubly-oblivious (H$_2$O$_2$RAM), 3PC (GORAM) \\
+    Structural fingerprinting & unique subgraph topology of the exposed view & anonymized graph views & de-uniqueness sanitization (PrivGemo) \\
+    \bottomrule
+  \end{tabularx}
+\end{table*}
+
 \paragraph{Anonymization.}
 Where exact cryptography is too costly, PrivGemo~\citep{tan_privgemo} attacks the graph leak
 channels directly rather than encrypting them away. A local ``Hand'' module performs the
@@ -240,28 +267,4 @@ close this channel by hiding which node is touched, while GORAM's 3PC sqrt-ORAM 
 billion-edge federated graphs. Where cryptography is too costly, anonymization (PrivGemo)
 instead shrinks and pseudonymizes the structural fingerprint---a heuristic obfuscation, not
 a provable guarantee, with unquantified residual leakage.
-\begin{table*}[t!]
-  \centering \footnotesize
-  \caption{Known attacks on confidential retrieval, separated by index structure (dense vs
-    graph; the leakage channels differ). Each row names the attack, the leakage it consumes,
-    the schemes at risk, and the defending scheme/primitive. PPE = property-preserving
-    encryption; EMM = encrypted multi-map.}
-  \label{tab:retr-attacks}
-  \scriptsize\setlength{\tabcolsep}{5pt}
-  \begin{tabularx}{\textwidth}{@{}Y{1.05}Y{1.0}Y{0.85}Y{1.1}@{}}
-    \toprule
-    Attack (cited) & Leakage exploited & Schemes at risk & Defence \\
-    \midrule
-    \multicolumn{4}{@{}l}{\emph{Dense retrieval}}\\
-    PPE inversion~\citep{naveed_ppe_2015} + Vec2Text~\citep{morris2023vec2text} & ciphertext distance comparisons + aux.\ distribution & SAP/DCPE & CAPRISE (conditional ADCPE + query DP) \\
-    Access-pattern reconstruction~\citep{kellaris2016leakage} & which records are fetched/returned & non-oblivious SE retrieval & PIR (Panther, PIR-RAG); HE scoring (TRSE, RemoteRAG) \\
-    $k$NN query leakage~\citep{kornaropoulos_knn_2019} & $k$-NN result geometry & distance-revealing search & oblivious fetch + query DP (RemoteRAG) \\
-    Volume leakage~\citep{blackstone_revisiting_2020} & result-set size & non-volume-hiding indexes & padding / DP candidate pruning \\
-    \midrule
-    \multicolumn{4}{@{}l}{\emph{Graph retrieval}}\\
-    Volume leakage~\citep{blackstone_revisiting_2020} (bound~\citep{ando_cost_2022}) & adjacency / postings-list size & encrypted multi-maps & volume-hiding EMM (XorMM, FLASH) \\
-    Access-pattern / degree re-identification~\citep{kellaris2016leakage} & node access + adjacency degree signature & encrypted graph stores (PeGraph) & ORAM (Compass), doubly-oblivious (H$_2$O$_2$RAM), 3PC (GORAM) \\
-    Structural fingerprinting & unique subgraph topology of the exposed view & anonymized graph views & de-uniqueness sanitization (PrivGemo) \\
-    \bottomrule
-  \end{tabularx}
-\end{table*}
+
