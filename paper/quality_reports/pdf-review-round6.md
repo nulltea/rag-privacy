@@ -3,7 +3,7 @@
 Source: `pdfannots` of annotated `main.pdf` (16 annotations; JSON==markdown==16, no dropped
 buckets) **plus 2 section-wide meta-rules** from the command args (terminology audit, em-dash
 sweep). Box (G3) maps to #12; attack-subtype (G4) maps to #15. All target §5 Static Obfuscation.
-**M = 18.** **18 of 18 resolved** (all ✅). Build clean: 25pp, 0 undefined, no errors, no em-dashes, no overfull. Committed in `<pending>`.
+**M = 18.** **18 of 18 resolved** (all ✅). Build clean: 25pp, 0 undefined, no errors, no em-dashes, no overfull. Committed in `8b710f8`.
 
 Legend: ✅ done · ℹ️ answered, no change · ⏸ deferred (reason + where tracked) · ❌ won't-fix (reason) · ⬜ pending (transient).
 
