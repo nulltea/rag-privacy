@@ -20,15 +20,14 @@ trade-offs, including who must perform the one-time obfuscation and hold the sec
 examined in \cref{ssec:deployment}.
 
 \subsection{Approaches}
-Every scheme in this family makes the same high-level choice: the client applies a secret
-transform so that the server computes on values it cannot interpret, then de-obfuscates the
-result. They differ in \emph{what} they transform. Most either obfuscate the model weights (AloePri,
+In every scheme the client applies a secret transform so the server computes on values it cannot
+interpret, then de-obfuscates the result. They differ in \emph{what} they transform. Most either obfuscate the model weights (AloePri,
 ObfusLM, KV-Cloak) or transform only the input embeddings and run on a stock, unmodified
 model (SGT, OSNIP, Eguard); CodeCipher is a domain-specific outlier for source code. In the \cref{sec:framework} taxonomy the trusted core
 is none or light (Tier~1, at most a TEE holding keys), and the adversary is an
 honest-but-curious, white-box operator. The observation surface is everything the scheme
 offloads to the untrusted accelerator: the obfuscated input and output, and, depending on the
-scheme, the offloaded attention, the externalized KV-cache, and the intermediate activations
+scheme, the offloaded attention and externalized KV-cache, plus the intermediate activations
 of the offloaded matrix multiplications.
 
 \textbf{ObfusLM}~\citep{obfuslm} permutes and re-synthesizes the vocabulary, embedding, and
@@ -52,8 +51,8 @@ persistent invertible matrices $S,M$ fused offline into the attention weights, a
 permutation $\hat{P}$ refreshed per PagedAttention block, and a beacon mask $A$ that recovers
 $\hat{P}$ without storing it. It is lossless and adds ${<}0.45\%$ to prefill, and, covering the cache
 rather than the I/O channel, composes with an input/output scheme for end-to-end protection.
-With the secret matrices $S,M$ in a TEE for key custody and attention on the GPU, it is KV-Cloak's
-per-block refresh of $\hat{P}$, the structural escape of \cref{sec:obfusc-attacks}, that makes it the
+The secret matrices $S,M$ sit in a TEE for key custody, and attention runs on the GPU. KV-Cloak's
+per-block refresh of $\hat{P}$ is the structural escape of \cref{sec:obfusc-attacks}, making it the
 family's outlier and a bridge toward the hybrids of \cref{sec:hybrid}; it splits no computation,
 though, so we treat it as an obfuscation scheme.
 
@@ -236,7 +235,7 @@ accumulation. Because the secret is identical on every request, observations com
 static linear or orthogonal mixing the Gram matrix leaks the hidden-state covariance
 ($U^{\top}U{=}H^{\top}H$), and the fixed mixing makes blind source separation identifiable as
 observations pile up~\citep{belikov_gelo,hyvarinen_ica,cardoso_jade}. A trained inverter learns the
-inverse from the externalities the scheme offloads, the hidden states, attention, and KV-cache, all
+inverse from the externalities the scheme offloads (hidden states, attention, KV-cache), all
 produced under the one transform~\citep{geia,vec2text,depth_false_privacy}. The externalized
 KV-cache is reconstructible by inversion, collision, and injection, and the collision attack defeats
 a \emph{fixed} shuffle (KV-Shield) precisely because the shuffle is reused~\citep{luo_shadowcache}.
