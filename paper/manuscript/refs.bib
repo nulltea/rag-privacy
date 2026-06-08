@@ -314,18 +314,49 @@
   note      = {[verified-EdgeQuake] token-to-token confusion mapping on the embedding matrix, discrete-optimized; preserves code-task output on CodeLlama-7B. Domain-specific (code LLMs). arXiv:2410.05797}
 }
 
-@misc{buban_ee,
-  author    = {Buban, James and Zhang, Hongyang and Angione, Claudio and Yang, Harry and Farhan, Ahmad and Sultanov, Seyfal and Du, Michael and Ma, Xuran and Wang, Zihao and Zhao, Yue and Owlia, Arria and Johnston, Fielding and Colangelo, Patrick},
-  title     = {Encrypted Large Model Inference: The Equivariant Encryption Paradigm},
-  year      = {2025},
-  note      = {[verified-EdgeQuake] Equivariant Encryption (EE): layer-specific transforms preserving linear ops and a prescribed set of non-linear ops (ReLU/GeLU/SiLU/RMSNorm/LayerNorm); near-zero overhead, exact. No formal security proof (``large combinatorial space''); commercial (Nesa Research). arXiv:2502.01013}
-}
-
 @misc{centaur,
   author    = {{Centaur authors}},
   title     = {Centaur: Bridging the Impossible Trinity of Privacy, Efficiency, and Performance in Privacy-Preserving Transformer Inference},
   year      = {2024},
   note      = {static random permutation replaces SMPC non-linears; plaintext-speed. Broken by Hidden-No-More (multi-run reconstruction). Cautionary lineage. arXiv:2412.10652. TODO: verify authors, venue}
+}
+
+@inproceedings{vec2text,
+  author    = {Morris, John X. and Kuleshov, Volodymyr and Shmatikov, Vitaly and Rush, Alexander M.},
+  title     = {Text Embeddings Reveal (Almost) As Much As Text},
+  booktitle = {Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing (EMNLP)},
+  year      = {2023},
+  note      = {Vec2Text: iterative embedding-inversion that reconstructs input text from its dense embedding. arXiv:2310.06816. TODO: verify page/DOI}
+}
+
+@article{hyvarinen_ica,
+  author  = {Hyv\"{a}rinen, Aapo and Oja, Erkki},
+  title   = {Independent Component Analysis: Algorithms and Applications},
+  journal = {Neural Networks},
+  volume  = {13},
+  number  = {4--5},
+  pages   = {411--430},
+  year    = {2000},
+  note    = {Independent component analysis; foundational blind-source-separation method.}
+}
+
+@article{cardoso_jade,
+  author  = {Cardoso, Jean-Fran\c{c}ois and Souloumiac, Antoine},
+  title   = {Blind Beamforming for Non-{G}aussian Signals},
+  journal = {IEE Proceedings F (Radar and Signal Processing)},
+  volume  = {140},
+  number  = {6},
+  pages   = {362--370},
+  year    = {1993},
+  note    = {JADE: joint approximate diagonalization of eigenmatrices for blind source separation.}
+}
+
+@inproceedings{geia,
+  author    = {Li, Haoran and Xu, Mingshi and Song, Yangqiu},
+  title     = {Sentence Embedding Leaks More Information than You Expect: Generative Embedding Inversion Attack to Recover the Whole Sentence},
+  booktitle = {Findings of the Association for Computational Linguistics: ACL},
+  year      = {2023},
+  note      = {GEIA: learning-based (generative) embedding inversion, trains a GPT-2 decoder to reconstruct full sentences from embeddings. arXiv:2305.03010 (2023.findings-acl.881). TODO: verify pages}
 }
 
 @misc{translinkguard,
@@ -525,23 +556,24 @@
                ``applies directly'' to DCPE-on-vector-DB deployments}
 }
 
-@misc{depth_false_privacy,
-  author = {{Depth-False-Privacy authors}},
-  title  = {Depth Gives a False Sense of Privacy: {LLM} Internal States Inversion},
-  note   = {adaptive inverter recovers from deeper layers; undercuts layer-skip/sensitive-layer
-            exclusion. TODO: verify authors, exact title, venue, year (doc cites arXiv 2507.16372)},
-  year   = {2025}
+@inproceedings{depth_false_privacy,
+  author    = {Dong, Tian and Meng, Yan and Li, Shaofeng and Chen, Guoxing and Liu, Zhen and Zhu, Haojin},
+  title     = {Depth Gives a False Sense of Privacy: {LLM} Internal States Inversion},
+  booktitle = {USENIX Security Symposium},
+  year      = {2025},
+  note      = {[verified-web 2026-06-06] adaptive inverter recovers inputs from deep/middle internal
+               states (e.g.\ 86.88 F1 from a mid-layer of Llama-3 on a 4{,}112-token prompt), undercutting
+               the assumption that deep layers are irreversible. arXiv:2507.16372}
 }
 
 @inproceedings{hnm,
-  author    = {Thomas, Rahul and Zahran, Louai and Choi, Sunoo and Potti, Aravind and
+  author    = {Thomas, Rahul and Zahran, Louai and Choi, Erica and Potti, Akilesh and
                Goldblum, Micah and Pal, Arka},
   title     = {Hidden No More: Attacking and Defending Private Third-Party {LLM} Inference},
   booktitle = {ICML (PMLR vol.~267)},
   year      = {2025},
-  note      = {[grounded 2026-06-03] near-perfect prompt reconstruction via vocabulary
-               matching (decoder injectivity); broke STIP/PermLLM/Centaur (fixed permutations).
-               arXiv:2505.18332. TODO: verify full author order/pages}
+  note      = {near-perfect prompt reconstruction via vocabulary matching (decoder injectivity);
+               breaks STIP/PermLLM/Centaur fixed permutations. arXiv:2505.18332}
 }
 
 @misc{cascade_thomas,

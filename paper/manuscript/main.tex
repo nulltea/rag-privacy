@@ -87,6 +87,29 @@
 \newcommand{\dnote}[1]{{\color{blue!65!black}\textit{[note: #1]}}}
 \newcommand{\tq}{{\color{red}\textbf{?}}} % compact unverified-cell marker (tables)
 
+% --- numbered insight callout box (xcolor-only; no tcolorbox/mdframed dependency) --
+% Standard enumerated element: each occurrence renders "Insight N" (document-wide counter),
+% and is \label-able via the \refstepcounter (use \cref/\ref{ins:...} to reference).
+\newsavebox{\keyinsightbox}
+\newcounter{insight}
+\definecolor{insightbg}{RGB}{238,245,252}
+\definecolor{insightrule}{RGB}{8,109,150}
+\newenvironment{keyinsight}{%
+  \par\medskip\noindent
+  \setlength{\fboxsep}{4pt}%
+  \refstepcounter{insight}%
+  \begin{lrbox}{\keyinsightbox}%
+  \begin{minipage}{\dimexpr\columnwidth-2\fboxsep-2\fboxrule\relax}%
+  \small\textcolor{insightrule}{\textbf{Insight \theinsight.}}\enspace\ignorespaces}%
+  {\end{minipage}\end{lrbox}%
+  \noindent\fcolorbox{insightrule}{insightbg}{\usebox{\keyinsightbox}}%
+  \par\medskip}
+\ifhavecleveref
+  \crefname{insight}{Insight}{Insights}\Crefname{insight}{Insight}{Insights}
+\else
+  \def\insightautorefname{Insight}
+\fi
+
 % --- title block ------------------------------------------------------------
 \title{\textbf{SoK: Confidential Transformer Inference and Retrieval-Augmented
        Generation\\

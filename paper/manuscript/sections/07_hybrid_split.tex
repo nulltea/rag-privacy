@@ -121,7 +121,7 @@ Static-basis break~\citep{saini_precomp_break} & reused secret basis (SOTER/TSQP
 \addlinespace[5pt]
 Gram-matrix leak~\citep{belikov_gelo} & GELO under \emph{orthogonal} mixing $A$ & $U^{\top}U{=}H^{\top}H$ leaks the hidden-state covariance + token-similarity spectrum (passive; narrows the BSS search) & non-orthogonal $A$, or shield vectors \\
 \addlinespace[5pt]
-ICA/BSS + anchor~\citep{belikov_gelo} & GELO per-batch mixing & hidden-state reconstruction; fails under fresh $A$, partial only with many in-batch anchors & fresh per-batch $A$; shields \\
+ICA/BSS + anchor~\citep{hyvarinen_ica,cardoso_jade,belikov_gelo} & GELO per-batch mixing & hidden-state reconstruction; fails under fresh $A$, partial only with many in-batch anchors & fresh per-batch $A$; shields \\
 \addlinespace[5pt]
 KV-cache reconstruction~\citep{luo_shadowcache} & externalized KV-cache (inversion / collision / injection) & rebuilds the user prompt from a leaked cache & KV-cache obfuscation (\cref{sec:obfuscation}) \\
 \bottomrule
@@ -180,12 +180,11 @@ confidentiality-and-integrity break (recovering a LLaMA-3-8B layer in
 ${\sim}6$~minutes)~\citep{saini_precomp_break}. The schemes that survive---GELO's
 per-batch mixing, SCX's per-step keys---do so precisely because they refresh.
 
-Even refreshed obfuscation leaks \emph{second-order} structure. GELO names its own
-channel: under an orthogonal mixing $A$ the Gram matrix is invariant
-($U^{\top}U{=}H^{\top}H$), exposing pairwise inner products of the hidden states; its
-mitigations---a non-orthogonal $A$, or appended high-energy ``shield'' vectors---blunt the
-ICA/BSS and anchor attacks it evaluates, but the guarantee is per-batch and collapses
-under key reuse~\citep{belikov_gelo}. Finally, the externalized KV-cache that these schemes
+Even refreshed obfuscation leaks \emph{second-order} structure. Under an orthogonal mixing
+$A$ the Gram matrix is invariant ($U^{\top}U{=}H^{\top}H$), exposing the pairwise inner
+products of the hidden states. A non-orthogonal $A$, or appended high-energy ``shield''
+vectors, blunt the resulting ICA/BSS and anchor attacks, but the guarantee is per-batch and
+collapses under key reuse~\citep{belikov_gelo}. Finally, the externalized KV-cache that these schemes
 leave outside the enclave for throughput is itself a reconstruction
 surface---inversion, collision, and injection attacks rebuild the prompt from a leaked
 cache~\citep{luo_shadowcache}, a threat made concrete by practical GPU-memory leaks such as

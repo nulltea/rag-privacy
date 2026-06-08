@@ -2,115 +2,141 @@
 \label{sec:obfuscation}
 
 % --- scope-framing (short role-framing) ---
-Static obfuscation transforms the data and/or weights so the server sees only
-values it cannot interpret, with no---or minimal---trusted hardware. Obfuscation is the cheapest family in our taxonomy (near-plaintext cost, no trusted
-hardware---Tier~1), which is precisely why its privacy claims deserve the most scrutiny:
-the obfuscation is \emph{fixed}, so a white-box adversary can analyze it in advance. We make
-that scrutiny concrete in \cref{app:validation}, and the published inversions in
-\cref{sec:synthesis} show several static schemes recover far more plaintext than
-their authors report. On the deployment-readiness criteria, obfuscation leads on performance
-and fidelity, but \emph{threat-model fit} is its weak axis. A second deployment advantage is
-infrastructural: because the model runs unmodified, static obfuscation slots into production
-inference stacks (vLLM, llama.cpp) directly---unlike crypto or TEE schemes, which require a
-bespoke serving path. The Tier-1 label is nonetheless qualified for the schemes that
-obfuscate the \emph{weights}: someone trusted must generate and hold the secret, and sharing
-the resulting obfuscated model across tenants likely forces that step into a TEE---whereas
-the input-transform schemes keep a stock, shareable model and a client-side secret. We return
-to this split in \cref{ssec:deployment}.
+Static obfuscation transforms the data and/or weights so the server sees only values it
+cannot interpret, with no trusted hardware or only a minimal amount. It is the cheapest
+family in our taxonomy: cost is near-plaintext and no trusted hardware is required (Tier~1).
+That low cost is also why its privacy claims deserve the most scrutiny. The obfuscation is
+\emph{fixed}, and the adversary is the white-box server. It knows the obfuscation algorithm
+and its parameters, and it can passively collect the intermediary results of its own
+computation and use them to train an inverter model. On the deployment-readiness criteria,
+obfuscation leads on performance and is often near-lossless. Fidelity is not uniform across
+the family, however, and depends on how hard each scheme tunes its hiding
+(\cref{sec:obfusc-perf}).
+
+A second advantage is infrastructural. These schemes leave the model architecture intact, so
+they fit standard inference stacks far more readily than crypto or hybrid schemes, which require
+a bespoke serving path. The deployment
+trade-offs, including who must perform the one-time obfuscation and hold the secret, are
+examined in \cref{ssec:deployment}.
 
 \subsection{Approaches}
-Every scheme in this family makes the same design choice: a client-side transform of the
-input (and, in all the schemes we survey, a matching transform of the weights) so that the
-server runs a stock inference graph on values it cannot interpret and returns results the
-client de-obfuscates. In the \cref{sec:framework} taxonomy the trusted core is none or
-light (Tier~1, at most a TEE holding keys), the adversary is an honest-but-curious,
-white-box operator, and the observation surface is the obfuscated input/output (and, for
-KV-cache schemes, the externalized cache). The schemes differ in \emph{what} they transform
-and \emph{how} the hiding randomness is structured.
+Every scheme in this family makes the same high-level choice: the client applies a secret
+transform so that the server computes on values it cannot interpret, then de-obfuscates the
+result. They differ in \emph{what} they transform. Most either obfuscate the model weights (AloePri,
+ObfusLM, KV-Cloak) or transform only the input embeddings and run on a stock, unmodified
+model (SGT, OSNIP, Eguard); CodeCipher is a domain-specific outlier for source code. In the \cref{sec:framework} taxonomy the trusted core
+is none or light (Tier~1, at most a TEE holding keys), and the adversary is an
+honest-but-curious, white-box operator. The observation surface is everything the scheme
+offloads to the untrusted accelerator: the obfuscated input and output, and, depending on the
+scheme, the offloaded attention, the externalized KV-cache, and the intermediate activations
+of the offloaded matrix multiplications.
 
 \textbf{ObfusLM}~\citep{obfuslm} permutes and re-synthesizes the vocabulary, embedding, and
 head under a \emph{provable} $(k,\varepsilon)$-anonymity guarantee (cluster size $k$, DP
-budget $\varepsilon$)---a formal footing rare in this otherwise heuristic family---and,
-because the vocabulary itself is permuted, protects the \emph{generated output} as well as
-the input, at the cost of fine-tuning the model on the obfuscated embeddings before serving.
-\textbf{AloePri}~\citep{lin_aloepri}, its covariant successor, carries the secret token
-permutation beyond the embedding and head into the \emph{remaining} weights via invertible
-matrices plus Gaussian noise, so the server computes blindly on a stock-shaped graph with no
-fine-tuning; the client likewise decodes the permuted response, so it too protects the output. Its hiding strength is set by a keymat half-expansion $h$ that
-widens the residual stream to $d_{\text{obs}}{=}d{+}2h$: larger $h$ buys more heuristic
-hiding but raises the transform's condition number (compounding through depth) and the
-compute width, the three-way knob that makes its trade-off concrete.
-\textbf{SGT}~\citep{roberts_sgt} (Stained Glass) applies an
-offline-trained, input-conditioned affine/Gaussian transform to the embedding sequence,
-optimized under a mutual-information loss; the model runs unmodified on the transformed
-embeddings. \textbf{OSNIP}~\citep{cao_osnip} projects the input embedding onto an obfuscated
-semantic null space (near-orthogonal to the recoverable subspace) via a client-side
-encryptor network trained against the server LLM. \textbf{Eguard}~\citep{eguard} trains a
-projection network with a dual-level mutual-information objective explicitly against
-Vec2Text inversion, driving inversion $F_1$ to ${\approx}4\%$ while keeping ${>}98\%$ task
-accuracy. \textbf{KV-Cloak}~\citep{luo_shadowcache} obfuscates the KV-cache as
-$K'{=}S\,\hat{P}\,(K{+}A)\,M$---persistent invertible $S,M$ fused offline into the attention
-weights, a one-time permutation $\hat{P}$ refreshed \emph{per PagedAttention block}, and an
-additive beacon mask $A$ enabling stateless permutation recovery---with the secret matrices
-held in a TEE for key custody only (no compute is offloaded to the enclave); it adds
-$<$0.45\% to prefill and is lossless.
+budget $\varepsilon$). This is a formal footing that is rare in this otherwise heuristic
+family. Because the vocabulary itself is permuted, it protects the \emph{generated output} as
+well as the input, at the cost of fine-tuning the model on the obfuscated embeddings before
+serving. \textbf{AloePri}~\citep{lin_aloepri} is its covariant successor. It carries the
+secret token permutation beyond the embedding and head into the \emph{remaining} weights,
+using invertible matrices and additive Gaussian noise, so the server runs stock inference
+with no fine-tuning. The client de-obfuscates the permuted response, so AloePri protects the
+output as well. Its hiding strength is governed by several secret parameters, not one: a
+keymat expansion $h$ that widens the residual stream to $d_{\text{obs}}{=}d{+}2h$, the scale
+of the additive Gaussian noise, and a per-head permutation window. Each trades accuracy for
+hiding. The expansion in particular makes the obfuscation matrices more ill-conditioned,
+which amplifies floating-point error layer by layer and is what degrades accuracy at large
+$h$ (\cref{sec:obfusc-perf}). \textbf{KV-Cloak}~\citep{luo_shadowcache} is narrower, securing only the KV-cache (the cached
+keys and values that encode the prompt) against an attacker who reads the externalized cache,
+e.g.\ via a GPU-memory leak. It transforms the cache as $K'{=}S\,\hat{P}\,(K{+}A)\,M$:
+persistent invertible matrices $S,M$ fused offline into the attention weights, a one-time
+permutation $\hat{P}$ refreshed per PagedAttention block, and a beacon mask $A$ that recovers
+$\hat{P}$ without storing it. Only the secret matrices live in a TEE (key custody); attention
+runs on the GPU. It is lossless and adds ${<}0.45\%$ to prefill, and, covering the cache
+rather than the I/O channel, composes with an input/output scheme for end-to-end protection.
 
-Output- and domain-specific variants extend the family. Equivariant Encryption
-(\textbf{EE})~\citep{buban_ee} swaps each layer's operators for transformed equivalents that preserve
-the linear maps and a fixed set of non-linearities at near-zero overhead, but offers no
-formal security argument beyond the size of its key space---a commercial proposal we include
-with that caveat. \textbf{CodeCipher}~\citep{codecipher} targets the source-code domain: a
-token-to-token confusion map (learned on the embedding matrix) that disguises code sent to a
-cloud coding assistant while preserving the model's task output (completion, summarization,
-translation).
+The input-transform schemes leave the weights untouched. \textbf{SGT}~\citep{roberts_sgt}
+(Stained Glass) adds learned, input-conditioned Gaussian noise to the embedding sequence,
+$\tilde{x}{=}x{+}\mathcal{N}(\mu_\theta(x),\Sigma_\theta(x))$. The noise model is trained to
+minimize the mutual information between the clean and obfuscated embeddings, which by a
+PAC-Privacy bound limits how much observing $\tilde{x}$ helps an adversary reconstruct $x$,
+while a separate utility loss keeps the frozen model's output unchanged.
+\textbf{OSNIP}~\citep{cao_osnip} projects the input embedding onto an obfuscated semantic null
+space, near-orthogonal to the recoverable subspace, using a client-side encryptor network
+trained against the server LLM. \textbf{Eguard}~\citep{eguard} trains a projection network
+with a dual-level mutual-information objective aimed explicitly at Vec2Text
+inversion~\citep{vec2text}, driving inversion $F_1$ down to ${\approx}4\%$ while keeping
+${>}98\%$ task accuracy. \textbf{CodeCipher}~\citep{codecipher} is domain-specific (coding). It trains, by discrete-gradient search (snapping each update to a valid token), a token-to-token confusion
+map: a permutation of the embedding-matrix rows that replaces each code token with a different
+one, minimizing task loss while raising obfuscation (perplexity and edit distance) so the
+cloud LLM still returns the correct output. It is trained on a white-box proxy and transfers
+to black-box LLMs.
 
 \subsection{Performance and Accuracy}
 \label{sec:obfusc-perf}
-Read off the headline columns of \cref{tab:inf-perf}, this family looks unambiguously
-cheap: every scheme runs at ${\approx}1\times$ plaintext and reports near-lossless fidelity.
-Both numbers, however, are \emph{sweet-spot} readings of a control knob that trades
-security, accuracy, and performance against one another simultaneously
-(\cref{tab:obfusc-tradeoffs}); the nuance the headline hides is where each scheme pays.
+Read off the headline columns of \cref{tab:inf-perf}, this family looks unambiguously cheap.
+Every scheme runs at ${\approx}1\times$ plaintext and reports near-lossless fidelity. Both
+numbers are \emph{sweet-spot} readings of a hiding knob that trades security, accuracy, and
+performance against one another at the same time (\cref{tab:obfusc-tradeoffs}). The nuance the
+headline hides is where each scheme pays.
 
-\emph{Performance.} Online cost is genuinely small---KV-Cloak adds $<$0.45\% to prefill, EE
-and AloePri are near-zero, the learned transforms add milliseconds at the client, and only
-Eguard pays a visible ${\approx}1.7\times$ by running its projection at inference. The
-deployment-relevant cost is therefore \emph{offline}, and it splits the family in two. The
-covariant matrix schemes (AloePri, KV-Cloak) and EE need only a one-time weight transform,
-computed in minutes with no training; the learned transforms pay a real training bill---each
-trains a small add-on network on top of the frozen pretrained model, not the model itself.
-SGT trains an input-conditioned transform (hours to days), OSNIP trains a client-side
-encryptor, and Eguard inserts a $24$-layer encoder between the embedding and the secured
-space---making each training step $1.6$--$3.4\times$ slower than the same step without the
-defense, the extra cost being that encoder's forward/backward pass and its
-mutual-information objective. ObfusLM is the heaviest: it additionally fine-tunes the model
-itself on the obfuscated embeddings (server-side hours) before it can serve, tying the
-obfuscation to one checkpoint. The headline ``${\approx}0$ inference overhead'' thus conceals a setup
-cost for half the family. Set against this, the infrastructural advantage is genuine: because
-the served model is a stock checkpoint, AloePri and KV-Cloak drop into vLLM/SGLang and inherit
-KV-cache and paged-attention optimizations that crypto and TEE serving paths cannot.
+\emph{Performance.} Online cost is genuinely small. KV-Cloak adds less than $0.45\%$ to
+prefill, AloePri is near-zero, and the learned input transforms add only milliseconds
+at the client. Eguard is the one exception at inference, because it runs its extra projection
+network on every forward pass, for an inference overhead of about $1.7\times$. The larger
+costs are \emph{offline}, and they split the family in two. The weight-transform schemes
+(AloePri, KV-Cloak) need only a one-time transform of the weights, computed in minutes
+with no training. The learned transforms instead pay a training bill, and in every case it is
+a small add-on network trained on top of the frozen pretrained model, not the model itself.
+SGT trains an input-conditioned transform over hours to days. OSNIP trains a client-side
+encryptor. Eguard trains a 24-layer projection encoder, which makes each training step $1.6$
+to $3.4\times$ slower than the same step without the defense. ObfusLM is the heaviest,
+because it does not stop at an add-on: it fine-tunes the model itself on the obfuscated
+embeddings, which the paper measures at over ten hours of server time, and the fine-tuned
+weights are then tied to one checkpoint. The headline of near-zero \emph{inference} overhead
+therefore hides a real setup cost for half the family. The infrastructural advantage is
+real: every scheme but KV-Cloak runs on \emph{unmodified} inference software, pushing the
+extra work to a client-side tokenizer or embedder. AloePri serves as a re-weighted checkpoint
+on stock vLLM, and SGT, OSNIP, Eguard, and ObfusLM run the model unchanged while the client
+supplies the obfuscated embeddings or token indices. KV-Cloak alone must insert obfuscation
+operators into the attention path. None needs the bespoke serving runtime that crypto and TEE
+schemes require.
 
-\emph{Accuracy.} Fidelity is not free either, and it is the hiding knob that sets it. KV-Cloak
-and EE are exactly lossless (their transforms are algebraic identities), so accuracy is
-decoupled from their security parameter. The rest face a privacy--utility curve: ObfusLM's
-$(k,\varepsilon)$-anonymity loses ${\approx}4\%$ (classification) to ${\approx}6\%$
-(generation) and degrades monotonically as the anonymity set $k$ grows; Eguard holds
-${>}98\%$ task accuracy only because its objective is tuned against inversion specifically;
-and AloePri is the sharpest case---its keymat expansion $h$ widens the residual stream to
-$d_{\text{obs}}{=}d{+}2h$ for more hiding, but the transform's condition number compounds
-through the model's depth, so accuracy falls off a \emph{cliff} past a model-dependent $h$
-(and its RoPE-window parameter $\beta$ is a discrete pass/fail rather than a smooth dial).
-AloePri's reported $0$--$3.5\%$ loss is the sweet-spot operating point, not a guarantee that
-holds as the knob is turned for stronger hiding. The lesson for deployment is that the three
-axes are coupled: a scheme reporting ${\approx}1\times$ and near-lossless has typically
-\emph{spent its budget on the security axis}, which is where the published attacks
-(\cref{sec:obfusc-attacks}) collect the bill.
+\emph{Accuracy.} Fidelity is not free either, and the hiding knob is what sets it. KV-Cloak
+is exactly lossless, because its matrices cancel in the attention product, so its accuracy is
+independent of the security parameter. The other schemes face a privacy-utility curve. ObfusLM's $(k,\varepsilon)$-anonymity loses about $4\%$ on classification and about
+$6\%$ on generation, and degrades further as the anonymity set $k$ grows. Eguard holds above
+$98\%$ task accuracy, but only because its objective is tuned against inversion specifically.
+AloePri is the most sensitive case, and its accuracy is not set by one parameter: the keymat
+expansion $h$, the additive Gaussian noise, and the per-head permutation window all trade
+accuracy for hiding. The expansion is the sharpest of them: a larger $h$ makes the obfuscation
+matrices more ill-conditioned, so floating-point error is amplified through the model's depth
+and accuracy falls off a cliff past a model-dependent value. AloePri's reported $0$ to $3.5\%$
+loss is the reading at a tuned operating point, not a guarantee that holds as any of these
+knobs is pushed for stronger hiding.
 
-% --- §5 knob trade-off table (the dimensional view comment #6 asked for) ---
+This sensitivity is itself a deployment factor, and it separates the family by \emph{how} the
+hiding configuration is found. The training-free schemes
+(AloePri, KV-Cloak) need no training, but a human must choose their hiding parameters for each
+model, and a safe configuration is easy to miss. Such a scheme is only as strong as how well
+that choice is formalized against the model's hyperparameters and the known attack vectors. A
+well-formalized heuristic approaches an information-theoretic guarantee, but few schemes
+formalize it, so the tuning is largely empirical today. The trained schemes (SGT, OSNIP,
+Eguard, ObfusLM) instead let an add-on network learn the hiding, which removes the
+manual-tuning risk but pays a heavy training cost and is itself retrained per model.
+
+\begin{keyinsight}
+In static obfuscation, performance, accuracy, and security trade off against one another. A
+configuration strong on all three is attainable but non-trivial to find, and reaching it
+usually costs ground on at least one axis. Locating that configuration is itself a cost: the
+training-free schemes must choose their hiding parameters well, the trained schemes must train
+an add-on network.
+\end{keyinsight}
+
+% --- §5 knob trade-off table ---
 \begin{table*}[t!]
 \centering
-\caption{The static-obfuscation trade-off is set by a single hiding knob that moves all three
-axes at once. ``${\approx}1\times$, near-lossless'' (\cref{tab:inf-perf}) is the sweet-spot
+\caption{The static-obfuscation trade-off is set by a hiding knob that moves all three axes
+at once. ``${\approx}1\times$, near-lossless'' (\cref{tab:inf-perf}) is the sweet-spot
 reading; this table shows what turning the knob up costs.}
 \label{tab:obfusc-tradeoffs}
 \footnotesize
@@ -120,19 +146,17 @@ reading; this table shows what turning the knob up costs.}
 \toprule
 \textbf{Scheme} & \textbf{Hiding knob} & \textbf{Accuracy cost as knob $\uparrow$} & \textbf{Performance cost} \\
 \midrule
-AloePri & keymat expansion $h$; RoPE window $\beta$ & accuracy cliff ($\kappa$ compounds over depth; $\beta{\geq}4$ fails) & wider residual stream $d{+}2h$ (online) \\
+AloePri & keymat expansion $h$; Gaussian noise; per-head window & accuracy cliff (ill-conditioning compounds over depth) & wider residual stream $d{+}2h$ (online) \\
 \addlinespace[4pt]
-SGT & MI-loss strength & $-0.3$--$0.5$\,pp util & ${\approx}0$ online; offline train (hrs--days) \\
+SGT & MI-loss strength & $-0.3$ to $0.5$\,pp util & ${\approx}0$ online; offline train (hrs to days) \\
 \addlinespace[4pt]
 OSNIP & null-space dimension & near-lossless & ${\approx}0$ online; offline encryptor train \\
 \addlinespace[4pt]
-Eguard & MI objective / projection rank & ${>}98\%$ acc (inversion $F_1{\to}{\approx}4\%$) & ${\approx}1.7\times$ online; $1.6$--$3.4\times$ train \\
+Eguard & MI objective / projection rank & ${>}98\%$ acc (inversion $F_1{\to}{\approx}4\%$) & ${\approx}1.7\times$ online; $1.6$ to $3.4\times$ train \\
 \addlinespace[4pt]
 KV-Cloak & block size $b$ (key space $b!$) & lossless (decoupled) & $<$0.45\% prefill \\
 \addlinespace[4pt]
-ObfusLM & cluster $k$, budget $\varepsilon$ & $-4\%$ clf / $-6\%$ gen; $\downarrow$ as $k\uparrow$ & ${\approx}0$ online; offline fine-tune (hrs) \\
-\addlinespace[4pt]
-EE & key-space size & exact (decoupled) & near-zero (security unverified) \\
+ObfusLM & cluster $k$, budget $\varepsilon$ & $-4\%$ clf / $-6\%$ gen; worsens as $k\uparrow$ & ${\approx}0$ online; offline fine-tune ($>$10\,h) \\
 \addlinespace[4pt]
 CodeCipher & PPL/obfuscation threshold & $-3$\,pp Pass@1 & ${\approx}0$ online; offline opt. \\
 \bottomrule
@@ -141,60 +165,82 @@ CodeCipher & PPL/obfuscation threshold & $-3$\,pp Pass@1 & ${\approx}0$ online; 
 
 \subsection{Limitations and Known Attacks}
 \label{sec:obfusc-attacks}
-Published attacks substantiate the field-level claim that static obfuscation
-\emph{under-protects} relative to its reported guarantees. We group them by the schemes they
-break (\cref{tab:obfusc-attacks}); the hybrid-split-specific attacks on offloaded weights and
-activations (Game of Arrows, GELO's Gram/ICA leakage, static-basis recovery) are deferred to
-\cref{sec:hybrid}.
+The attacks below are best read not as proof that obfuscation fails, but as a map of how hard
+each scheme has to work to stay safe, and of where the cost lands when the tuning is wrong. We
+group them by the schemes they target (\cref{tab:obfusc-attacks}). The hybrid-split-specific
+attacks on offloaded weights and activations (Game of Arrows, the Gram-matrix and ICA/BSS
+reconstruction of mixed activations, static-basis recovery) are deferred to \cref{sec:hybrid}.
 
-\emph{Embedding and nearest-neighbour inversion.} Learned embedding transforms are the
+\emph{Embedding and nearest-neighbour inversion.} The learned embedding transforms are the
 softest target. The inversion attack on obfuscated embedding matrices~\citep{lin_inversion}
-recovers input tokens from glide-reflection-style transforms, and nearest-neighbour
-embedding-inversion attacks~\citep{kornaropoulos_knn_2019,naveed_ppe_2015} match obfuscated
-vectors back to a public embedding table; AloePri's own evaluation reports several
-state-of-the-art embedding obfuscations losing $>$30\% accuracy while still leaking $>$50\%
-of tokens. The defenses are inversion-hardened training (Eguard), a null-space projection
-(OSNIP), or a large anonymity set (ObfusLM's $k$).
+recovers input tokens directly, and nearest-neighbour attacks~\citep{kornaropoulos_knn_2019,naveed_ppe_2015}
+match obfuscated vectors back to a public embedding table. AloePri's own evaluation reports
+several prior embedding obfuscations losing more than $30\%$ accuracy while still leaking more
+than $50\%$ of tokens. That is the trade-off the better-tuned schemes work to avoid. The
+defenses are inversion-hardened training (Eguard), a null-space projection (OSNIP), or a large
+anonymity set (ObfusLM's $k$).
 
-\emph{Static-permutation collapse.} When the secret is a fixed permutation and the weights
-are public, the adversary can solve for it: schemes whose hiding is a static permutation or
-key collapse once an attacker downloads the open weights. Hidden-No-More~\citep{hnm}
-reconstructs prompts near-perfectly from the hidden states of permutation+noise schemes
-(STIP~\citep{stip}, Centaur~\citep{centaur}), and the KV-cache Collision
-attack~\citep{luo_shadowcache} defeats KV-Shield's~\citep{kvshield} fixed shuffle because the
-shuffle preserves the statistical distribution the attack aligns against. Covariant schemes
-are not automatically safe---AloePri's per-head permutations are themselves probed by
-weight-fingerprinting that matches public-weight SVD spectra~\citep{lin_aloepri} (recovery
-rates are a companion result, \needswork)---which is why noise and non-reused mixing matter.
+\emph{Recovering the secret transform.} Two attack models try to undo a weight-level
+obfuscation, and they make very different assumptions. The first is \emph{closed-form (ridge)
+recovery}. With the public obfuscated and plaintext weights in hand, and a small set of known
+token pairs harvested from wire-side leakage, the attacker fits a least-squares (ridge) inverse
+and applies it to the rest. This is how a static permutation falls once the weights are open.
+Hidden-No-More~\citep{hnm} reconstructs prompts from the hidden states of permutation-plus-noise
+schemes (STIP~\citep{stip}, Centaur~\citep{centaur}), and the KV-cache Collision
+attack~\citep{luo_shadowcache} defeats KV-Shield's~\citep{kvshield} fixed shuffle, which
+preserves the statistical distribution the attack aligns against. The second model does not
+assume open weights at all. In \emph{learning-based inversion}, the attacker knows only the
+obfuscation \emph{algorithm} (Kerckhoffs's principle), runs it with their own keys on a public
+corpus to synthesize pairs of plaintext and obfuscated values, and trains a neural inverter (a
+transformer) to learn a key-invariant inverse. The inverter is then applied to the
+externalities the deployment offloads to the untrusted accelerator: the runtime hidden states,
+the attention internals, and the KV-cache. This is the generative-inversion line of
+GEIA~\citep{geia} and Vec2Text~\citep{vec2text}, extended to internal states
+by~\citet{depth_false_privacy}, who invert a mid-layer state of Llama-3 at $86.88$ token-level
+$F_1$. Covariant schemes are not automatically safe from either model. AloePri's per-head
+permutation is probed by weight-fingerprinting on the public-weight SVD
+spectra~\citep{lin_aloepri}, and its token permutation is the master key (below). The defenses
+are additive noise, a secret that is not reused across queries, and a design that resists the
+multi-key synthesis the learning-based attacker relies on. Recovery rates against AloePri are a
+companion result (\needswork).
+
+\emph{Recovering the token permutation.} The most damaging static-weight attack recovers the
+secret \emph{token} permutation, the master key that decodes every prompt, with no runtime
+access. AloePri's vocabulary-matching attack aligns sorted-quantile features of the public and
+obfuscated weight rows~\citep{lin_aloepri}, and ObfusLM evaluates the analogous token-frequency
+attack, which re-links obfuscated tokens by their plaintext frequency profile~\citep{obfuslm}.
+Permutation alone does not stop either one. The defense is per-row noise together with a large
+anonymity set, which is why $(k,\varepsilon)$-anonymity needs a sufficiently large $k$ (recovery
+rates are a companion result, \needswork).
 
 \emph{KV-cache reconstruction.} Externalizing the KV-cache opens three
-attacks~\citep{luo_shadowcache}: \emph{Inversion} reconstructs the input directly from cached
-keys/values, \emph{Collision} exploits the algebraic weight--cache correspondence (the one
-that breaks KV-Shield), and \emph{Injection} parses the cache with a pristine model. KV-Cloak
-answers all three with a per-block one-time permutation plus a beacon mask.
+attacks~\citep{luo_shadowcache}. \emph{Inversion} reconstructs the input directly from cached
+keys and values. \emph{Collision} exploits the algebraic correspondence between the weights and
+the cache, the same weakness that breaks KV-Shield. \emph{Injection} parses the cache with a
+pristine model. KV-Cloak answers all three with its per-block one-time permutation and beacon
+mask.
 
-\emph{Deeper-layer false privacy.} The intuition that obfuscating only deep-layer
-representations is safe is itself attackable: inversion succeeds at depth~\citep{depth_false_privacy},
-so leaving early layers unprotected is not sufficient.
+\emph{Deeper-layer false privacy.} Obfuscating only the deep-layer representations is not
+sufficient. Inversion still succeeds from deep and even mid-level internal
+states~\citep{depth_false_privacy}, so leaving the early layers unprotected leaves a usable
+channel.
 
-The throughline across these results is a single design lesson: the schemes that survive are
-the ones whose hiding randomness is \emph{dynamic and never reused}---KV-Cloak's per-block
-one-time permutation and AloePri's covariant transform on the static side, GELO's per-batch
-re-mixing on the hybrid side (\cref{sec:hybrid}). The broken schemes (STIP, Centaur, KV-Shield)
-all reuse a static permutation or key, which is what lets a white-box adversary average across
-queries and solve for the secret.
+Across these attacks the pattern is not that obfuscation is broken, but that each scheme's
+safety rests on a specific, tunable margin: enough noise, a large enough key or anonymity set,
+or a secret that is not reused across queries. The schemes that fall (STIP, Centaur, KV-Shield)
+are the ones that reuse a single static secret, which lets the adversary average across queries
+to recover it.
 
 % --- §5 attack table (parallels tab:hybrid-attacks / tab:crypto-attacks) ---
 \begin{table*}[t!]
 \centering
-\caption{Attacks against static obfuscation. Embedding-inversion and static-permutation
-schemes are broken; the surviving designs refresh their hiding randomness. Companion-stage
-recovery rates for the covariant weight-fingerprint are out of scope here (\needswork).}
+\caption{Attacks against static obfuscation, grouped by target. Each scheme's safety rests on
+a tunable margin: noise, key or anonymity-set size, or a non-reused secret.}
 \label{tab:obfusc-attacks}
 \footnotesize
 \setlength{\tabcolsep}{5pt}
 \renewcommand{\arraystretch}{1.15}
-\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{3.0cm}@{}}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.7cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{2.9cm}@{}}
 \toprule
 \textbf{Attack} & \textbf{Target} & \textbf{Effect} & \textbf{Defense / status} \\
 \midrule
@@ -202,13 +248,17 @@ Embedding inversion~\citep{lin_inversion} & learned embedding transforms (SGT/OS
 \addlinespace[5pt]
 Nearest-neighbour EIA~\citep{kornaropoulos_knn_2019,naveed_ppe_2015} & token / embedding obfuscation matched to a public table & token recovery by matching obfuscated vectors to plaintext embeddings & $(k,\varepsilon)$-anonymity (ObfusLM, ${\approx}80\%$ resist) \\
 \addlinespace[5pt]
-Hidden No More~\citep{hnm} & static permutation + noise, open-weights (STIP, Centaur) & near-perfect prompt reconstruction from hidden states & dynamic per-query randomness \\
+Closed-form (ridge) recovery~\citep{hnm,lin_inversion} & static permutation + noise, open weights (STIP, Centaur) & least-squares inverse from open weights + leaked token pairs reconstructs prompts & noise; non-reused secret; no static permutation \\
 \addlinespace[5pt]
-Covariant weight fingerprint~\citep{lin_aloepri} & per-head covariant permutations (AloePri-class) & SVD/spectrum matching of public weights probes the head permutation & additive noise + non-reused mixing (rates \needswork) \\
+Learning-based inversion~\citep{geia,vec2text,depth_false_privacy} & offloaded externalities (hidden states, attention, KV-cache); no open weights needed & trained inverter learns a key-invariant map from synthetic pairs, applied to captured externalities & additive noise; multi-key-resistant design; reduce offloaded surface \\
+\addlinespace[5pt]
+Covariant weight fingerprint~\citep{lin_aloepri} & per-head covariant permutations (AloePri-class) & SVD-spectrum matching of public weights probes the head permutation & additive noise + non-reused mixing (rates \needswork) \\
+\addlinespace[5pt]
+Token-permutation recovery~\citep{lin_aloepri,obfuslm} & permuted-vocabulary schemes (ObfusLM, AloePri) & recovers the master \emph{token} permutation from static open weights (no runtime); sorted-quantile / token-frequency matching & per-row noise + large anonymity set $k$ (rates \needswork) \\
 \addlinespace[5pt]
 KV-cache inversion / collision / injection~\citep{luo_shadowcache} & externalized KV-cache (KV-Shield fixed shuffle) & rebuilds the prompt from a leaked cache; Collision breaks fixed shuffles & KV-Cloak (per-block one-time perm + beacon mask) \\
 \addlinespace[5pt]
-Deeper-layer inversion~\citep{depth_false_privacy} & ``deep layers are safe'' assumption & inversion still succeeds at depth & protect early layers; covariant transform \\
+Deeper-layer inversion~\citep{depth_false_privacy} & ``deep layers are safe'' assumption & inversion succeeds from deep and mid-level states & protect early layers; covariant transform \\
 \bottomrule
 \end{tabularx}
 \end{table*}
