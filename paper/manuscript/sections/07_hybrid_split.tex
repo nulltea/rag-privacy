@@ -16,11 +16,11 @@ activations, recovering the exact result in the enclave. On a performance-versus
 spectrum it sits \emph{below} both pure confidential-GPU inference (\cref{sec:tee}) and
 static obfuscation (\cref{sec:obfuscation}) on raw speed. It pays a real cost for the
 TEE$\leftrightarrow$GPU communication it induces (\cref{sec:synthesis}), and some members
-trade a little accuracy to offload more. But it buys two things in return: stronger
+trade a little accuracy to offload more. But it offers two advantages in return: stronger
 security than static obfuscation (the hiding randomness is refreshed, not fixed), and no
 dependence on the scarce, expensive confidential-GPU hardware that pure-TEE inference
 needs at scale. That trade, more security and commodity hardware at a performance cost
-relative to a confidential GPU, is the family's reason to exist; we substantiate where it
+relative to a confidential GPU, is the family's rationale; we substantiate where it
 lands among the families in \cref{sec:synthesis}, not here.
 
 \subsection{Approaches}
@@ -39,14 +39,14 @@ taxonomy the TCB is the enclave alone, the adversary is an honest-but-curious, w
 operator, and the observation surface is the stream of obfuscated activations crossing the
 PCIe boundary.
 
-The schemes differ in those two knobs. \textbf{GELO}~\citep{belikov_gelo} draws a
+The schemes differ in those two choices. \textbf{GELO}~\citep{belikov_gelo} draws a
 \emph{fresh} secret invertible matrix $A$ for each offloaded batch (a block of token
 hidden states $H$), forms the mixed $U{=}AH$, offloads the Q/K/V and output projections on
 $U$ to the untrusted GPU, and unmixes by $A^{-1}$ in the enclave. Because $A$ is never
 reused, recovering $H$ is a single-batch blind-source-separation problem. (GELO is the
 family's outlier on hardware: its trusted core is a \emph{confidential} GPU, an
 H200-class TEE, and it offloads to a pool of cheaper untrusted commodity GPUs such as
-L40S, a cluster-economics choice that maximizes throughput when confidential GPUs are
+L40S, a deployment choice that maximizes throughput when confidential GPUs are
 scarce.) \textbf{TwinShield}~\citep{xue_twinshield} secret-shares \emph{both} the linear
 and the non-linear layers across a CPU-TEE root and the accelerator: its OutAttnMult
 recasts the data$\times$data attention multiply as additive computation with precomputed
@@ -74,15 +74,12 @@ untrusted GPU with no per-layer return.
 
 \begin{table}[H]
 \centering
-\caption{Offloaded compute vs.\ TEE$\leftrightarrow$GPU round-trips ($L$~layers, $H$~heads,
-$T$~generated tokens; structural estimate). A high offload ratio does \emph{not} buy low
-latency. Round-trips, not FLOP\%, set the serialization cost. ``per pass'' is one forward
-pass (prefill or a decode step); ``full gen'' is the whole $T$-token generation. SCX shares
-intermediate-layer keys so only its $l_s$ first $+$ $l_e$ last layers cross per decode step
-($O(L{+}T)$ overall); ${\sim}4L$ for ObfuscaTune counts one enclave return per non-linearity.
-Offload bases differ: TwinShield/ObfuscaTune/GELO keep the non-linears (and, for GELO, the
-FFN) in the enclave, so $<$100\%; SCX/CMIF run the whole model GPU-side and protect the
-\emph{data} instead. $^\dagger$of attention linear-algebra only.}
+\caption{Offloaded compute vs.\ TEE$\leftrightarrow$GPU round-trips ($L$ layers, $H$ heads,
+$T$ generated tokens; structural estimate). ``Per pass'' is one forward pass (prefill or a decode
+step), ``full gen'' the whole $T$-token generation. Offload bases differ: TwinShield, ObfuscaTune,
+and GELO keep the non-linears (and GELO the FFN) in the enclave, so $<$100\%, while SCX and CMIF run
+the whole model GPU-side and protect the \emph{data} instead. SCX's key-sharing leaves only its first
+$l_s$ and last $l_e$ layers crossing per step ($O(L{+}T)$ overall).}
 \label{tab:roundtrips}
 \footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -93,7 +90,7 @@ Scheme & Offl.\ FLOP & per pass & full gen \\
 \midrule
 TwinShield  & ${\sim}87\%$          & $(2H{+}5)L$ & $(2H{+}5)L(1{+}T)$ \\
 ObfuscaTune & ${\sim}95\%$          & ${\sim}4L$  & ${\sim}4L(1{+}T)$ \\
-GELO        & ${\sim}76\%^\dagger$  & $2L$        & $2L(1{+}T)$ \\
+GELO        & ${\sim}76\%$  & $2L$        & $2L(1{+}T)$ \\
 SCX         & ${\sim}100\%$         & $l_s{+}l_e$ & $O(L{+}T)$ \\
 CMIF        & ${\sim}98\%$          & $1$         & $1{+}T$ \\
 \bottomrule
@@ -128,14 +125,13 @@ KV-cache reconstruction~\citep{luo_shadowcache} & externalized KV-cache (inversi
 \end{tabularx}
 \end{table*}
 
-The reported numbers (\cref{tab:inf-perf}) trace a single curve: the more linear algebra a
-scheme can safely offload, the closer it runs to plaintext. But the published figures are
-\emph{not} measured on a common footing, and two of them need care.
+The reported numbers (\cref{tab:inf-perf}) follow one trend: the more linear algebra a
+scheme can safely offload, the closer its latency approaches plaintext. But the published figures are
+\emph{not} measured on a common footing, and two of them warrant caution.
 GELO's headline ``${\approx}76\%$ offloaded at $20$--$30\%$ overhead'' is a
 \emph{synthetic microbenchmark} of a \emph{single} projection offload (random tensors
 shuttled between two processes, not an end-to-end model run), and that overhead is
-dominated ($\sim$$80\%$) by inter-process communication, not the masking. Worse, the cost
-is U-shaped in batch size: ${\sim}20\%$ only at a sweet-spot batch, rising again for large
+dominated ($\sim$$80\%$) by inter-process communication, not the masking. The overhead is also U-shaped in batch size: ${\sim}20\%$ only at an optimal batch, rising again for large
 batches as the $O(n^3)$ generation of the mixing matrix dominates; GELO also offloads only
 the attention Q/K/V/O projections (MLP offload is left to future work). The number should
 thus be read as a best-case lower bound, not a full-inference cost.
@@ -143,9 +139,9 @@ TwinShield offloads ${\sim}87\%$ of total transformer-inference \emph{FLOPs} (a 
 ratio, not a latency one), reporting $5.4\times$ over a TEE-only baseline in its verifiable
 configuration (including U-Verify), ${\sim}6.7\times$ with privacy only, and
 $4.0$--$6.1\times$\,/\,$4.9$--$7.7\times$ over prior verifiable\,/\,private schemes. But
-offloading the non-linears is precisely what \emph{costs} crossings: the masks do not
+offloading the non-linears is precisely what \emph{multiplies} the round-trips: the masks do not
 commute with SoftMax, so TwinShield splits attention into \emph{per-head} OutAttnMult and
-OutSoftMax calls and pays $(2H{+}5)L$ TEE$\leftrightarrow$GPU round-trips per forward pass
+OutSoftMax calls and pays $(2H{+}5)L$ of them per forward pass
 (\cref{tab:roundtrips}), the most of any scheme here. Its wall-clock latency is therefore
 governed by serialization, not by the $13\%$ of FLOPs it retains. ObfuscaTune reports $1.5$--$4.3\times$ over unprotected
 inference, and SCX is effectively free online ($\sim$$1\times$, $36$\,ms for Llama-7B)
@@ -158,32 +154,37 @@ TEE$\leftrightarrow$GPU \emph{serialization} it induces: each offloaded GEMM sta
 the enclave returns the preceding non-linearity, idling the GPU on the PCIe round-trip.
 \Cref{tab:roundtrips} makes this structural: it is the offload \emph{granularity}, not the
 FLOP fraction, that sets latency, and the schemes span two orders of magnitude. TwinShield's
-per-head offload is $O(HL)$ round-trips per token; GELO and ObfuscaTune are $O(L)$ (few
-crossings, but a TEE-heavy residual: GELO keeps the FFN and all non-linears in the enclave);
+per-head offload is $O(HL)$ round-trips per token; GELO and ObfuscaTune are $O(L)$ (few,
+but a TEE-heavy residual: GELO keeps the FFN and all non-linears in the enclave);
 SCX collapses decode to $O(1)$ per token by sharing intermediate-layer keys with the cloud
 ($O(L{+}T)$ overall); and CMIF reaches a single handoff by sanitizing the input so the whole
-model runs GPU-side. The family's advantage is therefore economic: commodity untrusted GPUs,
-where pure-TEE inference needs a confidential accelerator (\cref{sec:tee}) and cryptography
-pays $100$--$1000\times$ (\cref{sec:crypto}); we rank it against the other families on the
-deployment-readiness axes in \cref{sec:synthesis}.
+model runs GPU-side. Adjacent confidential-compute work reaches the same point: the
+TEE$\leftrightarrow$GPU transfer dominates, and can only be hidden by overlapping it with computation rather than by cutting it~\citep{secureinfer,pipellm}. This pipelining and concurrency angle is
+largely unexplored for the hybrid-split family.
 
 \begin{keyinsight}
-A high offload ratio does not buy low latency. What governs wall-clock time in this family is the
-number of TEE$\leftrightarrow$GPU round-trips, not the fraction of FLOPs offloaded: the schemes span
-two orders of magnitude in crossings, from TwinShield's per-head $O(HL)$ per token to CMIF's single
-handoff, and even SCX, which offloads essentially all compute, spends $86$--$94\%$ of its latency on
-TEE$\leftrightarrow$GPU memory movement rather than computation. Offload granularity, not offload
-volume, is the design variable.
+A high offload ratio does not buy low latency. The real bottleneck is the TEE$\leftrightarrow$GPU
+round-trip count: the schemes differ by two orders of magnitude in it, from TwinShield's $O(HL)$ per
+token (one per attention head per layer) to CMIF's single handoff, and even SCX, which
+offloads essentially all compute, spends $86$--$94\%$ of its latency on TEE$\leftrightarrow$GPU memory
+movement rather than computation, leaving the GPU idle on the interconnect. Offload granularity, not
+offload volume, is the design variable.
 \end{keyinsight}
 
 \begin{openproblem}
-\emph{Round-trip minimization.} Because round-trips, not FLOPs, set latency, the family's
-performance ceiling is the TEE$\leftrightarrow$GPU serialization it can avoid. SCX shows that a
-constant number of crossings per token is reachable by sharing intermediate-layer keys with the
-cloud, but only by relaxing its per-step key freshness, and memory movement still dominates its
-runtime. Is there a partition or pipelining scheme that drives round-trips and PCIe traffic toward
-their $O(1)$ floor without enlarging the trusted core or weakening per-request refresh?
+\emph{Scheduling around serialization.} For a single request the round-trip count is largely
+irreducible, set by the model's layer dependencies; the remaining lever is concurrency: overlap secure
+transfers with computation (PipeLLM's speculative pipelined encryption~\citep{pipellm}), batch across
+requests where intra-request concurrency is capped, use speculative decoding, and
+re-partition the TEE/GPU boundary at runtime to keep round-trips off the critical path. \emph{How far can a
+scheduler hide TEE$\leftrightarrow$GPU serialization behind concurrent work without weakening per-request refresh?}
 \end{openproblem}
+
+The family's advantage is therefore economic:
+commodity untrusted GPUs,
+where pure-TEE inference needs a confidential accelerator (\cref{sec:tee}) and cryptography
+pays $100$--$1000\times$ (\cref{sec:crypto}); we rank it against the other families on the
+deployment-readiness axes in \cref{sec:synthesis}.
 
 
 \subsection{Limitations and Known Attacks}
@@ -205,12 +206,11 @@ vectors, blunt the resulting ICA/BSS and anchor attacks, but the guarantee is pe
 collapses under key reuse~\citep{belikov_gelo}.
 
 \begin{openproblem}
-\emph{Cheap second-order hiding.} Even a secret refreshed every batch leaks the hidden-state Gram
-matrix under an orthogonal mixing ($U^{\top}U{=}H^{\top}H$), exposing the feature covariance and the
-token-similarity spectrum. The known fixes each cost something: a non-orthogonal mixing forces an
-$O(n^3)$ inverse per batch and risks ill-conditioning, while high-energy shield vectors displace user
-tokens and lower throughput. Is there a refreshable hiding transform that provably closes
-second-order leakage at near-orthogonal cost and without sacrificing throughput?
+\emph{Cheap second-order hiding.} The Gram-matrix leak above persists under per-batch refresh, and
+its known fixes each cost something: a non-orthogonal mixing forces an $O(n^3)$ inverse per batch and
+risks ill-conditioning, while high-energy shield vectors displace user tokens and lower throughput.
+\emph{Is there a refreshable transform that closes second-order leakage at near-orthogonal cost without
+sacrificing throughput?}
 \end{openproblem}
 
 The externalized KV-cache that these schemes
