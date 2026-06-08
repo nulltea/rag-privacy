@@ -170,9 +170,9 @@ an add-on network.
 % --- §5 attack table (parallels tab:hybrid-attacks / tab:crypto-attacks) ---
 \begin{table*}[t!]
 \centering
-\caption{Attacks against static obfuscation, split by whether the family can blunt them or only
-raise their cost. The structural attacks feed on the reused secret; the sole fix is to refresh
-it (\cref{sec:hybrid}).}
+\caption{Attacks against static obfuscation. The mitigable attacks are closed or blunted by the
+scheme's own transform and knobs; the structural attacks compound across requests under the reused
+secret, and only refreshing it removes them (\cref{sec:hybrid}).}
 \label{tab:obfusc-attacks}
 \footnotesize
 \setlength{\tabcolsep}{5pt}
@@ -181,18 +181,16 @@ it (\cref{sec:hybrid}).}
 \toprule
 \textbf{Attack} & \textbf{Target} & \textbf{Effect} & \textbf{Defense} \\
 \midrule
-\multicolumn{4}{@{}l}{\emph{Mitigable: the family's knobs raise the bar}}\\
+\multicolumn{4}{@{}l}{\emph{Mitigable: the scheme's transform and knobs raise or close the bar}}\\
 \addlinespace[3pt]
 Embedding / nearest-neighbour inversion~\citep{lin_inversion,kornaropoulos_knn_2019,naveed_ppe_2015} & learned embedding transforms (SGT, OSNIP) & recover input tokens from a single obfuscated embedding & inversion-hardened training (Eguard); null-space (OSNIP); large $k$ (ObfusLM) \\
 \addlinespace[5pt]
 Deeper-layer inversion~\citep{depth_false_privacy} & ``deep layers are safe'' assumption & inversion succeeds from deep and mid-level states & protect early layers too \\
 \addlinespace[5pt]
-\multicolumn{4}{@{}l}{\emph{Structural: feed on the reused secret; only refreshing removes them}}\\
+Single-shot weight solving~\citep{hnm,arrowmatch,saini_precomp_break,lin_aloepri,obfuslm} & direction-preserving or permutation-revealing obfuscation (STIP, TransLinkGuard, SOTER, TSQP) & with observable weights, direction similarity recovers ${>}98\%$ of weights and vocabulary-matching / precomputed-noise solve the static secret in one shot & a direction-changing, noised transform closes it (AloePri's key matrices + noise; ObfusLM's anonymity), at an accuracy cost \\
+\addlinespace[5pt]
+\multicolumn{4}{@{}l}{\emph{Structural: compound across requests under the reused secret; only refreshing removes them}}\\
 \addlinespace[3pt]
-Static-key weight recovery~\citep{hnm,arrowmatch,saini_precomp_break} & static weight / permutation obfuscation (AloePri, ObfusLM, CodeCipher; shown on STIP, TransLinkGuard, SOTER) & open weights let the static secret be solved; ${>}98\%$ weight recovery; single-shot prompt reconstruction & noise + large key raise cost; not removable while weights are observable \\
-\addlinespace[5pt]
-Per-head / token-permutation recovery~\citep{lin_aloepri,obfuslm} & static covariant permutations (AloePri-class) & SVD-spectrum fingerprint recovers the head permutation; sorted-quantile / token-frequency matching recovers the token permutation & per-row noise + large $k$ (cost only) \\
-\addlinespace[5pt]
 Gram-matrix + ICA/BSS~\citep{belikov_gelo,hyvarinen_ica,cardoso_jade} & static linear / orthogonal mixing & $U^{\top}U{=}H^{\top}H$ leaks the covariance; fixed mixing makes BSS identifiable as observations accumulate & refreshed or non-orthogonal mixing \\
 \addlinespace[5pt]
 Learning-based inversion~\citep{geia,vec2text,depth_false_privacy} & externalities offloaded under a fixed transform & a trained inverter learns the inverse from accumulated or synthetic data & refresh; reduce offloaded surface \\
@@ -201,15 +199,14 @@ KV-cache inversion / collision / injection~\citep{luo_shadowcache} & externalize
 \bottomrule
 \end{tabularx}
 \end{table*}
-Static obfuscation applies one secret transform and reuses it on every request. That reuse is
-the family's structural vulnerability, and it is what the attacks here exploit. The attacks are
-best read not as proof that obfuscation fails, but as a map of how hard each scheme has to work
-and of where that work runs out. They fall into two kinds (\cref{tab:obfusc-attacks}). The
-first kind the family can \emph{blunt} by spending more of its budget: more noise, a larger
-key, a null-space projection, or inversion-hardened training. The second kind it cannot
-structurally defend, because the attacks feed on the fixed transform itself, so the family's
-machinery only raises their cost. The single structural fix is to stop reusing the secret,
-which moves a scheme out of the static family (\cref{sec:hybrid}).
+Static obfuscation applies one secret transform and reuses it on every request. The attacks here
+are best read not as proof that obfuscation fails, but as a map of how hard each scheme has to work
+and of where that work runs out. They fall into two kinds (\cref{tab:obfusc-attacks}). The first
+kind a scheme can close or blunt with its own transform and knobs: a stronger, direction-changing
+transform, more noise, a null-space projection, or inversion-hardened training. The second kind is
+genuinely structural. Because the one secret is identical on every request, these attacks compound
+across requests, and no setting of the knobs removes them; the only fix is to stop reusing the
+secret, which moves a scheme out of the static family (\cref{sec:hybrid}).
 
 \emph{Single-query inversion (mitigable).} The learned embedding transforms are invertible from
 a single observation: the inversion attack on obfuscated embedding
@@ -220,38 +217,44 @@ training (Eguard, $F_1{\to}{\approx}4\%$), a null-space projection (OSNIP), or a
 set (ObfusLM's $k$) materially reduce recovery. AloePri's evaluation still reports prior obfuscation schemes losing more than $30\%$ accuracy while leaking more than $50\%$ of
 tokens, the trade-off the better-tuned schemes work to avoid.
 
-\emph{Recovery from the fixed transform (structural).} The remaining attacks exploit that the
-secret never changes, and the family cannot close them. With the open weights in hand the
-static transform is solvable: vocabulary matching reconstructs prompts from
-permutation schemes~\citep{hnm}, direction-similarity recovers more than $98\%$ of statically
-obfuscated weights~\citep{arrowmatch}, and a precomputed-noise attack peels a LLaMA-3-8B layer
-in minutes~\citep{saini_precomp_break}. These were demonstrated on STIP, TransLinkGuard, and
-SOTER, but the broken property, a fixed secret folded into observable weights, is shared by
-AloePri, ObfusLM, and CodeCipher. The same fixity exposes AloePri's per-head permutation to
-SVD-spectrum fingerprinting and its token permutation to sorted-quantile and token-frequency
-matching~\citep{lin_aloepri,obfuslm}. Under a static linear or orthogonal mixing the Gram matrix
-leaks the hidden-state covariance ($U^{\top}U{=}H^{\top}H$), and because the mixing is identical
-on every request, blind source separation becomes identifiable as observations
-accumulate~\citep{belikov_gelo,hyvarinen_ica,cardoso_jade}. Even without the weights, an
-adversary can train an inverter on the externalities a static scheme offloads, namely the hidden
-states, attention, and KV-cache, since all are produced under the one
-transform~\citep{geia,vec2text,depth_false_privacy}. The externalized KV-cache is likewise
-reconstructible by inversion, collision, and injection~\citep{luo_shadowcache}, and the
-collision attack defeats a \emph{fixed} shuffle (KV-Shield) precisely because the shuffle is
-reused. Noise and a larger key raise the cost of every one of these, but none is removed while
-the secret stays static.
+\emph{Single-shot weight solving (mitigable by a strong transform).} With the weights observable, a
+transform that only permutes or preserves vector directions is solvable from a single observation:
+direction similarity alone recovers more than $98\%$ of such weights~\citep{arrowmatch}, and
+vocabulary-matching and precomputed-noise attacks reconstruct the secret outright on the lightweight
+schemes that leave directions intact (STIP, TransLinkGuard, SOTER, TSQP)~\citep{hnm,saini_precomp_break}.
+The schemes we report defeat this because they do more than permute: AloePri wraps its permutation in
+random invertible key matrices and additive noise, and ObfusLM in a $(k,\epsilon)$-anonymity synthesis,
+which changes the very directions the attack relies on. The protection is heuristic, bought with
+accuracy rather than proven, but it holds at the recommended settings, where AloePri recovers fewer
+than $5\%$ of tokens~\citep{lin_aloepri,obfuslm}.
 
-\emph{The structural escape.} The fixed secret leaks through two channels that close
-differently. The cross-request channel, where the adversary accumulates externalities or aligns
-a reused cache, is closed by \emph{refreshing} the secret. Within this family only KV-Cloak does
-so, drawing a fresh permutation per PagedAttention block, which is why it alone withstands the
-collision attack; the hybrid-split schemes generalize the move with per-batch or per-step
-refresh (\cref{sec:hybrid}). The open-weights channel is harder. When the obfuscated weights are
-themselves observable, as they are for AloePri, ObfusLM, and CodeCipher, the static transform
-can be solved from them directly, and refreshing is not an option short of re-obfuscating the
-model on every request. That channel closes only by keeping the weights out of the adversary's
-view, which means a TEE and a step out of the static family. Noise, a larger key, and
-inversion-hardened training raise the attacker's cost on both channels but remove neither.
+\emph{Accumulation under the reused secret (structural).} What no static transform closes is
+accumulation. Because the secret is identical on every request, observations compound. Under a
+static linear or orthogonal mixing the Gram matrix leaks the hidden-state covariance
+($U^{\top}U{=}H^{\top}H$), and the fixed mixing makes blind source separation identifiable as
+observations pile up~\citep{belikov_gelo,hyvarinen_ica,cardoso_jade}. A trained inverter learns the
+inverse from the externalities the scheme offloads, the hidden states, attention, and KV-cache, all
+produced under the one transform~\citep{geia,vec2text,depth_false_privacy}. The externalized
+KV-cache is reconstructible by inversion, collision, and injection, and the collision attack defeats
+a \emph{fixed} shuffle (KV-Shield) precisely because the shuffle is reused~\citep{luo_shadowcache}.
+The deterministic token map adds a standing residual, leaking token frequencies like a substitution
+cipher, which AloePri and ObfusLM suppress but cannot remove~\citep{lin_aloepri,obfuslm}.
+
+\emph{The structural escape.} The accumulation channel, where a trained inverter or blind source
+separation strengthens as observations pile up under the one secret, is closed only by
+\emph{refreshing} that secret. Within this family only KV-Cloak does so, drawing a fresh permutation
+per PagedAttention block, which is why it alone withstands the collision attack; the hybrid-split
+schemes generalize the move with per-batch or per-offload refresh (\cref{sec:hybrid}).
+
+\begin{openproblem}
+\emph{Re-obfuscation scheduling.} A fixed secret is cheap, but under it a trained inverter and blind source separation only strengthen
+as observations accumulate. Refreshing the secret resets that accumulation; refreshing on every
+request removes it but is costly. \emph{Is there a refresh
+period longer than a single request, yet short enough that neither attack succeeds within one
+window, that holds recovery below a target at a fraction of the per-request cost?} A heuristic for the
+re-obfuscation frequency that minimizes accumulation under a latency budget is an open problem.
+\label{op:refresh-frequency}
+\end{openproblem}
 
 
 % Validation moved to App.~\ref{app:validation}: decoupled from static-obfuscation-only and

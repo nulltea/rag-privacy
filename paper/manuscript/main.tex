@@ -110,6 +110,27 @@
   \def\insightautorefname{Insight}
 \fi
 
+% --- numbered open-problem callout box (mirrors keyinsight; own counter + colour) --
+\newsavebox{\openproblembox}
+\newcounter{openproblem}
+\definecolor{openprobbg}{RGB}{252,246,235}
+\definecolor{openprobrule}{RGB}{176,96,16}
+\newenvironment{openproblem}{%
+  \par\medskip\noindent
+  \setlength{\fboxsep}{4pt}%
+  \refstepcounter{openproblem}%
+  \begin{lrbox}{\openproblembox}%
+  \begin{minipage}{\dimexpr\columnwidth-2\fboxsep-2\fboxrule\relax}%
+  \small\textcolor{openprobrule}{\textbf{Open Problem \theopenproblem.}}\enspace\ignorespaces}%
+  {\end{minipage}\end{lrbox}%
+  \noindent\fcolorbox{openprobrule}{openprobbg}{\usebox{\openproblembox}}%
+  \par\medskip}
+\ifhavecleveref
+  \crefname{openproblem}{Open Problem}{Open Problems}\Crefname{openproblem}{Open Problem}{Open Problems}
+\else
+  \def\openproblemautorefname{Open Problem}
+\fi
+
 % --- title block ------------------------------------------------------------
 \title{\textbf{SoK: Confidential Transformer Inference and Retrieval-Augmented
        Generation\\
