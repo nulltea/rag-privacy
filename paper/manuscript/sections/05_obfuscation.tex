@@ -50,9 +50,12 @@ keys and values that encode the prompt) against an attacker who reads the extern
 e.g.\ via a GPU-memory leak. It transforms the cache as $K'{=}S\,\hat{P}\,(K{+}A)\,M$:
 persistent invertible matrices $S,M$ fused offline into the attention weights, a one-time
 permutation $\hat{P}$ refreshed per PagedAttention block, and a beacon mask $A$ that recovers
-$\hat{P}$ without storing it. Only the secret matrices live in a TEE (key custody); attention
-runs on the GPU. It is lossless and adds ${<}0.45\%$ to prefill, and, covering the cache
+$\hat{P}$ without storing it. It is lossless and adds ${<}0.45\%$ to prefill, and, covering the cache
 rather than the I/O channel, composes with an input/output scheme for end-to-end protection.
+With the secret matrices $S,M$ in a TEE for key custody and attention on the GPU, it is KV-Cloak's
+per-block refresh of $\hat{P}$, the structural escape of \cref{sec:obfusc-attacks}, that makes it the
+family's outlier and a bridge toward the hybrids of \cref{sec:hybrid}; it splits no computation,
+though, so we treat it as an obfuscation scheme.
 
 The input-transform schemes leave the weights untouched. \textbf{SGT}~\citep{roberts_sgt}
 (Stained Glass) adds learned, input-conditioned Gaussian noise to the embedding sequence,
