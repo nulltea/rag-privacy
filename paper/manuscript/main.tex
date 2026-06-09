@@ -13,11 +13,26 @@
 % =============================================================================
 \documentclass[10pt,letterpaper,twocolumn]{article}
 
+% --- Texifier built-in (TexpadTeX) compatibility toggle ---------------------
+% TexpadTeX (Texifier's internal LIVE typesetter) chokes on two packages:
+%   - microtype: unsupported engine (pdf/Xe/luaLaTeX only) -> it bails.
+%   - cleveref:  its babel \extras<lang> hook sends TexpadTeX into an infinite
+%                loop at \begin{document}.
+% stfloats IS supported by TexpadTeX (loads fine), so it is kept in both modes.
+% Leave \texpadtexfalse for the real build (pdflatex/MacTeX = full fidelity).
+% Flip to \texpadtextrue ONLY for the built-in LIVE preview: it skips microtype
+% and cleveref. Cost is cosmetic: no microtype micro-spacing, and cross-refs use
+% the \autoref fallback instead of cleveref (still render as section symbols).
+% \maybeusepackage hides the literal \usepackage{...} token so Texifier's
+% pre-typeset scan cannot reject microtype; under \texpadtexfalse it loads as usual.
+\newif\iftexpadtex \texpadtextrue
+\newcommand{\maybeusepackage}[1]{\iftexpadtex\else\csname usepackage\endcsname{#1}\fi}
+
 % --- encoding & fonts (pdflatex path) ---------------------------------------
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
-\usepackage{microtype}
+\maybeusepackage{microtype}
 
 % --- page layout ------------------------------------------------------------
 \usepackage[margin=0.75in]{geometry}
@@ -59,8 +74,10 @@
 \hypersetup{colorlinks=true,linkcolor=blue!50!black,
             citecolor=green!45!black,urlcolor=blue!60!black}
 % cleveref is nicer but not in minimal TeXLive installs; fall back to \autoref.
+% Under TexpadTeX force the fallback: TexpadTeX bundles cleveref, but cleveref's
+% babel \extras<lang> hook sends TexpadTeX into an infinite loop at \begin{document}.
 \newif\ifhavecleveref
-\IfFileExists{cleveref.sty}{\haveclevereftrue}{\haveclevereffalse}
+\iftexpadtex\haveclevereffalse\else\IfFileExists{cleveref.sty}{\haveclevereftrue}{\haveclevereffalse}\fi
 \ifhavecleveref
   \usepackage[capitalise]{cleveref}
   % Sections/subsections render as §X / §X.Y (compact; standard in security venues).
@@ -80,7 +97,7 @@
   \def\subsubsectionautorefname{\S\kern-0.15em}
 \fi
 \usepackage{float}  % [H]: pin tables that must not float away from their definition
-\usepackage{stfloats}  % enables [b] bottom placement for full-width table* floats (user-tree install)
+\csname usepackage\endcsname{stfloats}  % [b] bottom placement for full-width table* floats; supported by TexpadTeX, so always loaded (name hidden from Texifier's package scan)
 
 % --- drafting scaffolding macros (remove before submission) -----------------
 \newcommand{\needswork}[1]{{\color{red}\textbf{[TODO: #1]}}}
@@ -112,23 +129,23 @@
 
 % --- numbered open-problem callout box (mirrors keyinsight; own counter + colour) --
 \newsavebox{\openproblembox}
-\newcounter{openproblem}
+\newcounter{openprob}  % counter name kept distinct from the environment name (TexpadTeX loops on a clash)
 \definecolor{openprobbg}{RGB}{252,246,235}
 \definecolor{openprobrule}{RGB}{176,96,16}
 \newenvironment{openproblem}{%
   \par\medskip\noindent
   \setlength{\fboxsep}{4pt}%
-  \refstepcounter{openproblem}%
+  \refstepcounter{openprob}%
   \begin{lrbox}{\openproblembox}%
   \begin{minipage}{\dimexpr\columnwidth-2\fboxsep-2\fboxrule\relax}%
-  \small\textcolor{openprobrule}{\textbf{Open Problem \theopenproblem.}}\enspace\ignorespaces}%
+  \small\textcolor{openprobrule}{\textbf{Open Problem \theopenprob.}}\enspace\ignorespaces}%
   {\end{minipage}\end{lrbox}%
   \noindent\fcolorbox{openprobrule}{openprobbg}{\usebox{\openproblembox}}%
   \par\medskip}
 \ifhavecleveref
-  \crefname{openproblem}{Open Problem}{Open Problems}\Crefname{openproblem}{Open Problem}{Open Problems}
+  \crefname{openprob}{Open Problem}{Open Problems}\Crefname{openprob}{Open Problem}{Open Problems}
 \else
-  \def\openproblemautorefname{Open Problem}
+  \def\openprobautorefname{Open Problem}
 \fi
 
 % --- title block ------------------------------------------------------------

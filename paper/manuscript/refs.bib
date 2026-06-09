@@ -386,11 +386,31 @@
 }
 
 @misc{sparse_dp,
-  author = {{SPARSE authors}},
-  title  = {{SPARSE}: Concept-Masked Metric Differential Privacy for {LLM} Embeddings},
-  note   = {concept mask + Mahalanobis-Laplace metric-DP. TODO: verify authors, exact title,
-            venue (ICLR 2026?), year (doc cites arXiv 2602.07090)},
+  author = {Tsai, Yu-Che and others},
+  title  = {Concept-Aware Privacy Mechanisms for Defending Embedding Inversion Attacks},
+  note   = {[verified-EdgeQuake] SPARSE: concept-mask + Mahalanobis (elliptical Laplace)
+            metric-LDP. arXiv 2602.07090. TODO: verify venue (ICLR 2026?)},
   year   = {2026}
+}
+
+@misc{nvdp,
+  author = {El Zein, Dina and Henderson, James},
+  title  = {Differential Privacy for Transformer Embeddings with Nonparametric
+            Variational Information Bottleneck},
+  note   = {[verified-EdgeQuake] NVDP: learned NVIB posterior over multi-vector
+            embeddings; Renyi-DP converted to Bayesian-DP; BERT-base on GLUE.
+            arXiv 2601.02307 (Idiap/EPFL)},
+  year   = {2026}
+}
+
+@misc{dp_fusion,
+  author = {Thareja, Rushil and Nakov, Preslav and Vepakomma, Praneeth and Lukas, Nils},
+  title  = {{DP-Fusion}: Token-Level Differentially Private Inference for Large
+            Language Models},
+  note   = {[verified-EdgeQuake] per-token distribution blending toward a
+            sensitive-token-free baseline; (alpha,eps)-RDP over context token groups;
+            m+1 passes/token. Qwen2.5-7B. arXiv 2507.04531 (MBZUAI/MIT)},
+  year   = {2025}
 }
 
 @misc{tang_dprag,
@@ -642,6 +662,26 @@
   doi       = {10.1109/sp.2019.00015},
   note      = {[grounded 2026-06-03] k-NN/ANN value reconstruction from query leakage
                (rel.\ error 2.9\%$\to$0.003\%); applies to non-oblivious encrypted retrieval}
+}
+
+@misc{mia_rag,
+  author = {Anderson, Maya and Amit, Guy and Goldsteen, Abigail},
+  title  = {Is My Data in Your Retrieval Database? Membership Inference Attacks
+            Against Retrieval Augmented Generation},
+  note   = {[verified-web] black-box/gray-box MIA inferring document membership in a
+            RAG corpus from system outputs. arXiv 2405.20446 (ICISSP 2025)},
+  year   = {2024}
+}
+
+@inproceedings{hitaj_gan,
+  author    = {Hitaj, Briland and Ateniese, Giuseppe and P{\'e}rez-Cruz, Fernando},
+  title     = {Deep Models Under the {GAN}: Information Leakage from Collaborative
+               Deep Learning},
+  booktitle = {ACM CCS},
+  year      = {2017},
+  doi       = {10.1145/3133956.3134012},
+  note      = {[verified-web] GAN-based reconstruction of training/representation data;
+               the inversion threat NVDP is motivated against}
 }
 
 @inproceedings{blackstone_revisiting_2020,

@@ -203,9 +203,11 @@ PipeLLM/STIP from their preprints --- re-confirm at submission}
     CodeCipher~\cite{codecipher} & token confusion map (code) & CodeLlama-7B   & ${\approx}1\times$ (offline opt.)               & $-3$\,pp Pass@1 \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Differential privacy} --- \cref{sec:dp}}\\
-    DP-Forward~\cite{du_dpforward} & matrix-Gaussian fwd & BERT enc.         & ${\approx}1\times$                              & ${\approx}94\%$ SST2 \\
-    SPARSE~\cite{sparse_dp}   & metric-DP mask    & GTR/SBERT enc.          & ${\approx}1\times$                              & 65\% util @$\varepsilon{=}5$ \\
-    DP-KSA~\cite{tang_dprag}  & output-DP         & Qwen2.5-3B/Llama        & ${\approx}N\times$ gen.\ calls                  & F1 $+3.5$ @$\varepsilon{=}8$ \\
+    DP-Forward~\cite{du_dpforward} & matrix-Gaussian fwd & BERT enc.         & ${\approx}1\times$ (offl.\ FT)                  & ${\approx}94\%$ SST2 \\
+    SPARSE~\cite{sparse_dp}   & metric-DP mask    & GTR/SBERT enc.          & ${\approx}1\times$ (offl.\ mask)                & 65\% util @$\varepsilon{=}5$ \\
+    NVDP~\cite{nvdp}          & learned VIB (Bayes-DP) & BERT-base (GLUE)   & ${\approx}1\times$ (offl.\ NVIB)                & 83.0\% MRPC @$\varepsilon_\mu{\approx}11$ \\
+    DP-KSA~\cite{tang_dprag}  & output-DP (sample-aggr.) & Qwen2.5-3B/Llama & ${\approx}N\times$ gen.\ ($N{\approx}80$)       & F1 $+3.5$ @$\varepsilon{=}8$ \\
+    DP-Fusion~\cite{dp_fusion}& output-DP (dist.\ blend) & Qwen2.5-7B       & $m{+}1$ pass/tok (${\approx}1\times$ lat.)      & ppl $1.43$ @$\varepsilon{\approx}16$ \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Hybrid split (Tier 2)} --- \cref{sec:hybrid}}\\
     GELO~\cite{belikov_gelo}  & conf.\,GPU + per-batch mix & Llama-2-7B        & $1.2$--$1.3\times$ (76\% offl., microbench.)    & exact \\

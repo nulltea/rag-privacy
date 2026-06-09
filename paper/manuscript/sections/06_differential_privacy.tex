@@ -1,39 +1,172 @@
 \section{Differential Privacy}
 \label{sec:dp}
 
-% --- scope-framing (short role-framing; bodies stay \needswork) ---
-Differential privacy adds calibrated noise to obtain a formal---but
-probabilistic---guarantee, applied to embeddings (a noised forward pass), to queries
-(distance-DP perturbation), or to the generated output (output-DP against extraction).
-A practical divide runs through the family: embedding-DP typically requires
-\emph{retraining} or fine-tuning the model under the noise mechanism---a substantial
-deployment cost---whereas query- and output-DP attach to an unmodified model.
-Like obfuscation its inference cost is near-zero compute; unlike obfuscation it buys a provable
-bound, paid for in utility as $\varepsilon$ tightens. The output-side variant
-(DP-RAG/DP-KSA) is notable for composing orthogonally with any retrieval mechanism,
-making it a generic defense against the corpus-extraction attacks of
-\cref{sec:synthesis}. On the deployment-readiness criteria, DP scores
-well on performance and offers a formal threat model, trading \emph{fidelity}
-(recall/accuracy) as $\varepsilon$ tightens (\cref{sec:synthesis}).
+Differential privacy (DP) buys a formal but probabilistic guarantee by adding calibrated
+noise. Several schemes in other families borrow DP machinery: the covariant obfuscation of
+\cref{sec:obfuscation} adds Gaussian noise to weights and analyzes it under a Rényi-metric
+relaxation, ObfusLM perturbs synthesized embedding weights under a Laplace mechanism, and the
+hybrid SCX of \cref{sec:hybrid} injects Laplace noise into its KV-cache encoding. What sets the
+schemes in this section apart is not that they use noise but where the guarantee comes from. In
+the obfuscation and hybrid cases the noise is an adjunct to a secret key (a permutation, a
+one-time encoding) and is applied \emph{statically to the model's weights}; protection ultimately
+rests on the secret, and if it leaks the noise alone does not save it.
+
+The schemes here derive
+protection from the \emph{randomness alone}, with no secret to keep: the bound holds against an
+adversary who knows the weights, the mechanism, and the budget, and the noise is drawn
+\emph{fresh per request} and applied to the data or the output rather than baked into the
+weights. The price is paid purely in fidelity, which degrades as the budget $\varepsilon$ shrinks.
+A second axis decides what the family can protect, and we use it to organize the approaches:
+whether the noise is added \emph{locally} (the client perturbs its own input) or \emph{centrally}
+(a trusted operator perturbs an output), which fixes the protected asset and the adversary, the
+confidentiality-scope axis of \cref{sec:threat-axes}. On the deployment-readiness criteria DP
+scores well on performance, near-plaintext at inference, and offers a formal threat model,
+trading fidelity as $\varepsilon$ shrinks (\cref{sec:synthesis}).
 
 \subsection{Approaches}
-% Calibrated noise with formal (epsilon, delta) / metric-DP / RDP guarantees,
-% applied to embeddings (forward pass), to queries (DistanceDP), or to training.
-% Map onto §2: TCB = none; formal but probabilistic; the epsilon-utility trade.
-\needswork{describe DP for embeddings vs queries vs training; metric-DP / RDP}
+The schemes agree on the primitive, calibrated noise under a budget $\varepsilon$, but differ on
+\emph{which} DP notion they target and \emph{where} the noise enters. The noise mechanism fixes
+the notion: the Gaussian mechanism yields $(\varepsilon,\delta)$-DP with tight Rényi composition;
+the Laplace mechanism and its generalized (metric) form yield pure $\varepsilon$-DP and
+metric-LDP, whose indistinguishability degrades with the distance between inputs; and the
+exponential mechanism handles discrete selection, where additive noise is meaningless, by sampling
+an output with probability tilted toward high utility. Where the noise enters splits the family
+into a local branch (input and embedding) and a central branch (output).
 
-\subsection{Representative Schemes}
-The DP \emph{inference} schemes---DP-Forward (matrix-Gaussian noise in the embedding
-forward pass), SPARSE (metric-DP embedding mask), and DP-KSA (output-DP on the generated
-answer)---are reported in the shared inference table (\cref{tab:inf-perf}). The query-side DP
-retrieval scheme RemoteRAG is catalogued with the retrieval work (\cref{sec:retrieval}).
-RemoteRAG applies DistanceDP to the \emph{query} to coarse-retrieve a candidate set, then
-computes exact top-$k$ similarity over those candidates under homomorphic encryption;
-as a retrieval scheme it is covered in \cref{sec:retrieval} (\cref{tab:crypto-vec}).
+\paragraph{Local DP: input and embedding.}
+In the local model the client perturbs its own data before sending it, so the operator is never
+trusted; the cost is that the client must run the encoder, moving part of the compute and trust
+base onto the device. Token-level local DP replaces discrete tokens through an exponential
+mechanism (SANTEXT, InferDPT); as a fixed client-side map it is one of the static input transforms
+of \cref{sec:obfuscation}, and we treat it there. The three embedding schemes (\cref{tab:inf-perf})
+form a progression in \emph{how much of the noise is learned}. \textbf{DP-Forward}~\cite{du_dpforward}
+learns nothing about the noise: it adds an analytic matrix-Gaussian calibrated only to the $L_2$
+sensitivity of the pre-noise layers, a \emph{task-agnostic} mechanism (the noise does not depend on
+the downstream task), and the model is fine-tuned to perform on the noisy embeddings; the guarantee
+is standard $(\varepsilon,\delta)$-DP, in its local sequence form $(\varepsilon,\delta)$-SeqLDP
+(${\approx}94\%$ on SST-2). \textbf{SPARSE}~\cite{sparse_dp} learns \emph{where} the noise goes: a
+concept mask scores which embedding dimensions carry a user-named sensitive attribute, and a
+Mahalanobis (elliptical Laplace) mechanism perturbs those dimensions more than the rest, under
+metric-LDP (keeping ${\approx}65\%$ utility at $\varepsilon{=}5$ while cutting leakage from
+$60\%$ to $19\%$). \textbf{NVDP}~\cite{nvdp} learns \emph{the noise distribution itself}: a
+nonparametric variational information-bottleneck layer trains a posterior (a learned distribution)
+over the multi-vector embedding and samples the shared embedding from it, calibrating the noise to
+the task and reporting a Rényi-divergence bound that converts to a Bayesian-DP guarantee
+($83.0\%$ on MRPC at a Bayesian-DP budget $\varepsilon_\mu{\approx}11$). The three are genuinely
+distinct: they differ in DP notion (standard $(\varepsilon,\delta)$, metric, Bayesian-Rényi) and in
+what is learned (nothing, which dimensions, the whole distribution), so none subsumes another.
+Because any function of a noised embedding inherits its bound by the post-processing property of
+DP, these local schemes already protect the user's own input through to the output.
 
-\subsection{Performance (Reported)}
-\needswork{DP is cheap; the cost is recall/accuracy as epsilon tightens}
+\paragraph{Central DP: output.}
+The output schemes invert the trust setup. Here a \emph{trusted} operator holds the private data
+and injects the noise server-side; the client adds nothing. They protect not the user's own input
+but third-party data the operator holds, against the party that \emph{consumes} the output, so
+their confidentiality scope (\cref{sec:threat-axes}) differs from the local schemes above. Both act
+at the generation stage. \textbf{DP-KSA}~\cite{tang_dprag} (the inference half of DP-RAG) treats
+the retrieval corpus as the private dataset: it draws an ensemble of candidate generations and
+releases a differentially private set of answer keywords through the propose-test-release framework
+with an exponential-mechanism count, so the answer is $(\varepsilon,\delta)$-DP with respect to
+whether any one document is in the corpus. Its retrieval is ordinary dense top-$k$; the privacy is
+on the generated answer, not the query or the access pattern, which is why it sits here and not
+with the retrieval schemes of \cref{sec:retrieval}. \textbf{DP-Fusion}~\cite{dp_fusion} bounds the
+influence of sensitive spans already inside the model's context: at each decode step it runs the
+model once on a public, sensitive-token-free version of the context and once per sensitive group,
+blends each private next-token distribution toward the public one until their Rényi divergence
+falls under the per-group budget, and samples from the mixture. The operator runs the model and
+sees the context in the clear, with no trusted hardware; what is bounded is how much the marked
+spans can move the generated output, so the guarantee defends whoever \emph{receives} that output
+and, applied per retrieved chunk, doubles as a prompt-injection defense. The two are complementary
+rather than interchangeable: DP-KSA protects corpus membership, DP-Fusion protects context spans,
+and central output-DP is the natural complement to the local schemes when the protected asset is
+the operator's data rather than the user's input.
+
+\subsection{Performance and Accuracy}
+At inference every scheme here is near-plaintext in compute: the local schemes add one noise draw
+to the forward pass, the central schemes add sampling over the output. The real costs sit elsewhere
+and split along the local/central line. The local schemes pay \emph{offline}, once: DP-Forward
+fine-tunes under the noise layer at roughly the cost of an ordinary fine-tune (and about
+$3\times$ cheaper than the DP-SGD it replaces); SPARSE learns its concept mask in a one-time pass
+that scales linearly with data (25\,min for 10k samples, under 45\,min for 20k, on a single
+RTX~3090); NVDP trains one extra information-bottleneck layer over a frozen encoder. Once trained,
+all three serve at ${\approx}1\times$, and because post-processing is free under DP the noised
+embedding can be reused across tasks. The central schemes pay \emph{online}: DP-KSA multiplies
+generation by its ensemble size (${\approx}N\times$ calls, with $N{\approx}80$), and DP-Fusion runs
+$m{+}1$ forward passes per token for $m$ sensitive groups. DP-Fusion's passes parallelize, so
+wall-clock can stay near a single pass, but only when compute and memory are spare; the
+$m{+}1\times$ in compute and memory is real, and a multi-group deployment needs an inference path
+that issues and fuses the parallel passes (the method ships as a wrapper over standard models, so
+it does not demand a bespoke engine, but it does require that orchestration).
+
+How privacy trades against cost differs sharply from static obfuscation, where security, accuracy,
+and speed move together. For the local schemes $\varepsilon$ is a pure \emph{accuracy} knob: a
+tighter budget costs fidelity, not compute, since the noise draw is the same size at any
+$\varepsilon$, and a more selective mechanism (SPARSE's shaped noise, NVDP's learned posterior)
+costs only offline training. For the central schemes stronger privacy does cost compute, because it
+is bought with more samples: a larger ensemble for DP-KSA, a higher $m$ for DP-Fusion. Fidelity is
+the cost the whole family ultimately pays, read as task-accuracy or recall loss, small in the
+loose-$\varepsilon$ regime each paper reports and severe as $\varepsilon$ approaches $0$, where the
+output becomes independent of the protected data. The rate in between is not universal: it depends
+on the mechanism and on the content protected, and even within DP-Fusion the divergence grows
+differently for different entity types (roughly logarithmic for code-like spans, closer to a power
+law for dates), so no single sub- or super-linear law describes the frontier.
 
 \subsection{Limitations and Known Attacks}
-\needswork{epsilon-utility frontier; DP-Forward's IMA vulnerability; composition
-across pipeline stages (an open problem Bodea also flags)}
+
+\begin{table*}[t]
+\centering
+\caption{Attacks on the differential-privacy family, by whether DP can answer them. Mitigable
+  attacks are pushed back by the scheme's own budget or noise shaping; structural ones rest on a
+  weaker notion or on the $\varepsilon$-utility floor and admit no purely-DP fix.}
+\label{tab:dp-attacks}
+\footnotesize
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.15}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.1cm}>{\raggedright\arraybackslash}p{2.7cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{3.0cm}@{}}
+\toprule
+\textbf{Attack} & \textbf{Target} & \textbf{Effect} & \textbf{Class / fix} \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{Mitigable: the scheme's budget or noise shaping raises the bar}}\\
+\addlinespace[3pt]
+Embedding / inversion-model~\citep{vec2text,geia,lin_aloepri} & DP-Forward, SPARSE, NVDP & reconstruct input or tokens from the noised embedding; IMA recovers ${>}75\%$ on DP-Forward at deployment $\varepsilon$ & tighter $\varepsilon$ or shaped noise (SPARSE $60\%{\to}19\%$ at $\varepsilon{=}10$) \\
+\addlinespace[5pt]
+Tagger false-negative~\citep{dp_fusion} & DP-Fusion & spans the tagger misses fall outside the bound & higher-recall NER \\
+\addlinespace[5pt]
+\multicolumn{4}{@{}l}{\emph{Structural: a weaker notion or the $\varepsilon$-utility floor; no purely-DP fix}}\\
+\addlinespace[3pt]
+Nearest-neighbour under metric-LDP~\citep{kornaropoulos_knn_2019} & SPARSE (metric-LDP) & indistinguishability holds only in proportion to $\ell_2$ distance in embedding space, so far-apart inputs stay separable & inherent to the weaker notion \\
+\addlinespace[5pt]
+GAN reconstruction~\citep{hitaj_gan} & NVDP (Bayesian-DP) & the belief-shift bound assumes a data distribution; a generator trained on it erodes the budget & inherent to Bayesian-DP \\
+\addlinespace[5pt]
+Corpus membership inference~\citep{mia_rag} & DP-KSA & infer whether a document is in the corpus from the answers & DP is the defense; the $\varepsilon$-utility floor is the limit \\
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+The attacks on this family fall into two classes by whether DP can answer them
+(\cref{tab:dp-attacks}). Some are \emph{mitigable} within the mechanism. The local embedding
+schemes are all targets of embedding inversion: Vec2Text and GEIA reconstruct text from
+representations, and DP-Forward in particular is recovered by a trained inversion model
+(IMA, over $75\%$ token recovery in AloePri's evaluation) once $\varepsilon$ is loosened enough to
+keep utility. Tightening $\varepsilon$ or shaping the noise pushes these back (SPARSE's
+concept-masked noise cuts Vec2Text leakage from $60\%$ to $19\%$ at $\varepsilon{=}10$), so the
+inversion threat is managed on the $\varepsilon$-utility frontier rather than removed. DP-Fusion's
+gap is coverage, not mechanism: its bound holds only over spans a tagger marks sensitive, so a
+missed span falls outside the guarantee, and a higher-recall named-entity recognizer closes it.
+
+The remaining limits are \emph{structural} and cannot be repaired with more DP. Two of the notions
+traded here are weaker than standard $(\varepsilon,\delta)$-DP and should be read as such:
+metric-LDP (SPARSE) only makes inputs indistinguishable in proportion to their distance in
+embedding space, the $\ell_2$ metric on the embedding vector rather than a ranking score, so
+far-apart inputs stay distinguishable and nearest-neighbour search still separates them; and
+Bayesian-DP (NVDP) measures the shift in an adversary's belief against an \emph{assumed} data
+distribution rather than the worst case, so its budget is only as honest as that assumption, and a
+distributional mismatch, or a GAN-style reconstruction trained on the true distribution, erodes it.
+The $\varepsilon$-utility frontier itself is structural: at $\varepsilon\to 0$ the output is
+independent of the protected data, so there is a floor below which no scheme in this family can
+both protect and function. And composition across pipeline stages is unresolved: a deployment that
+perturbs embeddings and then bounds the output spends two budgets whose joint guarantee is not
+simply additive, an open problem Bodea et al.\ also flag for RAG. The payoff that survives these
+caveats is structural too: central output-DP composes orthogonally with any retrieval or inference
+backend, which is what makes it the family's natural answer to the corpus-extraction attacks of
+\cref{sec:synthesis}, regardless of how the rest of the pipeline is protected.
