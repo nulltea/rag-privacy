@@ -202,20 +202,23 @@ power, and physical channels out of scope. GELO excludes ``side channels
 originating inside the TEE \dots\ and accelerator-side leakage beyond raw memory
 reads'' \citep{belikov_gelo}; Opal devotes a paragraph to enumerating the
 in-enclave side channels it does \emph{not} defend \citep{kaviani_opal}; the
-remainder simply omit them. This is a collective blind spot worth naming,
-because it falls hardest on the schemes least able to absorb it: the TEE and
-hybrid designs anchor their entire trust in hardware whose best-documented
-weakness is exactly microarchitectural and transient-execution leakage---the
-Spectre/Foreshadow-class attacks \needswork{cite Spectre, Foreshadow, PLATYPUS,
-and the TEE side-channel surveys}. A scheme that trusts a TEE while declaring
-side channels out of scope is assuming away the dominant historical failure
-mode of that very anchor.
+remainder simply omit them. This is not a gap the field has overlooked but one its
+threat models deliberately exclude, and it is worth naming because it falls hardest
+on the designs least able to absorb it. The TEE and hybrid families anchor their
+entire trust in hardware whose best-documented weaknesses are microarchitectural and
+physical leakage: transient-execution attacks of the Spectre and Foreshadow
+class~\citep{spectre,foreshadow}, and physical memory-bus interposition such as
+TEE.Fail, which extracts keys and forges attestation from the deterministic memory
+encryption of server TEEs and which the vendors classify as out of scope with no fix
+planned~\citep{tee_fail}. Many individual attacks are patched on the normal platform
+cycle, but the class recurs because each generation's performance optimizations
+reopen an observable channel.
 
 We do not close this gap: side channels are out of scope for this SoK as
 well, and current confidential-computing hardware
 (TDX-backed CVMs, GPUs in confidential mode) materially raises the bar against
-them \citep{kaviani_opal}. But we record it as a systematisation finding and a
-standing item for future work: the field has converged on a threat model that
-structurally excludes the attack class most likely to break its dominant trust
-anchor.
-C
+software-only attackers \citep{kaviani_opal}. But we record it as a systematisation
+finding and a standing item for future work: the field has converged on a threat
+model that, by design, excludes the attack class most likely to break its dominant
+trust anchor, and a hardware-anchored guarantee cannot strengthen itself against that
+class without the vendor.
