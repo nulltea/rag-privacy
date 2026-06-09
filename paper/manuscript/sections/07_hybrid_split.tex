@@ -52,12 +52,13 @@ and the non-linear layers across a CPU-TEE root and the accelerator: its OutAttn
 recasts the data$\times$data attention multiply as additive computation with precomputed
 offline terms, and OutSoftMax offloads the exponentials. It adds U-Verify integrity
 checks (a Freivalds generalization, the first to verify the non-linear SoftMax) so the
-accelerator may even be \emph{malicious}. \textbf{ObfuscaTune}~\citep{frikha_obfuscatune}
-keeps only the low-parameter, non-linearity-bearing layers in the TEE (the input
-embedding, the output head, and the LayerNorm/dropout layers, ${\sim}5\%$ of the
-parameters) and offloads the obfuscated attention and MLP weights (the other $95\%$); its
-obfuscation matrices are \emph{static}, set up once and reused across many inferences
-(refreshed only periodically), a choice that proves fatal (below).
+accelerator may even be \emph{malicious}. \textbf{ObfuscaTune}~\citep{frikha_obfuscatune} keeps only the low-parameter, non-linearity-bearing
+layers in the TEE (the input embedding, the output head, and the LayerNorm/dropout layers,
+${\sim}5\%$ of the parameters, under $0.5\%$ at the $405$B scale) and offloads the obfuscated
+attention and MLP weights. Its obfuscation is a single \emph{static} invertible matrix per
+weight without the per-batch refresh, so its confidentiality holds
+only while the served model stays \emph{proprietary}: without the plaintext weights the operator
+cannot solve for the transform.
 \textbf{SCX}~\citep{zeng_scx} protects the KV-cache not by encryption but by
 \emph{permutation}, using token- and feature-level permutations plus redundant embeddings and
 calibrated Laplace noise (yielding $(\varepsilon,0)$-DP) with one-time keys per decoding
@@ -110,11 +111,11 @@ the surviving designs refresh their hiding randomness.}
 \toprule
 \textbf{Attack} & \textbf{Target} & \textbf{Effect} & \textbf{Defense / status} \\
 \midrule
-Game of Arrows~\citep{arrowmatch} & static weight-obfuscation (ObfuscaTune-class) & $>$98\% weight recovery via direction-similarity & per-batch refresh (GELO) \\
+Game of Arrows~\citep{arrowmatch} & lightweight static weight-obfuscation (TransLinkGuard, SOTER) & $>$98\% weight recovery via direction-similarity & per-batch refresh (GELO) \\
 \addlinespace[5pt]
 Hidden No More~\citep{hnm} & permutation + noise obfuscation, open-weights (STIP/PermLLM-class) & near-perfect prompt reconstruction from hidden states & refresh (GELO, SCX); seq.-sharding (Cascade) \\
 \addlinespace[5pt]
-Static-basis break~\citep{saini_precomp_break} & reused secret basis (SOTER/TSQP; ObfuscaTune shares it) & confidentiality + integrity break; LLaMA-3-8B layer in ${\sim}6$\,min & fresh keys; no static basis \\
+Static-basis break~\citep{saini_precomp_break} & reused secret basis (SOTER, TSQP) & confidentiality + integrity break; LLaMA-3-8B layer in ${\sim}6$\,min & fresh keys; no static basis \\
 \addlinespace[5pt]
 Gram-matrix leak~\citep{belikov_gelo} & GELO under \emph{orthogonal} mixing $A$ & $U^{\top}U{=}H^{\top}H$ leaks the hidden-state covariance + token-similarity spectrum (passive; narrows the BSS search) & non-orthogonal $A$, or shield vectors \\
 \addlinespace[5pt]
@@ -190,14 +191,16 @@ deployment-readiness axes in \cref{sec:synthesis}.
 \subsection{Limitations and Known Attacks}
 % GELO Gram-leak (U^T U = H^T H under orthogonal mixing), mitigated by non-orthogonal A or
 % shield vectors, per-batch only. Static-key schemes broken (Game of Arrows, static-basis).
-The family's security rests on \emph{dynamic, never-reused} hiding randomness; where that
-fails, so does the scheme (\cref{tab:hybrid-attacks}). The cautionary case is the
-\emph{static} key: ObfuscaTune's fixed obfuscation matrices are recovered by Game of
-Arrows~\citep{arrowmatch}, which exploits direction-similarity across the offloaded
-weights to recover $>$$98\%$ of them, and the same static-basis weakness yields a full
-confidentiality-and-integrity break (recovering a LLaMA-3-8B layer in
-${\sim}6$~minutes)~\citep{saini_precomp_break}. The schemes that survive (GELO's
-per-batch mixing, SCX's per-step keys) do so precisely because they refresh.
+The family's security rests on \emph{dynamic, never-reused} hiding randomness; once the secret is
+static and the weights are known, the open-weights solve returns (\cref{tab:hybrid-attacks}).
+Direction similarity recovers ${>}98\%$ of statically obfuscated weights~\citep{arrowmatch}, and a
+precomputed-basis attack drives a full confidentiality-and-integrity break, a LLaMA-3-8B layer in
+${\sim}6$~minutes~\citep{saini_precomp_break}; both were demonstrated on lightweight static schemes
+(TransLinkGuard, SOTER, TSQP). ObfuscaTune uses the same static, unrefreshed obfuscation and would
+inherit this exposure, but its threat model assumes a \emph{proprietary} model that denies the
+operator the plaintext weights the solve needs; its confidentiality therefore stands on model
+secrecy rather than on refresh. The schemes that refresh (GELO's per-batch mixing, SCX's per-step
+keys) remove the question.
 
 Even refreshed obfuscation leaks \emph{second-order} structure. Under an orthogonal mixing
 $A$ the Gram matrix is invariant ($U^{\top}U{=}H^{\top}H$), exposing the pairwise inner
