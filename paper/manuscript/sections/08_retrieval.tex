@@ -98,7 +98,7 @@ candidate set (DP, clustering) before scoring; the shared benefit is that the qu
 and the at-rest vectors are protected by the same CKKS/PHE machinery.
 
 \paragraph{Distance-comparison-preserving encryption (DCPE).}
-SAP/DCPE and CAPRISE take the opposite trade: a symmetric per-vector transform
+SAP/DCPE and CAPRISE make the opposite trade-off: a symmetric per-vector transform
 ($c = s\,e + \lambda$, the same dimension as the plaintext embedding, so the ciphertext
 imposes ${\approx}1\times$ storage)
 that preserves \emph{distance comparisons}, letting the server rank encrypted database
@@ -125,7 +125,7 @@ degree, and a degree sequence is a structural fingerprint that re-identifies nod
 public graph even under encryption. Third, the \texttt{source\_id} \emph{fan-out} (which
 chunks an entity maps to) links a query to specific source documents. Because these surfaces
 are about \emph{structure and access}, not arithmetic, dense-retrieval primitives do not
-address them and graph retrieval needs a different toolkit (\cref{tab:crypto-graph}).
+address them and graph retrieval needs different machinery (\cref{tab:crypto-graph}).
 \begin{table*}[t!]
   \centering \footnotesize
   \caption{\emph{Graph} retrieval and storage---graph-indexed ANN and graph traversal
@@ -180,7 +180,7 @@ queries, and volume-hiding EMMs bound that leak at a $1.5$--$3\times$ storage co
 conjunctive variant FLASH adds a keyword-pair access pattern of its own). What remains is the
 search/query-equality pattern, not the content, closed only by layering ORAM (as Compass
 does) or rotating keys per session. H$_2$O$_2$RAM supplies a doubly-oblivious RAM substrate
-(inside a TEE) beneath such a graph store, and GORAM is the heavier-trust 3PC reserve for
+(inside a TEE) beneath such a graph store, and GORAM is the heavier-trust 3PC fallback for
 billion-edge federated graphs.
 
 \begin{table*}[b!]
@@ -247,10 +247,10 @@ reconstruction attacks consume access-pattern and communication-volume
 leakage~\citep{kellaris2016leakage}, $k$-nearest-neighbour query leakage alone suffices to
 recover values~\citep{kornaropoulos_knn_2019}, and volume-only attacks defeat schemes that
 hide \emph{which} record is touched but not \emph{how many}~\citep{blackstone_revisiting_2020}.
-These attacks stop at the oblivious schemes: PIR (Panther, PIR-RAG, p\textsuperscript{2}RAG)
+These attacks fail against the oblivious schemes: PIR (Panther, PIR-RAG, p\textsuperscript{2}RAG)
 genuinely closes the access-pattern channel, and homomorphic scoring (TRSE, RemoteRAG) keeps
 the similarity values themselves encrypted. The oblivious schemes, not the
-distance-preserving shortcuts, anchor the deployable end (\cref{sec:synthesis}).
+distance-preserving ones, anchor the deployable end (\cref{sec:synthesis}).
 
 \paragraph{Graph retrieval.}
 Graph retrieval is attacked along the structural channels of \cref{ssec:retr-graph}. The
