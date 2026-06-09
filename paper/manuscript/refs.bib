@@ -960,3 +960,49 @@
   year   = {2024},
   note   = {[verified-web] recovers data from GPU local memory across processes/containers $\Rightarrow$ reconstructs LLM responses (${\sim}181$\,MB/query, 7B on llama.cpp) on Apple/Qualcomm/AMD/Imagination GPUs. The enabling VRAM-read threat behind activation-obfuscation. arXiv:2401.16603}
 }
+
+@inproceedings{tensortee,
+  author    = {Han, Husheng and Zheng, Xinyao and Wen, Yuanbo and Hao, Yifan and Feng, Erhu and Liang, Ling and Mu, Jianan and Li, Xiaqing and Ma, Tianyun and Jin, Pengwei and Song, Xinkai and Du, Zidong and Guo, Qi and Hu, Xing},
+  title     = {{TensorTEE}: Unifying Heterogeneous {TEE} Granularity for Efficient Secure Collaborative Tensor Computing},
+  booktitle = {ASPLOS},
+  year      = {2024},
+  note      = {[verified-EdgeQuake] unified tensor-granularity CPU--NPU TEE; on-chip tensor-wise version-number management, delayed-verification tensor-wise MAC, and re-encryption-free cross-enclave transfer; 4.0$\times$ over prior heterogeneous TEE and 2.1\% vs non-secure LLM training (Gem5 + cycle-accurate NPU simulator). DOI 10.1145/3622781.3674168; arXiv:2407.08903}
+}
+
+@misc{ascend_cc,
+  author = {Dhar, Aritra and Thorens, Cl\'ement and Lazier, Lara Magdalena and Cavigelli, Lukas},
+  title  = {{ASCEND-CC}: Confidential Computing on Heterogeneous {NPU} for Emerging Generative {AI} Workloads},
+  year   = {2024},
+  note   = {[verified-EdgeQuake] Huawei Zurich Research Center / ETH Zurich; discrete NPU (Ascend 910A) as the sole hardware root of trust, no CPU TEE, fully malicious host; protects data, model parameters, and operator binaries; DMA-unmap-before-decrypt (atomic-execution invariant) plus task and binary attestation; firmware-only, no AI-stack change; $<$0.1\% Llama-2/3 inference overhead at realistic sequence length. arXiv:2407.11888}
+}
+
+@misc{chrapek_gputee,
+  author = {Chrapek, Marcin and others},
+  title  = {Confidential {LLM} Inference: Performance and Cost Across {CPU} and {GPU} {TEE}s},
+  year   = {2025},
+  note   = {[verified-EdgeQuake] benchmarks CPU/GPU-TEE LLM inference; residual overhead dominated by PCIe bounce-buffer encryption, not GPU compute; $<$7\% typical, near-zero for large models and long sequences. arXiv:2509.18886}
+}
+
+@misc{tee_fail,
+  key          = {TEEFail},
+  title        = {{TEE.Fail}: Breaking Trusted Execution Environments via {DDR5} Memory Bus Interposition},
+  howpublished = {\url{https://tee.fail}},
+  year         = {2025},
+  note         = {[verified-web] Georgia Tech + Purdue; a sub-\$1000 DDR5 interposer extracts keys and forges attestation on Intel SGX/TDX and AMD SEV-SNP (and confidential-mode NVIDIA GPUs), exploiting deterministic memory encryption}
+}
+
+@inproceedings{wesee,
+  author    = {Schl\"uter, Benedict and Sridhara, Supraja and Bertschi, Andrin and Shinde, Shweta},
+  title     = {{WeSee}: Using Malicious \#{VC} Interrupts to Break {AMD} {SEV-SNP}},
+  booktitle = {IEEE Symposium on Security and Privacy (S\&P)},
+  year      = {2024},
+  note      = {[verified-web] ETH Zurich; hypervisor-injected \#VC exceptions leak and corrupt SEV-SNP VM state. arXiv:2404.03526}
+}
+
+@misc{nvidia_secureai,
+  author       = {{NVIDIA}},
+  title        = {{NVIDIA} Secure {AI} with {Blackwell} and {Hopper} {GPU}s},
+  howpublished = {Whitepaper WP-12554-001 v1.3},
+  year         = {2025},
+  note         = {[verified-web] Hopper confidential computing stages CPU--GPU PCIe transfers through a software bounce buffer with AES-GCM; inline PCIe TEE-IO (TDISP/IDE) on Blackwell removes the bounce buffer, available only on co-supporting CPU and GPU}
+}

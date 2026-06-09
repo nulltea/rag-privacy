@@ -192,6 +192,7 @@ PipeLLM/STIP from their preprints --- re-confirm at submission}
     \multicolumn{5}{@{}l}{\emph{TEE (Tier 3, baseline)} --- \cref{sec:tee}}\\
     H100 CC~\cite{h100cc}     & GPU-TEE (H100 CC) & Llama2 7--70B           & $1.04$--$1.08\times$                            & exact \\
     PipeLLM~\cite{pipellm}    & GPU-TEE+CVM       & OPT 13--175B            & ${\approx}1.2\times$ ($<$19.6\%)                & exact \\
+    Ascend-CC~\cite{ascend_cc}& NPU-TEE (Ascend, mal.\ host) & Llama2/3 7--13B & ${\approx}1\times$ ($<$0.1\% @${\geq}2$K seq)    & exact \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Static obfuscation} --- \cref{sec:obfuscation}}\\
     AloePri~\cite{lin_aloepri}& covariant data+weight & Qwen/Llama $\le$671B & ${\approx}1\times$                              & 0--3.5\% acc.\ loss \\
