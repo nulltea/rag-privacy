@@ -7,20 +7,20 @@
 % finding lives in §\ref{sec:synthesis}.
 
 We compare confidential Transformer-inference and RAG schemes along two kinds of
-dimension: \emph{security}---categorical properties of who the adversary is and what
-stays hidden (\cref{sec:threat})---and \emph{cost}---the quantitative price of that
+dimension. \emph{Security} captures categorical properties of who the adversary is and what
+stays hidden (\cref{sec:threat}); \emph{cost} is the quantitative price of that
 protection, in performance and fidelity (\cref{sec:comparison}). This single split runs
 through the paper: the security dimensions yield the threat-model-fit criterion of our
 deployment-readiness lens (\cref{sec:intro}). We also fix here how schemes are
-\emph{grouped} for comparison---by use case, not by family.
+\emph{grouped} for comparison: by use case, not by family.
 
 \subsection{Taxonomy: Threat Model and Security}
 \label{sec:threat}
 
 Confidential Transformer-inference and RAG systems are not built against a single
 adversary. Each scheme makes its own assumptions about who the attacker is, what it
-knows, what it can observe, and what must stay hidden---and those assumptions, not the
-mechanisms alone, decide whether a defence is adequate. We classify the security of each
+knows, what it can observe, and what must stay hidden. Those assumptions, not the
+mechanisms alone, decide whether a defense is adequate. We classify the security of each
 scheme along five \emph{categorical} axes (\cref{sec:threat-axes}), place
 every inference scheme on them (\cref{sec:threat-landscape}), and treat the
 attacker's \emph{capability budget} as a cross-cutting concern (\cref{sec:threat-budget}).
@@ -55,7 +55,7 @@ A field-wide side-channel blind spot emerges from the exercise (\cref{ssec:sidec
     \multicolumn{7}{@{}l}{\emph{TEE} --- \cref{sec:tee}}\\
     Nvidia-CC  & malicious  & GPU-TEE        & \texttt{bb}   & data+model & \texttt{ap}     & HW \\
     Ascend-CC  & malicious  & NPU-TEE        & \texttt{bb}   & data+model & \texttt{ap}     & HW \\
-    PipeLLM    & HbC        & GPU-TEE        & \texttt{bb}   & data+model & PCIe \texttt{act}. & HW \\
+    PipeLLM    & HbC        & GPU-TEE        & \texttt{bb}   & data+model & PCIe \texttt{act}  & HW \\
     Opal       & malicious  & CPU+GPU-TEE    & \texttt{bb}   & data+access & op-type        & crypto+HW \\
     \midrule
     \multicolumn{7}{@{}l}{\emph{Static obfuscation} --- \cref{sec:obfuscation}}\\
@@ -90,8 +90,8 @@ A field-wide side-channel blind spot emerges from the exercise (\cref{ssec:sidec
 We classify each scheme along five axes.
 
 \paragraph{1. Adversary behavior.}
-\emph{Honest-but-curious} (HbC): the operator runs the protocol faithfully but mines every
-observable for private information---the standard cloud model, adopted by most schemes here.
+\emph{Honest-but-curious} (HbC): the operator runs the protocol faithfully but inspects every
+observable for private information, the standard cloud model, adopted by most schemes here.
 \emph{Malicious/active}: the operator may additionally deviate (drop, replay, reorder, tamper),
 requiring integrity machinery on top of confidentiality. Behavior decides whether
 confidentiality alone suffices.
@@ -100,21 +100,21 @@ confidentiality alone suffices.
 What the scheme roots its guarantees in: \emph{none} (purely cryptographic, statistical, or
 obfuscation-based); a \emph{CPU-TEE} (Intel TDX, AMD SEV-SNP); a \emph{GPU-TEE} (a
 confidential H100/H200/B200-class accelerator); or \emph{multi-party non-collusion} (the MPC
-assumption). A larger TCB buys performance or simplicity at the price of a stronger trust
-assumption. These anchors collapse onto a three-level \emph{hardware-trust} ladder we use to
+assumption). A larger TCB trades a stronger trust assumption for performance or simplicity.
+These anchors collapse onto a three-level \emph{hardware-trust} ladder we use to
 organize the systematization and its scope (\cref{sec:intro}):
 \begin{description}
-  \item[Tier 1.] \emph{No trusted hardware}---confidentiality rests on cryptography or
+  \item[Tier 1.] \emph{No trusted hardware}: confidentiality rests on cryptography or
         statistics alone (MPC/FHE, static obfuscation, DP). ``None'' constrains what must be
-        \emph{trusted not to leak}, not where the \emph{work} runs: several Tier-1 schemes are
-        not thin-client---client-side PIR/ORAM retrieval, or 2PC where the user is a compute
+        \emph{trusted not to leak}, not where the \emph{work} runs. Several Tier-1 schemes are
+        not thin-client: client-side PIR/ORAM retrieval, or 2PC where the user is a compute
         party, make the client load-bearing, a deployment factor we revisit in
         \cref{sec:synthesis}.
-  \item[Tier 2.] \emph{CPU-TEE only}---a commodity CPU enclave is trusted; any GPU is untrusted.
-  \item[Tier 3.] \emph{Confidential accelerator}---a confidential GPU or accelerator-TEE trusted
+  \item[Tier 2.] \emph{CPU-TEE only}: a commodity CPU enclave is trusted; any GPU is untrusted.
+  \item[Tier 3.] \emph{Confidential accelerator}: a confidential GPU or accelerator-TEE trusted
         end-to-end.
 \end{description}
-The Tier-2$\to$Tier-3 jump---trusting the accelerator silicon end-to-end---is the sharpest
+The Tier-2$\to$Tier-3 jump (trusting the accelerator silicon end-to-end) is the sharpest
 escalation on this axis, so a scheme's tier is the single most consequential entry in its row;
 the hybrid split's defining move (\cref{sec:hybrid}) is to deliver Tier-3-class GPU performance
 at Tier~2.
@@ -131,15 +131,15 @@ private collapses once an attacker who knows the public weights can solve for it
 (\cref{sec:obfuscation}).
 
 \paragraph{4. Confidentiality scope.}
-What the scheme keeps hidden and what it concedes---two faces of one question. The protected
+What the scheme keeps hidden and what it concedes are two faces of one question. The protected
 \emph{asset} may be the input, the input \emph{and} output, the model weights, or the access
-pattern over a corpus. Its dual is the \emph{residual leakage}---what the adversary still
+pattern over a corpus. Its dual is the \emph{residual leakage}: what the adversary still
 observes despite the scheme (obfuscated I/O, mixed activations in untrusted VRAM, bounded
 access patterns, or distance structure). Microarchitectural, cache, timing, and power side
-channels are a residual category \emph{every} surveyed scheme places out of scope---a
+channels are a residual category \emph{every} surveyed scheme places out of scope, a
 uniformity we elevate to a finding (\cref{ssec:sidechannel}) rather than carry as a per-scheme
 cell. Two schemes agreeing on every other axis can diverge sharply here, and it is the residual
-leakage---not the stated protection goal---that an attack ultimately exploits.
+leakage, not the stated protection goal, that an attack ultimately exploits.
 
 \paragraph{5. Security basis.}
 What the guarantee \emph{rests on}, independent of \emph{which} entity is trusted (axis~2):
@@ -152,7 +152,7 @@ schemes the others cannot: an FHE scheme and a static-obfuscation scheme can sha
 row on axes~1--4 yet differ as cryptographic indistinguishability versus an empirically
 measured resistance that can be far weaker than reported. Security basis is thus the sharpest
 predictor of whether a confidentiality claim
-survives scrutiny, and the axis that \emph{threat-model fit} (\cref{sec:intro}) reads most heavily.
+survives scrutiny, and the axis that \emph{threat-model fit} (\cref{sec:intro}) weights most heavily.
 
 \subsubsection{The Landscape}
 \label{sec:threat-landscape}
@@ -161,14 +161,14 @@ survives scrutiny, and the axis that \emph{threat-model fit} (\cref{sec:intro}) 
 the five axes. Four patterns stand out. First, the
 obfuscation family clusters tightly at \emph{HbC + white-box}: these schemes
 explicitly assume the attacker knows the open-source model and the method, and
-stake everything on an ephemeral secret. Second, the trust anchor varies more
+depend entirely on an ephemeral secret. Second, the trust anchor varies more
 than the adversary behavior does: schemes that face nearly the same attacker still
-root trust in very different places---nothing, a CPU-TEE, or a GPU-TEE---which is the real
+root trust in very different places (nothing, a CPU-TEE, or a GPU-TEE), which is the real
 axis of disagreement in the field. Third, defending a \emph{malicious} operator tracks the
 trust anchor: the confidential-accelerator designs (Nvidia-CC, Opal, Ascend-CC) withstand a host
 that may tamper with computation outside the enclave, and TwinShield an accelerator that may
 deviate from the protocol (caught by its U-Verify integrity checks); the cryptographic,
-obfuscation, and DP schemes assume an honest-but-curious operator. Fourth---and most consequential---the \emph{security basis} cleaves the
+obfuscation, and DP schemes assume an honest-but-curious operator. Fourth, and most consequential, the \emph{security basis} separates the
 table where no other axis can: the obfuscation rows rest on heuristic,
 experimentally-measured resistance, while the cryptographic
 schemes rest on hardness assumptions and the TEE designs on hardware. Several
@@ -181,12 +181,12 @@ axis.
 \begin{table*}[t!]
   \centering \scriptsize\setlength{\tabcolsep}{4pt}
   \caption{\textbf{Inference performance across mechanism families}.
-    Cryptographic rows give \emph{absolute} latency---per generated token (``/tok'', decoders) or
-    per 128-token forward pass (``/inf'', encoders)---with no vs-plaintext multiplier; TEE,
+    Cryptographic rows give \emph{absolute} latency (per generated token, ``/tok'', for decoders;
+    per 128-token forward pass, ``/inf'', for encoders) with no vs-plaintext multiplier; TEE,
     obfuscation, DP, and hybrid rows give \emph{$\times$-overhead} vs.\ plaintext on the same
     hardware (communication local/negligible, omitted). An inline ``offl.'' figure marks one-time
-    offline cost. Figures are paper-reported except $\dagger$=1-hop extrapolated via the cited
-    baseline; cross-row figures are indicative, not co-measured (\cref{sec:comparison}). Fidelity
+    offline cost. Figures are paper-reported; cross-row figures are indicative, not co-measured
+    (\cref{sec:comparison}). Fidelity
     is the accuracy/utility delta vs.\ plaintext; obfuscation/DP privacy is treated in
     \cref{sec:obfuscation},~\cref{sec:dp}.}
   \label{tab:inf-perf}
@@ -195,14 +195,14 @@ axis.
     Scheme & Technique & Model & Latency / overhead & Fidelity \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Cryptographic (MPC/FHE)} --- \cref{sec:crypto}}\\
-    SHAFT~\cite{shaft}        & 2PC               & BERT-base (110M)        & ${\approx}1.4$\,s/inf$^\dagger$; ${\approx}0.6$\,GB/inf$^\dagger$ & $-0.5\%$ \\
+    SHAFT~\cite{shaft}        & 2PC               & BERT-base (110M)        & $41$/$281$\,s LAN/WAN; $10.5$\,GB/inf & $-0.5\%$ \\
     Fission~\cite{fission}    & MPC+evaluators    & ModernBERT (149M)       & $<$5\,s/inf; $<$3\,GB/inf                          & $-0.3\%$ \\
-    Euston~\cite{euston}      & FHE (non-int.)    & BERT-base (110M)        & ${\approx}10.7$\,s/inf$^\dagger$; ${\approx}37$\,MB/inf$^\dagger$ & $-0.1\%$ \\
+    Euston~\cite{euston}      & FHE (non-int.)    & BERT-base (110M)        & $46$\,s/inf (GPU)              & $-0.1\%$ \\
     PermLLM~\cite{permllm}    & 2PC+dealer        & ChatGLM-6B              & 3\,s/tok; 20\,Mb/tok                            & exact \\
     CryptoMoE~\cite{cryptomoe}& 2PC (MoE)         & OLMoE-7B-A1B & 22\,s/tok; 2.8\,GB/tok             & $-0.8\%$ \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{TEE} --- \cref{sec:tee}}\\
-    Nvidia-CC~\cite{h100cc}   & GPU-TEE (H100 CC) & Llama2 7--70B           & $1.04$--$1.08\times$                            & exact \\
+    Nvidia-CC~\cite{h100cc}   & GPU-TEE (H100/H200) & Llama2 7--70B           & $1.04$--$1.08\times$                            & exact \\
     Ascend-CC~\cite{ascend_cc}& NPU-TEE (Huawei Ascend) & Llama2/3 7--13B & ${\approx}1\times$ ($<$0.1\% @${\geq}2$K seq)    & exact \\
     PipeLLM~\cite{pipellm}    & GPU-TEE+CVM       & OPT 13--175B            & ${\approx}1.2\times$ ($<$19.6\%)                & exact \\
     Opal~\cite{kaviani_opal}  & GPU-TEE + Ring-ORAM & KG+ANN retr.\ (B200)  & $1.57\times$ (2.32\,s/q)                        & $+13\%$ vs ANN-only \\
@@ -225,26 +225,20 @@ axis.
     DP-Fusion~\cite{dp_fusion}& output-DP (dist.\ blend) & Qwen2.5-7B       & $m{+}1$ pass/tok (${\approx}1\times$ lat.)      & ppl $1.43$ vs $1.03$ @$\varepsilon{\approx}16$ \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Hybrid split (TEE+Obfuscation)} --- \cref{sec:hybrid}}\\
-    GELO~\cite{belikov_gelo}  & CPU-TEE + per-batch mix & Llama-2-7B        & $1.2$--$1.3\times$ (per offload)    & exact \\
+    GELO~\cite{belikov_gelo}  & GPU-TEE + per-batch mix & Llama-2-7B        & $1.2$--$1.3\times$ (per offload)    & exact \\
     TwinShield~\cite{xue_twinshield} & CPU-TEE + SS + U-Verify & BERT/ViT/LLaMA & $-4$--$6\times$ vs CPU-TEE              & exact \\
     ObfuscaTune~\cite{frikha_obfuscatune} & ${\sim}5\%$ params in TEE & GPT-2 & $1.5$--$4.3\times$                             & $-1\%$ \\
     SCX~\cite{zeng_scx}       & per-session OTK KV-cache & 7B decoder       & ${\approx}1\times$      & exact \\
     CMIF~\cite{cmif}          & CPU-TEE embed + RNM-DP & Llama2/3 7--8B      & $1.3$--$1.4\times$                              & 84\% SST-2 @$\varepsilon{=}3$ \\
     \bottomrule
   \end{tabular*}
-
-  \smallskip
-  {\footnotesize $^\dagger$ extrapolated 1-hop (\cref{sec:comparison}): SHAFT via SIGMA~\cite{sigma}
-  (1.84\,s/0.99\,GB, BERT-base, 128 tok); Euston via NEXUS~\cite{nexus} (37.3\,s/164\,MB, BERT-base,
-  128 tok; NEXUS $\Delta$acc $0.16$--$0.38\%$ per Li et al.). SHAFT's own reported BERT-base time
-  is 41\,s LAN; the $\dagger$ figures recover a GPU-class absolute, not a vs-plaintext ratio.}
 \end{table*}
 
 
 \subsubsection{The Attacker's Capability Budget}
 \label{sec:threat-budget}
 
-The five axes say what an adversary \emph{is}, not how \emph{much} it can spend---yet the
+The five axes say what an adversary \emph{is}, not how \emph{much} it can spend. Yet the
 capability budget (compute, and especially the observation horizon: a single inference vs.\
 many adaptive runs) is decisive, because the surveyed schemes target markedly different
 budgets. AloePri is explicit that it ``aims to provide adjustable security for constrained attackers in
@@ -254,16 +248,16 @@ guarantee is per-batch non-identifiability under a fresh mixing matrix, concedin
 \emph{across} batches but leaving a single-batch blind-source-separation problem
 \citep{belikov_gelo}. A worst-case adversary with unbounded compute and unlimited adaptive
 observation defeats every static-obfuscation scheme here; an evaluation assuming one would
-measure nothing interesting and strawman schemes that never claimed that bar. This is why
-\emph{threat-model fit}---not maximality---is a deployment-readiness criterion: a scheme
+measure nothing interesting and misrepresent schemes that never claimed it. This is why
+\emph{threat-model fit}, not maximality, is a deployment-readiness criterion: a scheme
 defending an adversary stronger than its deployment faces overpays in performance, one
 defending a weaker adversary fails to protect, and the deployable point is the calibrated one,
 on which we score families in \cref{sec:synthesis}.
 
 We therefore treat the budget as an explicit per-scheme parameter, assessing each scheme
-\emph{within its own constrained-attacker regime}---white-box on weights and method, denied the
+\emph{within its own constrained-attacker regime} (white-box on weights and method, denied the
 per-session secret, under the compute and observation horizon the scheme's own evaluation
-permits---so that a reported break is a break by the victim's own standard, not an artefact of
+permits), so that a reported break is a break by the victim's own standard, not an artifact of
 an inflated adversary.
 
 \subsection{Cost: Performance and Fidelity}
@@ -278,22 +272,13 @@ sizes, datasets, and metrics, so a raw side-by-side can mislead. We fix here a c
 \paragraph{Normalizing performance.}
 Wherever a paper gives a plaintext baseline we express cost as an \emph{overhead multiplier}
 ($\times$ vs.\ plaintext on the same hardware and model); otherwise we compare only \emph{within
-a regime}---a (model-size $\times$ hardware) bucket (e.g.\ BERT-base on one GPU; a 7B decoder
-over WAN)---never across regimes. Cross-scheme figures are \emph{indicative} by default (each
+a regime}, a (model-size $\times$ hardware) bucket (e.g.\ BERT-base on one GPU; a 7B decoder
+over WAN), never across regimes. Cross-scheme figures are \emph{indicative} by default (each
 from its own testbed: an order of magnitude, not a precise ratio); only figures we flag
 \emph{co-measured} (benchmarked together in one paper) support direct comparison. Even within a
 regime, a comparison is fair only when the number of parties, the numerical precision, and the
-network setting match---Chen et al.~\citep{chen_sok_pti} find WAN-tuned schemes miss their
+network setting match. Chen et al.~\citep{chen_sok_pti} find WAN-tuned schemes miss their
 reported numbers under other network profiles, so LAN and WAN figures are not interchangeable.
-
-\paragraph{One-hop relative normalization.}
-Cryptographic-inference papers report cost \emph{relative to a prior secure scheme}, not
-plaintext. Where a scheme $A$ reports a $k\times$ factor over a baseline $B$ that gives an
-absolute figure in the \emph{same} regime, we recover $A$'s absolute cost as
-${\approx}\,\mathrm{cost}(B)/k$ and flag it \emph{extrapolated} (1-hop); we never chain further
-or extrapolate across regimes. Since these chains terminate at secure schemes rather than
-plaintext, a vs-plaintext multiplier for crypto inference is only an order-of-magnitude
-estimate, flagged as such.
 
 \paragraph{Normalizing fidelity.}
 Schemes that compute the true function (cryptography, TEE, invertible-mask hybrid splits) are
@@ -315,5 +300,3 @@ corpus, so it stays an open gap (\cref{sec:synthesis}), not a cost bucket. Each 
 canonical metric: latency and $\times$-overhead for generation and embedding; latency/query and
 communication at a fixed corpus size for retrieval; and fidelity as the task-accuracy
 (generation/embedding) or recall@$k$ (retrieval) delta against the plaintext baseline.
-
-% [tab:inf-perf moved to the START of §2.2 (below) so it lands before §3 in two-column flow.]
