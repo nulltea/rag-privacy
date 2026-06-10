@@ -1,13 +1,6 @@
 \section{Trusted Execution Environments}
 \label{sec:tee}
 
-% SCOPE ROLE: TEE is the Tier-3 performance/trust BASELINE (HW-gated). Pure-TEE inference
-% (full model in a CPU enclave, or on a confidential accelerator) gives near-plaintext
-% performance but DEMANDS confidential-compute hardware and full enclave trust. Spine =
-% hardware-availability axis: CPU-TEE (Tier 2) -> confidential GPU (Tier 3, baseline) ->
-% confidential NPU (parallel substrate). The HW requirement, NOT the performance, motivates
-% the Tier-2 commodity-GPU hybrid split (sec:hybrid). Side-channel finding bites hardest here.
-
 A trusted execution environment runs the computation in plaintext inside a
 hardware-isolated enclave and proves to the client, by remote attestation, that the expected
 code and model are what executes. It achieves near-plaintext speed and shifts trust to the

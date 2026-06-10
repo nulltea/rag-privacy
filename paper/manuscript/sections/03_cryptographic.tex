@@ -8,51 +8,52 @@
 Cryptographic schemes compute on data the server never sees in the clear: secure multi-party
 computation (MPC) and secret sharing (SS) split the computation across non-colluding parties,
 while fully-homomorphic encryption (FHE) evaluates directly on ciphertext. They offer the
-strongest confidentiality in our taxonomy (\cref{sec:threat})---a trusted computing base of
-\emph{none} (FHE) or \emph{non-colluding parties} (MPC/SS), no special hardware---at one-to-three
-orders of magnitude in latency or communication, concentrated in the non-linear operations. Because
-MPC/FHE \emph{inference} protocols are already the subject of dedicated surveys---Li et
-al.~\citep{li_pti_survey} (layer-wise, MPC-vs-HE) and Chen et al.~\citep{chen_sok_pti} (a
-reproducibility re-benchmark)---we do not re-systematize them, covering the sub-family briefly
-through five frontier exemplars (\cref{tab:inf-perf}) that locate it on our deployment-cost frontier
-and deferring the cryptographic \emph{retrieval} layer (PIR/ORAM/SSE/DCPE) to \cref{sec:retrieval}.
+strongest confidentiality in our taxonomy (\cref{sec:threat}): a trusted computing base of
+\emph{none} (FHE) or \emph{non-colluding parties} (MPC/SS), with no special hardware. That guarantee
+costs one-to-three orders of magnitude of overhead in latency or communication, concentrated in the
+non-linear operations. Because MPC/FHE \emph{inference} protocols are already covered by dedicated
+surveys, we do not re-systematize them: \citet{li_pti_survey} give a layer-wise MPC-vs-HE treatment
+and \citet{chen_sok_pti} a reproducibility re-benchmark. We cover the sub-family briefly through five
+frontier exemplars (\cref{tab:inf-perf}) that locate it on our deployment-cost frontier, and defer
+the cryptographic \emph{retrieval} layer (PIR/ORAM/SSE/DCPE) to \cref{sec:retrieval}.
 On our criteria, cryptographic inference scores highest on threat-model fit and fidelity but lowest
 on performance (\cref{sec:synthesis}).
 
 \subsection{Approaches}
 \label{ssec:crypto-approach}
-\emph{Secret sharing and MPC} split each value into shares held by non-colluding parties; linear
-maps---the bulk of a Transformer's matrix multiplications---are local or need only cheap
+\emph{Secret sharing and MPC} split each value into shares held by non-colluding parties. Linear
+maps (the bulk of a Transformer's matrix multiplications) are local or need only cheap
 Beaver-triple multiplications, so cost concentrates in the non-linear operations (Softmax, GELU,
-LayerNorm), which must be evaluated through oblivious transfer or garbled circuits or replaced by
-polynomial approximations---each adding rounds, communication, or error. \emph{FHE} instead
-evaluates directly on ciphertext under one key; the RNS-CKKS scheme used in most FHE Transformer
-inference is \emph{leveled}, bounding multiplicative depth before an expensive bootstrap and again
-forcing the non-linearities into low-degree polynomial approximations. In both families these
-non-linear operations dominate---Li et al.~\citep{li_pti_survey} measure them at $>$85\% of MPC
-runtime and ${\approx}60\%$ for HE---and autoregressive decoding compounds the cost, since each
-generated token is a full forward pass whose per-pass overhead and interaction rounds multiply by
-the generation length~\citep{andreoletti_ppi_practice}.
+LayerNorm), which must be evaluated through oblivious transfer or garbled circuits, or else replaced
+by polynomial approximations. Each of these options adds rounds, communication, or error.
+\emph{FHE} instead evaluates directly on ciphertext under one key; the RNS-CKKS scheme used in most
+FHE Transformer inference is \emph{leveled}, bounding multiplicative depth before an expensive
+bootstrap and again forcing the non-linearities into low-degree polynomial approximations. In both
+families these non-linear operations dominate: \citet{li_pti_survey} measure them at ${>}85\%$ of
+MPC runtime and ${\approx}60\%$ for HE. Autoregressive decoding compounds the cost, since each
+generated token is a full forward pass whose per-pass overhead and interaction rounds are multiplied
+by the generation length~\citep{andreoletti_ppi_practice}.
 
 Our five exemplars (\cref{tab:inf-perf}) span the design space: 2PC (SHAFT), 2PC with an offline
 dealer (PermLLM), distributed MPC with evaluator nodes (Fission), private mixture-of-experts
 routing (CryptoMoE), and non-interactive FHE (Euston). CryptoMoE is the one architecture-specific
-case: it keeps MoE expert-routing secret-shared, hiding a pattern that leaks the input's semantic
-type and has been used to recover a co-batched prompt in full~\citep{yona_moe_steal}, recovering
-sparsity at $2.8$--$3.5\times$ dense-MPC cost. Across all five, even the fastest exchanges hundreds
-of MB to GBs per token or inference at exact (MPC) or near-exact (FHE) fidelity; no scheme reports
+case: it keeps MoE expert-routing secret-shared. This hides a routing pattern that leaks the input's
+semantic type and that has been used to recover a co-batched prompt in full~\citep{yona_moe_steal}.
+Exploiting that sparsity, CryptoMoE realizes a $2.8$--$3.5\times$ end-to-end latency reduction (and
+$2.9$--$4.3\times$ in communication) over a dense-MPC baseline. Across all five, even the fastest
+exchanges hundreds of MB to GB per token or inference at exact (MPC) or near-exact (FHE) fidelity; no scheme reports
 overhead vs.\ plaintext, so \cref{tab:inf-perf}'s figures are paper-reported or 1-hop extrapolated
 (\cref{sec:comparison}).
 
 \subsection{Limitations and Known Attacks}
 \label{ssec:crypto-limits}
-Each failure mode below is a concrete attack on a specific trust assumption or speed
-heuristic; \cref{tab:crypto-attacks} collects them by family (MPC/secret sharing vs FHE).
+Each failure mode below is a concrete attack on a specific trust assumption or efficiency
+heuristic; \cref{tab:crypto-attacks} collects them by family (MPC/secret sharing vs.\ FHE).
 \begin{table*}[t!]
   \centering \footnotesize
   \caption{Known attacks on cryptographic \emph{inference}, separated by family
-    (MPC/secret sharing vs FHE; the failure modes differ). Each row names the attack, the
-    assumption or speed heuristic it exploits, the schemes at risk, and the defence.
+    (MPC/secret sharing vs.\ FHE; the failure modes differ). Each row names the attack, the
+    assumption or efficiency heuristic it exploits, the schemes at risk, and the defence.
     IND-CPA\textsuperscript{D} = indistinguishability under chosen plaintext with a
     decryption oracle.}
   \label{tab:crypto-attacks}
@@ -63,7 +64,7 @@ heuristic; \cref{tab:crypto-attacks} collects them by family (MPC/secret sharing
     \midrule
     \multicolumn{4}{@{}l}{\emph{MPC / secret sharing}}\\
     Model extraction (Muse)~\citep{muse_2021} & malicious client deviating from a semi-honest 2PC protocol & semi-honest 2PC inference (SHAFT, PermLLM) & malicious-client security: SIMC~\citep{simc_2022} ($1.3$--$2\times$) \\
-    Party collusion & two parties collude $\Rightarrow$ additive shares recombine to plaintext & MPC/SS (PermLLM, Fission) & non-collusion / honest-majority deployment \\
+    Party collusion & two parties collude $\Rightarrow$ additive shares recombine to plaintext & MPC/SS (PermLLM, Fission) & non-collusion deployment \\
     Permutation inversion (Fission)~\citep{fission} & heuristic, non-information-theoretic permuted-plaintext reveal & PermLLM-style permutation & multi-evaluator chunking (${\sim}\log N$) + query batching \\
     Prompt reconstruction (Hidden No More)~\citep{hnm} & fixed permutation + decoder injectivity & STIP, Centaur, PermLLM & token sharding~\citep{cascade_thomas} (statistical only) \\
     \midrule
@@ -77,29 +78,29 @@ heuristic; \cref{tab:crypto-attacks} collects them by family (MPC/secret sharing
 Every scheme here is proved secure only against a \emph{semi-honest} adversary, and MPC/SS
 additionally require non-collusion. Neither is free: Muse shows a single \emph{malicious} client can
 extract the server's weights from a semi-honest 2PC protocol~\citep{muse_2021}, and two colluding
-parties collapse additive sharing back to plaintext. Closing the malicious-client gap costs
-${\approx}1.3$--$2\times$ (SIMC~\citep{simc_2022}) and full malicious security more---no scheme we
-survey adopts either. So under a realistic cloud adversary that can deviate or quietly co-locate its
-``non-colluding'' parties, the guarantee degrades to that of an honest operator---comparable in
-trust to a TEE, but without the attestation that lets a client \emph{verify} it (\cref{sec:tee},
-\cref{sec:hybrid}).
+parties can recombine additive shares to recover the plaintext. Closing the malicious-client gap
+costs ${\approx}1.3$--$2\times$ (SIMC~\citep{simc_2022}) and full malicious security more; no scheme
+we survey adopts either. So under a realistic cloud adversary that can deviate or covertly co-locate
+the nominally non-colluding parties, the guarantee degrades to that of an honest operator. This is
+comparable in trust to a TEE, but without the attestation that lets a client \emph{verify} it
+(\cref{sec:tee}, \cref{sec:hybrid}).
 
 \paragraph{Permutation secrecy is heuristic, not information-theoretic.}
-The fastest exemplars buy speed by evaluating non-linearities on \emph{permuted} plaintext rather
+The fastest exemplars gain speed by evaluating non-linearities on \emph{permuted} plaintext rather
 than under MPC (PermLLM reveals permuted hidden states; Fission reveals shuffled activation chunks
 to evaluators), which both concede is not information-theoretic. Hidden No More reconstructs prompts
 near-perfectly from \emph{fixed} permutations via decoder injectivity, breaking STIP, Centaur, and
 PermLLM in a third-party-node deployment~\citep{hnm}; the co-designed token-sharding defence is only
 \emph{statistically} secure~\citep{cascade_thomas}. Exposure is contingent on \emph{who} sees the
-reveal---PermLLM reveals to the user (their own data), and Fission's chunking drives leakage down as
-${\sim}\log N$---so permutation is best read as a heuristic speed/leakage trade, not a guarantee on
-par with full MPC or FHE.
+reveal. PermLLM reveals to the user (their own data), and Fission's chunking reduces leakage as
+${\sim}\log N$ in the number of evaluators $N$. Permutation is therefore best characterized as a
+heuristic speed/leakage trade-off, not a guarantee on par with full MPC or FHE.
 
 \paragraph{FHE: depth budget and approximate-ciphertext security.}
 RNS-CKKS's bounded multiplicative depth forces range-sensitive polynomial approximations of the
 non-linearities. Separately, approximate-FHE ciphertexts carry a subtlety: the
 IND-CPA\textsuperscript{D} attack recovers a CKKS secret key when an adversary can \emph{observe
 decryptions} of honestly evaluated ciphertexts~\citep{li_micciancio_2021}, mitigated by noise
-flooding. It bites only where decrypted outputs are exposed; the non-interactive inference schemes
+flooding. It applies only where decrypted outputs are exposed; the non-interactive inference schemes
 here (the server never decrypts) are unaffected, but RAG deployments that return decrypted scores to
 a client should apply the countermeasure (\cref{ssec:retr-limits}).
