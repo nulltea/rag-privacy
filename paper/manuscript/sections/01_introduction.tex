@@ -2,13 +2,36 @@
 \label{sec:intro}
 
 \subsection{Motivation}
-% Confidential LLM inference + RAG outsourced to untrusted clouds; regulated
-% domains. Standard pipelines leak at every stage: invertible embeddings,
-% plaintext queries, access patterns, assembled prompts.
-\needswork{2--3 paragraphs: why confidential Transformer inference and RAG matter; ground the leakage
-that motivates the field (\citealp{morris2023vec2text} inversion;
-\citealp{kellaris2016leakage} access patterns; the Yu-Lin obfuscated-embedding
-inversion attack from the corpus)}
+Organizations in regulated and sensitive domains increasingly want to run Transformer
+inference, both embedding and generation, over confidential data such as clinical notes,
+financial records, legal files, and proprietary code. The default path defeats that goal: a
+hosted inference or embedding API receives every document and query in plaintext, so the
+operator, a privileged insider, or an attacker who breaches the service sees the data in the
+clear. GDPR, HIPAA, and the EU AI Act's high-risk provisions make this incompatible with
+processing personal, health, or privileged information, and data-residency rules can forbid
+the egress outright. The constraint already reshapes practice: in a 2024 survey of enterprise
+IT leaders, half adopt retrieval-augmented generation specifically to bring the model to the
+data and keep it in house~\citep{cloudera_ai_survey}, foregoing frontier hosted models rather
+than surrendering plaintext.
+
+Hosting on-premises does not by itself resolve the problem, because the exposure is not
+confined to data at rest. A confidential pipeline must protect data \emph{in use}: during
+inference the serving operator observes the inputs and the intermediate activations, and a
+retrieval-augmented pipeline additionally exposes the query, the access pattern over the
+corpus, and the assembled prompt, which concentrates the most sensitive context in one place.
+These surfaces are exploited rather than hypothetical. The European Data Protection Supervisor
+warns that RAG systems can retrieve and disclose personal data inadvertently held in their
+corpus~\citep{edps_rag}, and a single poisoned document placed in a retrieval corpus has been
+shown to turn an ordinary RAG application into a remote data-exfiltration
+channel~\citep{greshake_ipi}.
+
+These pressures have produced a fast-growing body of work on confidential Transformer
+inference and RAG, built on cryptography, trusted hardware, obfuscation, differential privacy,
+and combinations of these. The schemes span the inference stages of embedding, reranking, and
+generation as well as the retrieval and storage layer, yet they rest on different trust
+assumptions and report costs on different hardware, models, and metrics. A practitioner
+therefore cannot tell which is deployable for a given setting; this systematization supplies
+that comparison.
 
 \subsection{Scope and Positioning}
 % Merged Why-a-New-SoK + Scope (goal-first). Positioning compressed: the table carries
@@ -35,8 +58,9 @@ al.~\citep{andreoletti_ppi_practice}, differs substantively: it is a \emph{meta}
 level of PET \emph{families} (qualitative trade-offs, thin on information-theoretic and
 obfuscation methods, no retrieval or graph-RAG), and where it argues one trust-minimising
 trajectory (TEE\,$\to$\,FHE) we score \emph{individual schemes} and reach a different
-conclusion---hybrid splits and obfuscation are present-day leaders, not way-stations
-(\cref{ssec:deployment}). Our contribution is thus breadth across all five families,
+conclusion: today's deployable options are present-day systems such as the hybrid split,
+obfuscation, and confidential-accelerator TEEs, not way-stations toward a cryptographic
+endpoint (\cref{ssec:deployment}). Our contribution is thus breadth across all five families,
 per-scheme depth, the retrieval and graph-RAG dimension, and a quantitative
 deployment-readiness lens.
 
