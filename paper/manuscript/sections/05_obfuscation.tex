@@ -91,17 +91,17 @@ reading; this table shows what turning the knob up costs.}
 \textbf{Scheme} & \textbf{Hiding knob} & \textbf{Accuracy cost as knob $\uparrow$} & \textbf{Performance cost} \\
 \midrule
 AloePri & keymat expansion $h$; Gaussian noise; per-head window & accuracy cliff (ill-conditioning compounds over depth) & wider residual stream $d{+}2h$ (online) \\
-\addlinespace[4pt]
+\addlinespace[3pt]
 SGT & MI-loss strength & $-0.3$ to $0.5$\,pp util & ${\approx}0$ online; offline train (hrs to days) \\
-\addlinespace[4pt]
+\addlinespace[3pt]
 OSNIP & null-space dimension & near-lossless & ${\approx}0$ online; offline encryptor train \\
-\addlinespace[4pt]
+\addlinespace[3pt]
 Eguard & MI objective / projection rank & ${>}98\%$ acc (inversion $F_1{\to}{\approx}4\%$) & ${\approx}1.7\times$ online; $1.6$ to $3.4\times$ train \\
-\addlinespace[4pt]
+\addlinespace[3pt]
 KV-Cloak & block size $b$ (key space $b!$) & lossless (decoupled) & $<$0.45\% prefill \\
-\addlinespace[4pt]
+\addlinespace[3pt]
 ObfusLM & cluster $k$, budget $\varepsilon$ & $-4\%$ clf / $-6\%$ gen; worsens as $k\uparrow$ & ${\approx}0$ online; offline fine-tune ($>$10\,h) \\
-\addlinespace[4pt]
+\addlinespace[3pt]
 CodeCipher & PPL/obfuscation threshold & $-3$\,pp Pass@1 & ${\approx}0$ online; offline opt. \\
 \bottomrule
 \end{tabularx}
@@ -186,17 +186,17 @@ secret, and only refreshing it removes them (\cref{sec:hybrid}).}
 \multicolumn{4}{@{}l}{\emph{Mitigable: the scheme's transform and knobs raise or close the bar}}\\
 \addlinespace[3pt]
 Embedding / nearest-neighbour inversion~\citep{lin_inversion,kornaropoulos_knn_2019,naveed_ppe_2015} & learned embedding transforms (SGT, OSNIP) & recover input tokens from a single obfuscated embedding & inversion-hardened training (Eguard); null-space (OSNIP); large $k$ (ObfusLM) \\
-\addlinespace[5pt]
+\addlinespace[3pt]
 Deeper-layer inversion~\citep{depth_false_privacy} & ``deep layers are safe'' assumption & inversion succeeds from deep and mid-level states & protect early layers too \\
-\addlinespace[5pt]
+\addlinespace[3pt]
 Single-shot weight solving~\citep{hnm,arrowmatch,saini_precomp_break,lin_aloepri,obfuslm} & direction-preserving or permutation-revealing obfuscation (STIP, TransLinkGuard, SOTER, TSQP) & with observable weights, direction similarity recovers ${>}98\%$ of weights and vocabulary-matching / precomputed-noise solve the static secret in one shot & a direction-changing, noised transform closes it (AloePri's key matrices + noise; ObfusLM's anonymity), at an accuracy cost \\
-\addlinespace[5pt]
+\addlinespace[3pt]
 \multicolumn{4}{@{}l}{\emph{Structural: compound across requests under the reused secret; only refreshing removes them}}\\
 \addlinespace[3pt]
 Gram-matrix + ICA/BSS~\citep{belikov_gelo,hyvarinen_ica,cardoso_jade} & static linear / orthogonal mixing & $U^{\top}U{=}H^{\top}H$ leaks the covariance; fixed mixing makes BSS identifiable as observations accumulate & refreshed or non-orthogonal mixing \\
-\addlinespace[5pt]
+\addlinespace[3pt]
 Learning-based inversion~\citep{geia,vec2text,depth_false_privacy} & externalities offloaded under a fixed transform & a trained inverter learns the inverse from accumulated or synthetic data & refresh; reduce offloaded surface \\
-\addlinespace[5pt]
+\addlinespace[3pt]
 KV-cache inversion / collision / injection~\citep{luo_shadowcache} & externalized KV-cache; collision breaks the \emph{fixed} shuffle (KV-Shield) & rebuilds the prompt from a leaked cache & KV-Cloak: fresh per-block permutation \\
 \bottomrule
 \end{tabularx}

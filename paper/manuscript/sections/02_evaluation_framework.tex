@@ -158,11 +158,6 @@ heuristic and cryptographic schemes alike anchor trust in \emph{nothing}
 (trust anchor \emph{none}), so this distinction is invisible without the basis
 axis---yet it is exactly what the case study (\cref{app:validation}) turns on.
 
-\needswork{rows are grounded via the EdgeQuake-indexed source PDFs (AloePri, GELO,
-ObfuscaTune, TwinShield, Opal, PermLLM, RemoteRAG, Caprise, Pacmann, Compass);
-PipeLLM/STIP from their preprints --- re-confirm at submission}
-
-
 % Shared inference-performance table at the start of §2.2; each inference family
 % (\cref{sec:crypto}--\cref{sec:hybrid}) contributes a band.
 \begin{table*}[t!]
@@ -189,7 +184,7 @@ PipeLLM/STIP from their preprints --- re-confirm at submission}
     PermLLM~\cite{permllm}    & 2PC+dealer        & ChatGLM-6B              & 3\,s/tok; 20\,Mb/tok                            & exact (0) \\
     CryptoMoE~\cite{cryptomoe}& 2PC (MoE)         & OLMoE-7B-A1B & 22\,s/tok; 2.8\,GB/tok             & $-0.8\%$ \\
     \midrule
-    \multicolumn{5}{@{}l}{\emph{TEE (Tier 3, baseline)} --- \cref{sec:tee}}\\
+    \multicolumn{5}{@{}l}{\emph{TEE} --- \cref{sec:tee}}\\
     H100 CC~\cite{h100cc}     & GPU-TEE (H100 CC) & Llama2 7--70B           & $1.04$--$1.08\times$                            & exact \\
     PipeLLM~\cite{pipellm}    & GPU-TEE+CVM       & OPT 13--175B            & ${\approx}1.2\times$ ($<$19.6\%)                & exact \\
     Ascend-CC~\cite{ascend_cc}& NPU-TEE (Ascend, mal.\ host) & Llama2/3 7--13B & ${\approx}1\times$ ($<$0.1\% @${\geq}2$K seq)    & exact \\
@@ -210,7 +205,7 @@ PipeLLM/STIP from their preprints --- re-confirm at submission}
     DP-KSA~\cite{tang_dprag}  & output-DP (sample-aggr.) & Qwen2.5-3B/Llama & ${\approx}N\times$ gen.\ ($N{\approx}80$)       & F1 $+3.5$ @$\varepsilon{=}8$ \\
     DP-Fusion~\cite{dp_fusion}& output-DP (dist.\ blend) & Qwen2.5-7B       & $m{+}1$ pass/tok (${\approx}1\times$ lat.)      & ppl $1.43$ @$\varepsilon{\approx}16$ \\
     \midrule
-    \multicolumn{5}{@{}l}{\emph{Hybrid split (Tier 2)} --- \cref{sec:hybrid}}\\
+    \multicolumn{5}{@{}l}{\emph{Hybrid split (TEE+Obfuscation)} --- \cref{sec:hybrid}}\\
     GELO~\cite{belikov_gelo}  & conf.\,GPU + per-batch mix & Llama-2-7B        & $1.2$--$1.3\times$ (76\% offl., microbench.)    & exact \\
     TwinShield~\cite{xue_twinshield} & CPU-TEE + SS + U-Verify & BERT/ViT/LLaMA & $4$--$6\times$ vs TEE-only                   & exact \\
     ObfuscaTune~\cite{frikha_obfuscatune} & ${\sim}5\%$ params in TEE & GPT-2 & $1.5$--$4.3\times$                             & exact-ish \\

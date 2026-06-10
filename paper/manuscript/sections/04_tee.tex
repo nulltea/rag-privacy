@@ -14,14 +14,15 @@ code and model are what executes. It achieves near-plaintext speed and shifts tr
 silicon vendor, but at full scale it demands either a CPU enclave large enough for the model
 (Tier~2, impractical for large models) or a \emph{confidential accelerator} (Tier~3). We cover
 two such accelerators: a confidential NVIDIA GPU (an H100/B200-class GPU-TEE) and a confidential
-NPU (the Huawei Ascend line). The schemes here are therefore predominantly Tier~3, which we
-cover rather than systematize in depth: once the accelerator is trusted end-to-end,
+NPU (the Huawei Ascend line). These designs are therefore predominantly Tier~3: once the accelerator is trusted end-to-end,
 confidentiality reduces to enclave provisioning and attestation, a hardware-specific space
-systematized separately~\citep{accel_tee_sok}. The hardware requirement, rather than any
-performance gap, is what motivates the Tier-2 commodity-GPU hybrid split (\cref{sec:hybrid}).
-Two schemes here assume the corpus's strongest adversary, a \emph{malicious host} that may
-tamper with computation outside the enclave: Opal~\citep{kaviani_opal}, which additionally hides
-access patterns with ORAM, and Ascend-CC~\citep{ascend_cc}. Pure TEE attains the highest
+systematized separately~\citep{accel_tee_sok}. The corpus's strongest adversary, a \emph{malicious host} that may tamper with computation outside
+the enclave, is met here under three different trusted bases. NVIDIA's confidential
+GPU~\citep{h100cc} trusts a CPU-TEE CVM (SEV-SNP/TDX) as its peer, so its guarantee is only as
+strong as that CPU-TEE and the access pattern still leaks; Opal~\citep{kaviani_opal} keeps that
+base but adds ORAM, hiding the access pattern obliviously rather than under a hardness assumption;
+Ascend-CC~\citep{ascend_cc} drops the CPU-TEE, leaving the NPU as the sole trusted base against a
+fully compromised host. Pure TEE attains the highest
 performance and fidelity in the survey, but its Tier-3 hardware dependence is the binding
 deployability constraint; we rank it against the other families in \cref{sec:synthesis}.
 
@@ -29,18 +30,18 @@ deployability constraint; we rank it against the other families in \cref{sec:syn
 % Bold-name paragraphs grouped by hardware band (the spine). CPU-TEE (Tier 2) ->
 % confidential GPU (H100-CC, PipeLLM, Opal) -> confidential NPU (Ascend-CC). PipeLLM and
 % TensorTEE re-surface in Performance as the two overhead-reducers.
-End-to-end confidentiality is the deployment workflow that binds the hardware guarantee to the
-threat model, not the enclave alone~\citep{andreoletti_ppi_practice}. The workflow has four
+End-to-end confidentiality is a deployment workflow, not the enclave alone: it binds the hardware
+guarantee to the threat model~\citep{andreoletti_ppi_practice}. The workflow has four
 parts: \emph{remote attestation}, where the client verifies the enclave's measurement (the hash
 of the loaded code, model, and configuration); \emph{key provisioning}, where session keys are
 released to the enclave only after attestation succeeds; a \emph{secure channel}, where prompts
 are decrypted and processed only inside the enclave and completions are re-encrypted before
 leaving it; and \emph{operational discipline}, where plaintext logging, tracing, and telemetry
-outside the boundary are forbidden by policy rather than enforced by the hardware. In the
-\cref{sec:framework} taxonomy the trusted core is a CPU-TEE or a confidential accelerator, the
-adversary is honest-but-curious by default (Opal and Ascend-CC are the exceptions), and the residual
+outside the boundary are forbidden by policy rather than enforced by the hardware. In the taxonomy
+of \cref{sec:framework} the trusted core is a CPU-TEE or a confidential accelerator, the
+adversary ranges from honest-but-curious to the malicious host above (by trusted base), and the residual
 surface is what escapes the boundary: token-streaming timing and length, and the
-microarchitectural side channels of \cref{ssec:sidechannel}. The schemes differ in which
+microarchitectural side channels of \cref{ssec:sidechannel}. The designs differ in which
 hardware holds the enclave.
 
 The simplest design runs the entire model inside a \textbf{CPU enclave} (Intel TDX, AMD
@@ -49,31 +50,27 @@ capacity, which caps the model size that fits, and by the absence of a GPU, whic
 throughput, so it is impractical for large models; it is the floor of the family, not a
 deployment target.
 
-The Tier-3 schemes run on a trusted accelerator. \textbf{The confidential GPU}~\citep{h100cc}
+The Tier-3 designs run on a trusted accelerator. \textbf{The confidential GPU}~\citep{h100cc}
 places the whole model in a hardware enclave on an H100/H200/B200-class accelerator, encrypts
 its HBM, and protects the CPU--GPU PCIe link with AES-GCM; paired with an attested CPU
 confidential VM at the other end, it delivers whole-model confidentiality at near-plaintext
-speed. \textbf{PipeLLM}~\citep{pipellm} targets the one place a confidential GPU pays, the
-encrypted PCIe channel: it speculatively precomputes the AES-GCM keystream so the link
-encryption overlaps computation instead of serializing behind it. \textbf{Opal}~\citep{kaviani_opal}
+speed. \textbf{Ascend-CC}~\citep{ascend_cc} places the enclave on a discrete NPU (a Huawei Ascend 910A)
+instead. Before any plaintext exists, the NPU revokes the host's DMA mappings, decrypts the data
+and model on-device, and re-encrypts results before remapping; it also attests each operator
+binary, so a malicious host cannot substitute one that exfiltrates plaintext. Encrypting the model
+and operator binaries alongside the input lets one deployment serve the data owner, model owner,
+and cloud at once, with no change to the PyTorch stack. Its trusted base is an on-chip security
+module and hardware root of trust that a commodity device lacks.
+
+\textbf{PipeLLM}~\citep{pipellm} targets the encrypted PCIe channel, the one place a confidential
+GPU pays: it speculatively precomputes the AES-GCM keystream so the link encryption overlaps
+computation instead of serializing behind it. \textbf{Opal}~\citep{kaviani_opal}
 confronts that malicious host directly. Encryption alone does not stop it, since encryption hides
 content but not the host's control of scheduling, memory mapping, and message replay; Opal
 therefore verifies the integrity and freshness of every result against attested,
 Merkle-authenticated state, rejecting any tampered or rolled-back execution. It additionally hides
 access patterns with oblivious RAM over an encrypted disk, running an in-enclave knowledge-graph
 and ANN retrieval pipeline on a TDX host with a B200 accelerator.
-
-\textbf{Ascend-CC}~\citep{ascend_cc} places the enclave on a discrete NPU instead. It makes a
-Huawei Ascend 910A the \emph{sole} hardware root of trust, with no CPU TEE and a fully malicious
-host. Before any plaintext exists, the NPU unmaps its memory from the host's address space by
-removing the DMA mappings, decrypts the data and model inside the device, and re-encrypts results
-before that memory is remapped for the host to read. It attests each operator binary before
-execution, so a malicious host cannot substitute a rogue operator that would exfiltrate the
-plaintext. Because it encrypts the model parameters and operator binaries as well as the input
-data, a single deployment can protect three mutually distrusting parties at once (the data owner,
-the model owner, and the cloud), and it requires no change to the PyTorch stack. The confidential
-accelerator is thus not limited to one vendor, but it remains a requirement: Ascend-CC depends on
-an on-chip security module and hardware root of trust that a commodity device lacks.
 
 \subsection{Performance}
 \label{ssec:tee-perf}
@@ -110,14 +107,14 @@ TEE-protected tensor workload, inference included.
 
 These optimizations are software workarounds for a cost that hardware is beginning to absorb.
 Inline PCIe TEE-IO, the TDISP and IDE standards adopted as Intel TDX-Connect, AMD SEV-TIO, and
-NVIDIA Blackwell trusted-I/O, encrypts the link in the PCIe controller itself and removes the
-software bounce buffer entirely, but only when both the CPU and the accelerator support it, which
-most deployed systems do not yet provide~\citep{nvidia_secureai}. Opal is the exception here: its
-oblivious RAM adds access-pattern hiding at a real cost, $1.57\times$ query latency over a
-non-oblivious enclave, but its $O(\log N)$ accesses make oblivious retrieval roughly $29\times$
-higher in query throughput, and about an order of magnitude cheaper at scale, than the alternative
-of scanning the whole encrypted store in-enclave for the same privacy~\citep{kaviani_opal}. Fidelity
-is exact throughout, since a TEE computes the true function in plaintext.
+NVIDIA Blackwell Trusted I/O, encrypts the link in the PCIe controller itself and removes the
+software bounce buffer entirely, but only when both the CPU and the accelerator support it. Most
+deployed systems do not yet provide that support~\citep{nvidia_secureai}. Opal pays more than the rest of
+the band, for access-pattern hiding rather than for compute. Hiding which records a query touches
+has two routes inside an enclave: rescan the whole encrypted store on every request ($O(N)$), or
+use ORAM ($O(\log N)$). Opal's ORAM costs $1.57\times$ the query latency of the same pipeline with
+no hiding (plaintext storage, selective fetches)~\citep{kaviani_opal}. Fidelity is exact throughout, since a
+TEE computes the true function in plaintext.
 
 \subsection{Limitations and Known Attacks}
 \label{ssec:tee-limits}
@@ -142,15 +139,13 @@ inherit the same exclusions. This is the cross-cutting finding of \cref{ssec:sid
 \multicolumn{4}{@{}l}{\emph{Patched or deployment-addressable: closed on the platform cycle or by correct configuration}}\\
 \addlinespace[3pt]
 Malicious-interrupt injection (WeSee)~\citep{wesee} & SEV-SNP guest via a malicious hypervisor (\#VC) & leaks and corrupts enclave state & AMD firmware mitigation \\
-\addlinespace[5pt]
-GPU-memory residue (LeftoverLocals)~\citep{leftoverlocals} & leaked GPU local memory across processes & reconstructs responses and activations & vendor-patched (clear-on-free) \\
-\addlinespace[5pt]
-Attestation / RATLS misconfiguration & the attestation handshake & client trusts a wrong or stale enclave measurement & pin the expected measurement; nonce-bound fresh quote \\
-\addlinespace[5pt]
+\addlinespace[3pt]
+GPU-memory residue (LeftoverLocals)~\citep{leftoverlocals} & leaked GPU local memory across processes & reconstructs responses and activations & vendor-patched \\
+\addlinespace[3pt]
 Access-pattern leakage~\citep{kellaris2016leakage} & memory and retrieval access trace & reveals which items a query touches & oblivious RAM (Opal) \\
-\addlinespace[5pt]
-Unencrypted-HBM residue & confidential-GPU memory left in the clear on some parts & exposes plaintext outside the encrypted boundary & full-memory encryption; current-generation parts \\
-\addlinespace[5pt]
+\addlinespace[3pt]
+Unencrypted-HBM residue & confidential-GPU memory left in the clear on some parts & exposes plaintext outside the encrypted boundary & full-memory encryption\\
+\addlinespace[3pt]
 \multicolumn{4}{@{}l}{\emph{Structural: deliberately outside the vendor threat model, not fixed}}\\
 \addlinespace[3pt]
 Physical memory-bus interposition (TEE.Fail)~\citep{tee_fail} & DDR5 bus on SGX/TDX/SEV-SNP and confidential-mode GPUs & extracts keys and forges attestation from deterministic AES-XTS memory encryption & none: AMD and Intel declare physical attacks out of scope \\
@@ -164,7 +159,7 @@ already mitigated. WeSee's malicious-interrupt injection into AMD SEV-SNP is clo
 mitigations~\citep{wesee}, and LeftoverLocals, which reconstructed responses from leaked GPU local
 memory, was patched by the affected vendors within months of disclosure~\citep{leftoverlocals}.
 These are the normal patch cycle of a maturing platform, not standing holes, and they apply to
-the hardware itself, so TensorTEE and Ascend-CC inherit the same exposure and the same fixes.
+the hardware itself, so Ascend-CC inherits the same exposure and the same fixes.
 
 One class, though, the vendors decline to close. Server-grade TEEs dropped the Merkle-tree
 integrity and replay protection of client SGX in favor of deterministic AES-XTS memory
@@ -172,34 +167,29 @@ encryption, a deliberate trade-off to support large confidential VMs at low late
 exploits exactly that determinism: a sub-\$1000 DDR5 bus interposer reads and replays memory
 traffic to extract keys and forge attestation across Intel SGX/TDX, AMD SEV-SNP, and
 confidential-mode GPUs, and both AMD and Intel classify such physical attacks as out of scope with
-no mitigation planned~\citep{tee_fail}. This is the structural remainder: not an oversight the
-field has missed, but a class its threat model deliberately excludes, sitting precisely on the
-silicon the whole guarantee rests on. That exclusion is the long-term cost of anchoring trust in
-hardware. A guarantee that reduces to ``the silicon is correct'' holds only within the vendor's
+no mitigation planned~\citep{tee_fail}. This is a deliberate exclusion, not an oversight, and the
+long-term cost of anchoring trust in hardware. A guarantee that reduces to ``the silicon is correct'' holds only within the vendor's
 threat model, and only until the next attack on the microarchitecture or the memory bus. Such
 attacks recur because each generation's performance optimizations (deterministic encryption,
 speculation, shared caches, and interconnects) reopen an observable channel. Unlike a
 cryptographic assumption, which a scheme can strengthen on its own, a hardware-anchored design
-cannot close this without the vendor, and the vendor optimizes for performance first. We treat side channels as out of scope for this
-survey too, and current confidential-compute hardware materially raises the bar against
-software-only attackers; but we record the exclusion as the finding of \cref{ssec:sidechannel},
-because it falls hardest on exactly the TEE and hybrid families whose entire guarantee is the
-silicon.
+cannot close this channel without the vendor, and the vendor optimizes for performance first. We
+treat side channels as out of scope for this survey too, and current confidential-compute hardware
+materially raises the bar against software-only attackers. We still record the exclusion as the
+finding of \cref{ssec:sidechannel}, because it falls hardest on exactly the TEE and hybrid families
+whose entire guarantee is the silicon.
 
 The deployment-addressable gaps are more tractable. Attestation is only as strong as its
 configuration, so a deployment must pin the expected measurement and require a fresh, nonce-bound
 quote on each session; otherwise an attacker can replay a stale attestation, or, as TEE.Fail
 shows, forge one outright once the bus encryption is broken. Access patterns leak which corpus
-items a query touches, which Opal's ORAM answers in-band at a cost, and some confidential-GPU
-parts still leave HBM regions unencrypted, a coverage gap closed on current-generation hardware.
+items a query touches, which Opal's ORAM answers in-band at a cost. Some confidential-GPU parts
+still leave HBM regions unencrypted, a coverage gap closed on current-generation hardware.
 
 \begin{keyinsight}
-On the right hardware, near-plaintext confidential inference is a solved capability: a
-confidential GPU runs the whole model at $4$--$8\%$ overhead, and an NPU root of trust reaches
-under $0.1\%$ while resisting a malicious host. The capability is gated on possessing a
-confidential accelerator, which more than one vendor now supplies but which a commodity device
-still lacks. Its one residual risk is the same for every design in the family and independent of
-the mechanism: a physical or microarchitectural attack on the silicon the guarantee rests on, a
+On the right hardware, near-plaintext confidential inference is a solved capability, gated only on
+owning a confidential accelerator. Its one residual risk is then uniform across the family and
+independent of the mechanism: a physical or microarchitectural attack on the silicon itself, a
 class the vendor threat model deliberately excludes (\cref{ssec:sidechannel}) and that no design
 here can close on its own.
 \end{keyinsight}
