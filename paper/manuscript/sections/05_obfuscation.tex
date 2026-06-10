@@ -179,7 +179,7 @@ secret, and only refreshing it removes them (\cref{sec:hybrid}).}
 \footnotesize
 \setlength{\tabcolsep}{5pt}
 \renewcommand{\arraystretch}{1.15}
-\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{2.7cm}@{}}
+\begin{tabularx}{\textwidth}{@{}Y{0.8}Y{1.0}Y{1.25}Y{0.95}@{}}
 \toprule
 \textbf{Attack} & \textbf{Target} & \textbf{Effect} & \textbf{Defense} \\
 \midrule
@@ -189,7 +189,7 @@ Embedding / nearest-neighbour inversion~\citep{lin_inversion,kornaropoulos_knn_2
 \addlinespace[3pt]
 Deeper-layer inversion~\citep{depth_false_privacy} & ``deep layers are safe'' assumption & inversion succeeds from deep and mid-level states & protect early layers too \\
 \addlinespace[3pt]
-Single-shot weight solving~\citep{hnm,arrowmatch,saini_precomp_break,lin_aloepri,obfuslm} & direction-preserving or permutation-revealing obfuscation (STIP, TransLinkGuard, SOTER, TSQP) & with observable weights, direction similarity recovers ${>}98\%$ of weights and vocabulary-matching / precomputed-noise solve the static secret in one shot & a direction-changing, noised transform closes it (AloePri's key matrices + noise; ObfusLM's anonymity), at an accuracy cost \\
+Single-shot weight solving~\citep{hnm,arrowmatch,saini_precomp_break,lin_aloepri,obfuslm} & direction-preserving or permutation-revealing obfuscation (STIP, TransLinkGuard, SOTER) & direction similarity recovers ${>}98\%$ of weights; vocabulary-matching and precomputed-noise solve the static secret in one shot & direction-changing, noised transform (AloePri, ObfusLM), at an accuracy cost \\
 \addlinespace[3pt]
 \multicolumn{4}{@{}l}{\emph{Structural: compound across requests under the reused secret; only refreshing removes them}}\\
 \addlinespace[3pt]

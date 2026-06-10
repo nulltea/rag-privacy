@@ -123,6 +123,13 @@ stage}---together they answer ``what should I deploy for my use case?''
 and (on cost alone) obfuscation lead, but obfuscation's threat-fit is its liability;
 exact-but-slow cryptography and hardware-gated Tier-3 TEE trail on the binding axis}
 
+\subsection{Cross-Cutting Findings}
+Several observations cut across the gap-map, the performance comparison, and the
+deployment scoring, and none is visible from any one of them alone. Two concern a cost
+that relocates rather than disappears as a scheme sheds server-side trust; the remaining
+three concern how the families sit against a prior deployability survey, where the
+coverage map is thinnest, and a threat class the whole field excludes by design.
+
 \paragraph{Finding: the client-reliance asymmetry.}
 A fourth factor cuts across the three and is easy to miss because the trust ladder hides
 it: \emph{how much work the scheme leaves on the client}. The lowest-server-trust
@@ -179,7 +186,7 @@ that survive refresh their hiding randomness per query or per batch, while every
 scheme reuses a static permutation or key that a white-box adversary averages across queries
 to recover.
 
-\subsection{Graph-RAG as a Retrieval Setting}
+\paragraph{Finding: graph-RAG is the most privacy-underserved setting.}
 Graph-RAG systems such as LightRAG~\citep{guo_lightrag} index a corpus as a knowledge
 graph; their retrieval surface is entity/relation ANN plus \emph{one-hop} neighborhood
 expansion and a source-chunk fan-out---not multi-hop reasoning or GNN message-passing. The
@@ -193,9 +200,8 @@ stage and for traversal integrity (ZKGraph~\citep{zkgraph} is the lone entry). T
 distinctive adjacency/degree leak that separates graph-RAG from naive RAG is the volume
 surface that volume-hiding multi-maps target (\cref{ssec:retr-graph}).
 
-\subsection{Finding: the Field-Wide Side-Channel Blind Spot}
+\paragraph{Finding: the field-wide side-channel blind spot.}
 \label{ssec:sidechannel}
-
 Reading down the residual-leakage axis of the taxonomy (\cref{tab:threat-taxonomy})
 yields a uniform answer: \emph{every} scheme places microarchitectural, cache, timing,
 power, and physical channels out of scope. GELO excludes ``side channels

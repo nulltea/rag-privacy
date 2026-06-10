@@ -190,7 +190,7 @@ does) or rotating keys per session. H$_2$O$_2$RAM supplies a doubly-oblivious RA
 (inside a TEE) beneath such a graph store, and GORAM is the heavier-trust 3PC fallback for
 billion-edge federated graphs.
 
-\begin{table*}[b!]
+\begin{table*}[t!]
   \centering \footnotesize
   \caption{Known attacks on confidential retrieval, separated by index structure (dense vs.\
     graph; the leakage channels differ). Each row names the attack, the leakage it consumes,
@@ -200,17 +200,24 @@ billion-edge federated graphs.
   \scriptsize\setlength{\tabcolsep}{5pt}
   \begin{tabularx}{\textwidth}{@{}Y{1.05}Y{1.0}Y{0.85}Y{1.1}@{}}
     \toprule
-    Attack (cited) & Leakage exploited & Schemes at risk & Defence \\
+    Attack (cited) & Leakage exploited & Schemes at risk & Defense \\
     \midrule
     \multicolumn{4}{@{}l}{\emph{Dense retrieval}}\\
+    \addlinespace[3pt]
     PPE inversion~\cite{naveed_ppe_2015} + Vec2Text~\cite{morris2023vec2text} & ciphertext distance comparisons + aux.\ distribution & SAP/DCPE & CAPRISE (conditional ADCPE + query DP) \\
+    \addlinespace[3pt]
     Access-pattern reconstruction~\cite{kellaris2016leakage} & which records are fetched/returned & non-oblivious SE retrieval & PIR (Panther, PIR-RAG); HE scoring (TRSE, RemoteRAG) \\
+    \addlinespace[3pt]
     $k$NN query leakage~\cite{kornaropoulos_knn_2019} & $k$-NN result geometry & distance-revealing search & oblivious fetch + query DP (RemoteRAG) \\
+    \addlinespace[3pt]
     Volume leakage~\cite{blackstone_revisiting_2020} & result-set size & non-volume-hiding indexes & padding / DP candidate pruning \\
     \midrule
     \multicolumn{4}{@{}l}{\emph{Graph retrieval}}\\
+    \addlinespace[3pt]
     Volume leakage~\cite{blackstone_revisiting_2020} (bound~\cite{ando_cost_2022}) & adjacency / postings-list size & encrypted multi-maps & volume-hiding EMM (XorMM, FLASH) \\
+    \addlinespace[3pt]
     Access-pattern / degree re-identification~\cite{kellaris2016leakage} & node access + adjacency degree signature & encrypted graph stores (PeGraph) & ORAM (Compass), doubly-oblivious (H$_2$O$_2$RAM), 3PC (GORAM) \\
+    \addlinespace[3pt]
     Structural fingerprinting & unique subgraph topology of the exposed view & anonymized graph views & structural de-uniqueness (PrivGemo) \\
     \bottomrule
   \end{tabularx}

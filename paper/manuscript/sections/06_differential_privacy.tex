@@ -137,22 +137,22 @@ rising with $\varepsilon$ above a release threshold and flattening once the budg
 \footnotesize
 \setlength{\tabcolsep}{5pt}
 \renewcommand{\arraystretch}{1.15}
-\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.1cm}>{\raggedright\arraybackslash}p{2.7cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{3.0cm}@{}}
+\begin{tabularx}{\textwidth}{@{}Y{0.85}Y{0.7}Y{1.5}Y{0.95}@{}}
 \toprule
 \textbf{Attack} & \textbf{Target} & \textbf{Effect} & \textbf{Class / fix} \\
 \midrule
 \multicolumn{4}{@{}l}{\emph{Mitigable: a smaller budget or concentrated noise raises the attacker's cost}}\\
 \addlinespace[3pt]
-Embedding / inversion-model~\citep{vec2text,geia,lin_aloepri} & DP-Forward, SPARSE, NVDP & reconstruct input or tokens from the noised embedding; IMA recovers ${>}75\%$ on DP-Forward at deployment $\varepsilon$ & lower $\varepsilon$ or concentrated noise \\
-\addlinespace[5pt]
+Embedding / inversion-model~\citep{vec2text,geia,lin_aloepri} & DP-Forward, SPARSE, NVDP & reconstruct tokens from the noised embedding; IMA recovers ${>}75\%$ on DP-Forward at deployment $\varepsilon$ & lower $\varepsilon$ or concentrated noise \\
+\addlinespace[3pt]
 Tagger false-negative~\citep{dp_fusion} & DP-Fusion & spans the tagger misses fall outside the bound & higher-recall tagger \\
-\addlinespace[5pt]
+\addlinespace[3pt]
 \multicolumn{4}{@{}l}{\emph{Structural: a weaker notion or the $\varepsilon$-utility floor; no purely-DP fix}}\\
 \addlinespace[3pt]
-Nearest-neighbour under metric-LDP~\citep{kornaropoulos_knn_2019} & SPARSE (metric-LDP) & indistinguishability holds only in proportion to $\ell_2$ distance in embedding space, so far-apart inputs stay separable & inherent to the weaker notion \\
-\addlinespace[5pt]
+Nearest-neighbour under metric-LDP~\citep{kornaropoulos_knn_2019} & SPARSE (metric-LDP) & indistinguishability scales with $\ell_2$ distance, so far-apart inputs stay separable & inherent to the weaker notion \\
+\addlinespace[3pt]
 GAN reconstruction~\citep{hitaj_gan} & NVDP (Bayesian-DP) & the belief-shift bound assumes a data distribution; a generator trained on it erodes the budget & inherent to Bayesian-DP \\
-\addlinespace[5pt]
+\addlinespace[3pt]
 Corpus membership inference~\citep{mia_rag} & DP-KSA & infer whether a document is in the corpus from the answers & DP is the defense; the $\varepsilon$-utility floor is the limit \\
 \bottomrule
 \end{tabularx}

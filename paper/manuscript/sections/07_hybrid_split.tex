@@ -106,20 +106,20 @@ the surviving designs refresh their hiding randomness.}
 \footnotesize
 \setlength{\tabcolsep}{5pt}
 \renewcommand{\arraystretch}{1.15}
-\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.3cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{3.1cm}@{}}
+\begin{tabularx}{\textwidth}{@{}Y{0.62}Y{1.28}Y{1.3}Y{0.8}@{}}
 \toprule
 \textbf{Attack} & \textbf{Target} & \textbf{Effect} & \textbf{Defense / status} \\
 \midrule
 Game of Arrows~\citep{arrowmatch} & lightweight static weight-obfuscation (TransLinkGuard, SOTER) & $>$98\% weight recovery via direction-similarity & per-batch refresh (GELO) \\
-\addlinespace[5pt]
+\addlinespace[3pt]
 Hidden No More~\citep{hnm} & permutation + noise obfuscation, open-weights (STIP/PermLLM-class) & near-perfect prompt reconstruction from hidden states & refresh (GELO, SCX); seq.-sharding (Cascade) \\
-\addlinespace[5pt]
+\addlinespace[3pt]
 Static-basis break~\citep{saini_precomp_break} & reused secret basis (SOTER, TSQP) & confidentiality + integrity break; LLaMA-3-8B layer in ${\sim}6$\,min & fresh keys; no static basis \\
-\addlinespace[5pt]
-Gram-matrix leak~\citep{belikov_gelo} & GELO under \emph{orthogonal} mixing $A$ & $U^{\top}U{=}H^{\top}H$ leaks the hidden-state covariance + token-similarity spectrum (passive; narrows the BSS search) & non-orthogonal $A$, or shield vectors \\
-\addlinespace[5pt]
-ICA/BSS + anchor~\citep{hyvarinen_ica,cardoso_jade,belikov_gelo} & GELO per-batch mixing & hidden-state reconstruction; fails under fresh $A$, partial only with many in-batch anchors & fresh per-batch $A$; shields \\
-\addlinespace[5pt]
+\addlinespace[3pt]
+Gram-matrix leak~\citep{belikov_gelo} & GELO under \emph{orthogonal} mixing $A$ & $U^{\top}U{=}H^{\top}H$ leaks hidden-state covariance (passive; narrows the BSS search) & non-orthogonal $A$, or shield vectors \\
+\addlinespace[3pt]
+ICA/BSS + anchor~\citep{hyvarinen_ica,cardoso_jade,belikov_gelo} & GELO per-batch mixing & hidden-state reconstruction; partial only with many in-batch anchors & fresh per-batch $A$; shields \\
+\addlinespace[3pt]
 KV-cache reconstruction~\citep{luo_shadowcache} & externalized KV-cache (inversion / collision / injection) & rebuilds the user prompt from a leaked cache & KV-cache obfuscation (\cref{sec:obfuscation}) \\
 \bottomrule
 \end{tabularx}

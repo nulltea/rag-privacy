@@ -21,47 +21,65 @@ Confidential Transformer-inference and RAG systems are not built against a singl
 adversary. Each scheme makes its own assumptions about who the attacker is, what it
 knows, what it can observe, and what must stay hidden---and those assumptions, not the
 mechanisms alone, decide whether a defence is adequate. We classify the security of each
-scheme along five \emph{categorical} axes (\cref{sec:threat-axes}), place a
-representative set of schemes on them (\cref{sec:threat-landscape}), and treat the
+scheme along five \emph{categorical} axes (\cref{sec:threat-axes}), place
+every inference scheme on them (\cref{sec:threat-landscape}), and treat the
 attacker's \emph{capability budget} as a cross-cutting concern (\cref{sec:threat-budget}).
-A field-wide side-channel blind spot emerges from the exercise (\cref{ssec:sidechannel}),
-and the one empirical case study in this SoK (\cref{app:validation}) instantiates a single
-point in this space.
+A field-wide side-channel blind spot emerges from the exercise (\cref{ssec:sidechannel}).
 
 \begin{table*}[t!]
   \centering
-  \footnotesize
-  \caption{Threat models across confidential Transformer-inference and RAG
-    schemes, on the five axes of \cref{sec:threat-axes}. \emph{Knows}:
-    wb=white-box weights, +s=+scheme. \emph{Protects} and \emph{Residual leak}
-    are the two facets of confidentiality scope (asset hidden vs.\ what the server
-    still sees): act=activations (VRAM), ap=access patterns, ct+dist=ciphertext +
-    cosine-distance structure (the distance, not the ciphertext, is the leak). \emph{Basis}=security basis (crypto=cryptographic,
-    DP=differential privacy, HW=hardware-enforced, heur.=heuristic;
-    *=cryptographic but distance-leaking). Side channels are out of scope for
-    every row (\cref{ssec:sidechannel}).}
+  \scriptsize\setlength{\tabcolsep}{4pt}
+  \caption{Threat models for the inference schemes of \cref{tab:inf-perf}, on the
+    five axes of \cref{sec:threat-axes}; rows mirror that table's families.
+    \emph{Knows} (attack surface): \texttt{wb}=white-box (model weights and
+    activations inspectable); \texttt{bb}=black-box (input/output interface only).
+    \emph{Protects} and
+    \emph{Residual leak} are the two facets of confidentiality scope (asset hidden
+    from the operator vs.\ what it still observes): \texttt{ap}=access pattern,
+    \texttt{act}=activations in VRAM, \texttt{ct}=ciphertext. \emph{Basis}:
+    crypto=cryptographic, DP=differential privacy, HW=hardware-enforced,
+    heur.=heuristic. Side channels are out of scope for every row
+    (\cref{ssec:sidechannel}).}
   \label{tab:threat-taxonomy}
   \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lllllll@{}}
     \toprule
     Scheme & Behavior & Trust anchor & Knows & Protects & Residual leak & Basis \\
     \midrule
-    \multicolumn{7}{@{}l}{\textit{Static obfuscation}}\\
-    AloePri      & HbC        & none           & wb+s & in+out      & obf.\ I/O+wts & heur. \\
-    STIP         & HbC        & none (3-party) & wb   & input       & activations   & heur. \\
+    \multicolumn{7}{@{}l}{\emph{Cryptographic (MPC/FHE)} --- \cref{sec:crypto}}\\
+    SHAFT      & HbC        & 2PC            & \texttt{wb}   & in+model   & shares          & crypto \\
+    Fission    & HbC        & MPC evaluators & \texttt{wb}   & in+model   & shuffled chunks & crypto+heur. \\
+    Euston     & HbC        & none (FHE)     & \texttt{wb}   & in+out     & \texttt{ct} only & crypto \\
+    PermLLM    & HbC        & 2PC+dealer     & \texttt{wb}   & in+model   & shares          & crypto+heur. \\
+    CryptoMoE  & HbC        & 2PC            & \texttt{wb}   & in+model   & shares          & crypto \\
     \midrule
-    \multicolumn{7}{@{}l}{\textit{TEE / hybrid}}\\
-    GELO         & HbC        & GPU-TEE        & wb   & input       & activations   & heur.+HW \\
-    ObfuscaTune  & HbC        & CPU/GPU-TEE    & wb   & data+model  & activations   & heur.+HW \\
-    TwinShield   & HbC+verif. & CPU-TEE + SS   & wb   & data+model  & activations   & crypto+HW \\
-    Opal         & malicious  & TDX + GPU-TEE  & ---  & data+access & op-type only  & crypto+HW \\
-    PipeLLM      & HbC        & GPU-TEE        & ---  & data+model  & PCIe act.     & HW \\
+    \multicolumn{7}{@{}l}{\emph{TEE} --- \cref{sec:tee}}\\
+    Nvidia-CC  & malicious  & GPU-TEE        & \texttt{bb}   & data+model & \texttt{ap}     & HW \\
+    Ascend-CC  & malicious  & NPU-TEE        & \texttt{bb}   & data+model & \texttt{ap}     & HW \\
+    PipeLLM    & HbC        & GPU-TEE        & \texttt{bb}   & data+model & PCIe \texttt{act}. & HW \\
+    Opal       & malicious  & CPU+GPU-TEE    & \texttt{bb}   & data+access & op-type        & crypto+HW \\
     \midrule
-    \multicolumn{7}{@{}l}{\textit{Cryptographic / DP / RAG}}\\
-    PermLLM      & HbC        & 2PC+dealer     & wb   & input        & shares       & crypto+heur. \\
-    RemoteRAG    & HbC        & none           & ---  & query        & query+ap     & DP \\
-    Caprise      & HbC        & none           & ---  & doc+query    & ct+dist      & crypto*+DP \\
-    Pacmann      & HbC        & none; clt.-relied & ---  & query+access & none (pub.\ DB) & crypto \\
-    Compass      & malicious  & none; clt.-relied & --- & query+access & op-type only  & crypto \\
+    \multicolumn{7}{@{}l}{\emph{Static obfuscation} --- \cref{sec:obfuscation}}\\
+    AloePri    & HbC        & none           & \texttt{wb}   & in+out     & obf.\ I/O+weights   & heur. \\
+    SGT        & HbC        & none           & \texttt{wb}   & input      & obf.\ embed.    & heur. \\
+    OSNIP      & HbC        & none           & \texttt{wb}   & input      & obf.\ embed.    & heur. \\
+    Eguard     & HbC        & none           & \texttt{wb}   & input      & obf.\ embed.    & heur. \\
+    KV-Cloak   & HbC        & none           & \texttt{wb}   & input      & obf.\ KV-cache  & heur. \\
+    ObfusLM    & HbC        & none           & \texttt{wb}   & in+out     & anon.\ embed.   & heur. \\
+    CodeCipher & HbC        & none           & \texttt{wb}   & input      & obf.\ tokens    & heur. \\
+    \midrule
+    \multicolumn{7}{@{}l}{\emph{Differential privacy} --- \cref{sec:dp}}\\
+    DP-Forward & HbC        & none           & \texttt{wb}   & input      & noised embed.   & DP \\
+    SPARSE     & HbC        & none           & \texttt{wb}   & input      & noised embed.   & DP \\
+    NVDP       & HbC        & none           & \texttt{wb}   & input      & noised embed.   & DP \\
+    DP-KSA     & HbC        & none           & \texttt{bb}   & corpus     & DP answers      & DP \\
+    DP-Fusion  & HbC        & none           & \texttt{bb}   & context    & DP output       & DP \\
+    \midrule
+    \multicolumn{7}{@{}l}{\emph{Hybrid split (TEE+Obfuscation)} --- \cref{sec:hybrid}}\\
+    GELO        & HbC        & GPU-TEE       & \texttt{wb}   & input      & \texttt{act}    & heur.+HW \\
+    TwinShield  & HbC+verif. & CPU-TEE+SS    & \texttt{wb}   & data+model & \texttt{act}    & crypto+HW \\
+    ObfuscaTune & HbC        & CPU-TEE       & \texttt{wb}   & data+model & \texttt{act}    & heur.+HW \\
+    SCX         & HbC        & CPU-TEE       & \texttt{wb}   & input      & obf.\ KV-cache  & heur.+HW \\
+    CMIF        & HbC        & CPU-TEE       & \texttt{wb}   & input      & DP tokens       & DP+HW \\
     \bottomrule
   \end{tabular*}
 \end{table*}
@@ -102,13 +120,15 @@ the hybrid split's defining move (\cref{sec:hybrid}) is to deliver Tier-3-class 
 at Tier~2.
 
 \paragraph{3. Attacker knowledge.}
-\emph{Black-box} (queries only), \emph{white-box on weights} (knows the public model---the
-realistic case for open-weight Transformers), or \emph{white-box plus the obfuscation scheme}
-(knows the algorithm, ignorant only of an ephemeral per-session secret). We adopt Kerckhoffs's
-principle throughout: the adversary knows the model and method and is denied only the fresh
-secret. This is the honest assumption for open-weight deployments, and the regime in which
-static schemes are most stressed---a transform secure only while the weights are private
-collapses once an attacker who knows the public weights can solve for it (\cref{sec:obfuscation}).
+\emph{Black-box} (the adversary sees only the input/output interface) or \emph{white-box}
+(it can additionally inspect the model weights and internal activations, the realistic case
+for open-weight Transformers). We adopt Kerckhoffs's principle throughout: in either regime the
+adversary knows the algorithm and is denied only a fresh per-session secret, whether an
+obfuscation transform, injected DP noise, or cryptographic keys. That secret therefore belongs
+to the \emph{security basis} (axis~5), not to a separate knowledge level. White-box is the
+regime in which static schemes are most stressed: a transform secure only while the weights are
+private collapses once an attacker who knows the public weights can solve for it
+(\cref{sec:obfuscation}).
 
 \paragraph{4. Confidentiality scope.}
 What the scheme keeps hidden and what it concedes---two faces of one question. The protected
@@ -118,9 +138,8 @@ observes despite the scheme (obfuscated I/O, mixed activations in untrusted VRAM
 access patterns, or distance structure). Microarchitectural, cache, timing, and power side
 channels are a residual category \emph{every} surveyed scheme places out of scope---a
 uniformity we elevate to a finding (\cref{ssec:sidechannel}) rather than carry as a per-scheme
-cell. Two schemes agreeing on every other axis can diverge sharply here, and as the case study
-(\cref{app:validation}) shows, it is the residual leakage---not the stated protection
-goal---that an attack ultimately exploits.
+cell. Two schemes agreeing on every other axis can diverge sharply here, and it is the residual
+leakage---not the stated protection goal---that an attack ultimately exploits.
 
 \paragraph{5. Security basis.}
 What the guarantee \emph{rests on}, independent of \emph{which} entity is trusted (axis~2):
@@ -131,86 +150,86 @@ What the guarantee \emph{rests on}, independent of \emph{which} entity is truste
 (resistance shown only experimentally, as in most static obfuscation). This axis separates
 schemes the others cannot: an FHE scheme and a static-obfuscation scheme can share an identical
 row on axes~1--4 yet differ as cryptographic indistinguishability versus an empirically
-measured resistance the case study (\cref{app:validation}) shows can be far weaker than
-reported. Security basis is thus the sharpest predictor of whether a confidentiality claim
+measured resistance that can be far weaker than reported. Security basis is thus the sharpest
+predictor of whether a confidentiality claim
 survives scrutiny, and the axis that \emph{threat-model fit} (\cref{sec:intro}) reads most heavily.
 
 \subsubsection{The Landscape}
 \label{sec:threat-landscape}
 
-\cref{tab:threat-taxonomy} places a representative scheme from each of the five
-mechanism families on the five axes; the full per-family rosters appear in
-\cref{sec:crypto}--\cref{sec:hybrid}. Four patterns stand out. First, the
+\cref{tab:threat-taxonomy} places every inference scheme of \cref{tab:inf-perf} on
+the five axes. Four patterns stand out. First, the
 obfuscation family clusters tightly at \emph{HbC + white-box}: these schemes
 explicitly assume the attacker knows the open-source model and the method, and
 stake everything on an ephemeral secret. Second, the trust anchor varies more
 than the adversary behavior does: schemes that face nearly the same attacker still
 root trust in very different places---nothing, a CPU-TEE, or a GPU-TEE---which is the real
-axis of disagreement in the field. Third, only Opal and Compass
-defend a \emph{malicious} operator---Opal a host that may tamper with computation outside
-the enclave, Compass a retrieval server that may deviate from the agreed search protocol
-(caught by its commitment and integrity checks, with no trusted hardware); every other
-scheme assumes the operator follows the protocol. Fourth---and most consequential---the \emph{security basis} cleaves the
+axis of disagreement in the field. Third, defending a \emph{malicious} operator tracks the
+trust anchor: the confidential-accelerator designs (Nvidia-CC, Opal, Ascend-CC) withstand a host
+that may tamper with computation outside the enclave, and TwinShield an accelerator that may
+deviate from the protocol (caught by its U-Verify integrity checks); the cryptographic,
+obfuscation, and DP schemes assume an honest-but-curious operator. Fourth---and most consequential---the \emph{security basis} cleaves the
 table where no other axis can: the obfuscation rows rest on heuristic,
-experimentally-measured resistance, while PermLLM and the cryptographic-retrieval
+experimentally-measured resistance, while the cryptographic
 schemes rest on hardness assumptions and the TEE designs on hardware. Several
 heuristic and cryptographic schemes alike anchor trust in \emph{nothing}
 (trust anchor \emph{none}), so this distinction is invisible without the basis
-axis---yet it is exactly what the case study (\cref{app:validation}) turns on.
+axis.
 
 % Shared inference-performance table at the start of §2.2; each inference family
 % (\cref{sec:crypto}--\cref{sec:hybrid}) contributes a band.
 \begin{table*}[t!]
   \centering \scriptsize\setlength{\tabcolsep}{4pt}
-  \caption{\textbf{Inference performance across mechanism families} (exemplars; the shared
-    inference cost table, replacing the former per-family tables). Rows are grouped by family.
+  \caption{\textbf{Inference performance across mechanism families}.
     Cryptographic rows give \emph{absolute} latency---per generated token (``/tok'', decoders) or
-    per 128-token forward pass (``/inf'', encoders)---and report no vs-plaintext multiplier; TEE,
-    obfuscation, DP, and hybrid rows report \emph{$\times$-overhead} vs.\ plaintext on the same
-    hardware (their communication is local/negligible and omitted). Figures are paper-reported except $\dagger$ =
-    extrapolated 1-hop via the cited baseline (\cref{sec:comparison}); cross-row figures are
-    indicative, not co-measured (\cref{sec:comparison}). The Fidelity column is the accuracy/utility
-    delta vs.\ plaintext; obfuscation/DP privacy claims are discussed in their sections
-    (\cref{sec:obfuscation},~\cref{sec:dp}) and tested in \cref{app:validation}.}
+    per 128-token forward pass (``/inf'', encoders)---with no vs-plaintext multiplier; TEE,
+    obfuscation, DP, and hybrid rows give \emph{$\times$-overhead} vs.\ plaintext on the same
+    hardware (communication local/negligible, omitted). An inline ``offl.'' figure marks one-time
+    offline cost. Figures are paper-reported except $\dagger$=1-hop extrapolated via the cited
+    baseline; cross-row figures are indicative, not co-measured (\cref{sec:comparison}). Fidelity
+    is the accuracy/utility delta vs.\ plaintext; obfuscation/DP privacy is treated in
+    \cref{sec:obfuscation},~\cref{sec:dp}.}
   \label{tab:inf-perf}
   \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lllll@{}}
     \toprule
-    Scheme & Technique & Model & Latency / overhead & Fidelity ($\Delta$acc) \\
+    Scheme & Technique & Model & Latency / overhead & Fidelity \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Cryptographic (MPC/FHE)} --- \cref{sec:crypto}}\\
-    SHAFT~\cite{shaft}        & 2PC               & BERT-base (110M)        & ${\approx}1.4$\,s/inf$^\dagger$; ${\approx}0.6$\,GB/inf$^\dagger$ & ${\approx}0$ \\
-    Fission~\cite{fission}    & MPC+evaluators    & ModernBERT (149M)       & $<$5\,s/inf; $<$3\,GB/inf                          & ${\approx}0$ \\
-    Euston~\cite{euston}      & FHE (non-int.)    & BERT-base (110M)        & ${\approx}10.7$\,s/inf$^\dagger$; ${\approx}37$\,MB/inf$^\dagger$ & approx.$^\dagger$ \\
-    PermLLM~\cite{permllm}    & 2PC+dealer        & ChatGLM-6B              & 3\,s/tok; 20\,Mb/tok                            & exact (0) \\
+    SHAFT~\cite{shaft}        & 2PC               & BERT-base (110M)        & ${\approx}1.4$\,s/inf$^\dagger$; ${\approx}0.6$\,GB/inf$^\dagger$ & $-0.5\%$ \\
+    Fission~\cite{fission}    & MPC+evaluators    & ModernBERT (149M)       & $<$5\,s/inf; $<$3\,GB/inf                          & $-0.3\%$ \\
+    Euston~\cite{euston}      & FHE (non-int.)    & BERT-base (110M)        & ${\approx}10.7$\,s/inf$^\dagger$; ${\approx}37$\,MB/inf$^\dagger$ & $-0.1\%$ \\
+    PermLLM~\cite{permllm}    & 2PC+dealer        & ChatGLM-6B              & 3\,s/tok; 20\,Mb/tok                            & exact \\
     CryptoMoE~\cite{cryptomoe}& 2PC (MoE)         & OLMoE-7B-A1B & 22\,s/tok; 2.8\,GB/tok             & $-0.8\%$ \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{TEE} --- \cref{sec:tee}}\\
-    H100 CC~\cite{h100cc}     & GPU-TEE (H100 CC) & Llama2 7--70B           & $1.04$--$1.08\times$                            & exact \\
+    Nvidia-CC~\cite{h100cc}   & GPU-TEE (H100 CC) & Llama2 7--70B           & $1.04$--$1.08\times$                            & exact \\
+    Ascend-CC~\cite{ascend_cc}& NPU-TEE (Huawei Ascend) & Llama2/3 7--13B & ${\approx}1\times$ ($<$0.1\% @${\geq}2$K seq)    & exact \\
     PipeLLM~\cite{pipellm}    & GPU-TEE+CVM       & OPT 13--175B            & ${\approx}1.2\times$ ($<$19.6\%)                & exact \\
-    Ascend-CC~\cite{ascend_cc}& NPU-TEE (Ascend, mal.\ host) & Llama2/3 7--13B & ${\approx}1\times$ ($<$0.1\% @${\geq}2$K seq)    & exact \\
+    Opal~\cite{kaviani_opal}  & GPU-TEE + Ring-ORAM & KG+ANN retr.\ (B200)  & $1.57\times$ (2.32\,s/q)                        & $+13\%$ vs ANN-only \\
+
     \midrule
     \multicolumn{5}{@{}l}{\emph{Static obfuscation} --- \cref{sec:obfuscation}}\\
-    AloePri~\cite{lin_aloepri}& covariant data+weight & Qwen/Llama $\le$671B & ${\approx}1\times$                              & 0--3.5\% acc.\ loss \\
-    SGT~\cite{roberts_sgt}    & learned embed.\ transform & Llama-1B/Qwen3   & ${\approx}1\times$ ($\approx$0\,ms)             & $-0.4\%$ util \\
-    OSNIP~\cite{cao_osnip}    & semantic null-space & Llama-3.2/Qwen3       & ${\approx}1\times$ (0.96\,ms)                   & near-lossless \\
-    Eguard~\cite{eguard}      & MI-loss projector & T5/MPNet/RoBERTa        & ${\approx}1.7\times$                            & ${>}98\%$ task acc \\
-    KV-Cloak~\cite{luo_shadowcache} & KV-cache per-block perm & LLaMA-3.1-8B    & ${\approx}1\times$ ($<$0.45\% prefill)          & lossless \\
-    ObfusLM~\cite{obfuslm}    & $(k,\varepsilon)$-anon embed+head & BERT/Llama3-8B & ${\approx}1\times$ (1.29\,s/inf)             & $-4\%$ clf / $-6\%$ gen \\
-    CodeCipher~\cite{codecipher} & token confusion map (code) & CodeLlama-7B   & ${\approx}1\times$ (offline opt.)               & $-3$\,pp Pass@1 \\
+    AloePri~\cite{lin_aloepri}& covariant data+weight & Qwen/Llama $\le$671B & ${\approx}1\times$ (offl.\ transform, mins)     & $-0$ to $-3.5\%$ \\
+    SGT~\cite{roberts_sgt}    & learned embed.\ transform & Llama-1B/Qwen3   & ${\approx}1\times$; offl.\ train (hrs--days)    & $-0.4\%$ \\
+    OSNIP~\cite{cao_osnip}    & semantic null-space & Llama-3.2/Qwen3       & ${\approx}1\times$ (0.96\,ms); offl.\ train     & ${\approx}0$ \\
+    Eguard~\cite{eguard}      & MI-loss projector & T5/MPNet/RoBERTa        & ${\approx}1.7\times$; $1.6$--$3.4\times$ train step & $-0$ to $-2\%$ \\
+    KV-Cloak~\cite{luo_shadowcache} & KV-cache per-block perm & LLaMA-3.1-8B    & ${\approx}1\times$ ($<$0.45\% prefill)          & exact \\
+    ObfusLM~\cite{obfuslm}    & $(k,\varepsilon)$-anon embed+head & BERT/Llama3-8B & ${\approx}1\times$ (1.29\,s/inf); ${>}10$\,h FT offl. & $-4\%$ classif.\ / $-6\%$ gen. \\
+    CodeCipher~\cite{codecipher} & token confusion map (code) & CodeLlama-7B   & ${\approx}1\times$ (offline opt.)               & $-3\%$ Pass@1 \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Differential privacy} --- \cref{sec:dp}}\\
-    DP-Forward~\cite{du_dpforward} & matrix-Gaussian fwd & BERT enc.         & ${\approx}1\times$ (offl.\ FT)                  & ${\approx}92\%$ SST2 @$\varepsilon{\approx}16$ \\
-    SPARSE~\cite{sparse_dp}   & metric-DP mask    & GTR/SBERT enc.          & ${\approx}1\times$ (offl.\ mask)                & 65\% util @$\varepsilon{=}10$ \\
+    DP-Forward~\cite{du_dpforward} & matrix-Gaussian fwd & BERT enc.         & ${\approx}1\times$ (offl.\ FT)                  & 92\% SST-2 @$\varepsilon{\approx}16$ \\
+    SPARSE~\cite{sparse_dp}   & metric-DP mask    & GTR/SBERT enc.          & ${\approx}1\times$ (offl.\ train 25\,min/10k)   & 65\% STS-12 util @$\varepsilon{=}10$ \\
     NVDP~\cite{nvdp}          & learned VIB (Bayes-DP) & BERT-base (GLUE)   & ${\approx}1\times$ (offl.\ NVIB)                & 83\% MRPC @$\varepsilon_\mu{\approx}11$ \\
-    DP-KSA~\cite{tang_dprag}  & output-DP (sample-aggr.) & Qwen2.5-3B/Llama & ${\approx}N\times$ gen.\ ($N{\approx}80$)       & F1 $+3.5$ @$\varepsilon{=}8$ \\
-    DP-Fusion~\cite{dp_fusion}& output-DP (dist.\ blend) & Qwen2.5-7B       & $m{+}1$ pass/tok (${\approx}1\times$ lat.)      & ppl $1.43$ @$\varepsilon{\approx}16$ \\
+    DP-KSA~\cite{tang_dprag}  & output-DP (sample-aggr.) & Qwen2.5-3B/Llama & ${\approx}N\times$ gen.\ ($N{\approx}80$)       & F1 $+3.5$ vs no-RAG @$\varepsilon{=}8$ \\
+    DP-Fusion~\cite{dp_fusion}& output-DP (dist.\ blend) & Qwen2.5-7B       & $m{+}1$ pass/tok (${\approx}1\times$ lat.)      & ppl $1.43$ vs $1.03$ @$\varepsilon{\approx}16$ \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Hybrid split (TEE+Obfuscation)} --- \cref{sec:hybrid}}\\
-    GELO~\cite{belikov_gelo}  & conf.\,GPU + per-batch mix & Llama-2-7B        & $1.2$--$1.3\times$ (76\% offl., microbench.)    & exact \\
-    TwinShield~\cite{xue_twinshield} & CPU-TEE + SS + U-Verify & BERT/ViT/LLaMA & $4$--$6\times$ vs TEE-only                   & exact \\
-    ObfuscaTune~\cite{frikha_obfuscatune} & ${\sim}5\%$ params in TEE & GPT-2 & $1.5$--$4.3\times$                             & exact-ish \\
-    SCX~\cite{zeng_scx}       & per-session OTK KV-cache & 7B decoder       & ${\approx}1\times$ (online)                     & exact \\
-    CMIF~\cite{cmif}          & CPU-TEE embed + RNM-DP & Llama2/3 7--8B      & $1.3$--$1.4\times$                              & DP utility cost \\
+    GELO~\cite{belikov_gelo}  & CPU-TEE + per-batch mix & Llama-2-7B        & $1.2$--$1.3\times$ (per offload)    & exact \\
+    TwinShield~\cite{xue_twinshield} & CPU-TEE + SS + U-Verify & BERT/ViT/LLaMA & $-4$--$6\times$ vs CPU-TEE              & exact \\
+    ObfuscaTune~\cite{frikha_obfuscatune} & ${\sim}5\%$ params in TEE & GPT-2 & $1.5$--$4.3\times$                             & $-1\%$ \\
+    SCX~\cite{zeng_scx}       & per-session OTK KV-cache & 7B decoder       & ${\approx}1\times$      & exact \\
+    CMIF~\cite{cmif}          & CPU-TEE embed + RNM-DP & Llama2/3 7--8B      & $1.3$--$1.4\times$                              & 84\% SST-2 @$\varepsilon{=}3$ \\
     \bottomrule
   \end{tabular*}
 
@@ -241,11 +260,11 @@ defending an adversary stronger than its deployment faces overpays in performanc
 defending a weaker adversary fails to protect, and the deployable point is the calibrated one,
 on which we score families in \cref{sec:synthesis}.
 
-We therefore treat the budget as an explicit per-scheme parameter. The ``what breaks'' case
-study (\cref{app:validation}) accordingly attacks each scheme \emph{within its own
-constrained-attacker regime}---white-box on weights and method, denied the per-session secret,
-under the compute and observation horizon the scheme's own evaluation permits---so a break
-there is a break by the victim's own standard, not an artefact of an inflated adversary.
+We therefore treat the budget as an explicit per-scheme parameter, assessing each scheme
+\emph{within its own constrained-attacker regime}---white-box on weights and method, denied the
+per-session secret, under the compute and observation horizon the scheme's own evaluation
+permits---so that a reported break is a break by the victim's own standard, not an artefact of
+an inflated adversary.
 
 \subsection{Cost: Performance and Fidelity}
 \label{sec:comparison}

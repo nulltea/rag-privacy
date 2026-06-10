@@ -125,7 +125,7 @@ inherit the same exclusions. This is the cross-cutting finding of \cref{ssec:sid
 \footnotesize
 \setlength{\tabcolsep}{5pt}
 \renewcommand{\arraystretch}{1.15}
-\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{2.7cm}@{}}
+\begin{tabularx}{\textwidth}{@{}Y{0.85}Y{1.1}Y{1.0}Y{1.05}@{}}
 \toprule
 \textbf{Attack} & \textbf{Target} & \textbf{Effect} & \textbf{Status / defense} \\
 \midrule
@@ -141,7 +141,7 @@ Unencrypted-HBM residue & confidential-GPU memory left in the clear on some part
 \addlinespace[3pt]
 \multicolumn{4}{@{}l}{\emph{Structural: deliberately outside the vendor threat model, not fixed}}\\
 \addlinespace[3pt]
-Physical memory-bus interposition (TEE.Fail)~\citep{tee_fail} & DDR5 bus on SGX/TDX/SEV-SNP and confidential-mode GPUs & extracts keys and forges attestation from deterministic AES-XTS memory encryption & none: AMD and Intel declare physical attacks out of scope \\
+Physical memory-bus interposition (TEE.Fail)~\citep{tee_fail} & DDR5 bus on SGX/TDX/SEV-SNP and confidential-mode GPUs & extracts keys and forges attestation & none: AMD and Intel declare physical attacks out of scope \\
 \bottomrule
 \end{tabularx}
 \end{table*}
