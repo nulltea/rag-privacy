@@ -1,103 +1,40 @@
-\section{Synthesis: Coverage, Gaps, and Performance}
+\section{Synthesis}
 \label{sec:synthesis}
 
-% The payoff section. Three artifacts: (1) a stage x mechanism matrix whose empty
-% cells are the gap-map; (2) a normalized performance comparison from reported
-% numbers + a non-comparability caveat; (3) graph-RAG as a retrieval setting.
+This section draws the per-family results of \cref{sec:crypto}--\cref{sec:retrieval} together
+into three views: the trade-off geometry that locates each family
+(\cref{ssec:design-space}), per-use-case deployment recommendations (\cref{ssec:deployment}),
+and the cross-cutting findings and open problems that no single family section could state on
+its own (\cref{ssec:findings}). The headline is that no family dominates:
+which scheme is deployable depends on the application. The geometry below makes that trade
+explicit, and the recommendations turn it into per-use-case guidance.
 
-\subsection{The Stage\,$\times$\,Mechanism Matrix and Gap-Map}
-% Rows = pipeline stages (ingest, embed, store, retrieve, rerank, generate, +
-% graph construction, graph traversal); columns = mechanism families (§3-§7).
-% Cells = representative schemes. EMPTY / weak cells = open problems.
-\begin{table*}[t!]
-  \centering \scriptsize
-  \caption{Coverage of the inference-and-RAG pipeline by mechanism family. Cell = one
-    or two representative schemes (\cref{sec:crypto}--\cref{sec:hybrid}; see those
-    tables for the full set); ``---'' = no practical scheme known to us (a gap).}
-  \label{tab:gapmap}
-  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
-    \toprule
-    Pipeline stage & Crypto/MPC & TEE & Obfuscation & DP & Hybrid split \\
-    \midrule
-    Embed            & SHAFT/Euston       & H100-CC          & SGT/Eguard    & DP-Fwd/SPARSE & GELO/ObfuscaTune \\
-    Store (vectors)  & CAPRISE/SAP        & Opal             & ---           & ---           & --- \\
-    Retrieve (ANN)   & Compass/Pacmann    & Opal+ORAM        & ---           & RemoteRAG     & --- \\
-    Rerank           & p\textsuperscript{2}RAG/TRSE & Opal   & ---           & RemoteRAG(HE) & --- \\
-    Generate         & PermLLM/CryptoMoE  & PipeLLM          & AloePri/OSNIP & DP-RAG(out)   & GELO/SCX \\
-    Graph construct. & ---                & ---              & ARoG          & ---           & PrivGemo \\
-    Graph traverse   & Pacmann/XorMM      & Opal/H$_2$O$_2$RAM & ARoG        & ---           & PrivGemo \\
-    \bottomrule
-  \end{tabular*}
-\end{table*}
-\needswork{narrate the headline gaps the ``---'' cells expose: obfuscation and DP are
-almost absent from storage/retrieval/rerank; the hybrid split is absent from every
-retrieval stage (it is an inference technique); graph \emph{construction} is a near-total
-gap across all confidentiality families (only anonymization touches it). Integrity
-(verification) is orthogonal to these columns --- ZKGraph/V3DB/ZKIFV compose on top
-(\cref{sec:threat}). Note explicitly that secure GNN-inference / graph-analytics
-schemes were excluded as off-target for retrieval-style graph-RAG.}
+\subsection{Design Space}
+\label{ssec:design-space}
 
-\subsection{Performance Comparison (by Use Case)}
-% Grouped BY USE CASE per \cref{sec:comparison} (deployment decisions are per use case),
-% normalized per use case. Numbers are indicative / self-reported unless marked.
-Following \cref{sec:comparison}, we compare \emph{by use case}---the unit of a deployment
-decision---rather than by family, putting the mechanisms that actually compete for a given
-stage side by side. Figures are normalized to each use case's canonical metric
-(\cref{sec:comparison}) and are indicative (each from its own paper's testbed---different
-hardware, model, dataset) unless marked \emph{co-measured} (benchmarked together in one
-paper); the non-comparability caveat of \cref{sec:comparison} stands.
-\emph{Reranking} is absent from \cref{tab:performance} by design: although it is a pipeline
-stage in the gap-map above, no surveyed scheme reports a standalone private cross-encoder
-reranking measurement---the few schemes with a scoring step (p\textsuperscript{2}RAG, TRSE,
-RemoteRAG's HE top-$k$ scoring, Opal's in-enclave scoring) fold it into a retrieval-pipeline
-figure---so private reranking stands as an \emph{open gap} rather than a comparable cost.
-\begin{table*}[t!]
-  \centering \footnotesize
-  \caption{Performance and fidelity by use case (indicative; normalized per use case,
-    \cref{sec:comparison}). ``$\times$'' = overhead vs.\ plaintext; ``exact'' = computes the
-    true function. Cross-paper figures are indicative, not co-measured. All figures are
-    \emph{paper-reported}; we do not independently reproduce them, and Chen et
-    al.~\citep{chen_sok_pti} find that re-benchmarked crypto-inference numbers can diverge from
-    the originals---so cross-scheme readings here are order-of-magnitude, and open-source
-    availability is tracked per scheme in the family tables (\cref{sec:crypto}--\cref{sec:hybrid}).}
-  \label{tab:performance}
-  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}p{6.3cm}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{3.6cm}@{}}
-    \toprule
-    Use case & Mechanisms (representative) & Overhead (normalized) & Fidelity \\
-    \midrule
-    Generation & MPC (PermLLM, CryptoMoE, Fission); TEE (PipeLLM); obfusc (AloePri, SGT, OSNIP); hybrid (GELO, SCX, ObfuscaTune)
-               & MPC 1--2 orders; TEE $<$20\%; obfusc $\sim$0; hybrid few$\times$
-               & exact (MPC/TEE/hybrid); lossy (obfusc) \\
-    Embedding (encoder) & MPC (SHAFT); FHE (Euston); DP (DP-Forward, SPARSE); obfusc (Eguard)
-               & crypto 1--2 orders; obfusc/DP $\sim$0
-               & exact (crypto); acc.\ $\Delta$ (obfusc/DP) \\
-    Vector retrieval & crypto (p\textsuperscript{2}RAG, Panther, PIR-RAG, RAGtime-PIANO); DP (RemoteRAG); enc (CAPRISE, SAP)
-               & sub-s--10\,s @$10^6$--$10^7$; enc $\sim$0
-               & exact (PIR/FHE); recall $\Delta$ (DP); order-leak (DCPE) \\
-    Graph retrieval & TEE (Opal); crypto (Compass, Pacmann); SSE (XorMM, PeGraph, GORAM); anon (ARoG, PrivGemo)
-               & graph-ANN sub-s--s; KG-anon $\sim$0
-               & exact (ORAM/SSE); quality-only (anon) \\
-    \bottomrule
-  \end{tabular*}
-\end{table*}
-\needswork{fill cells with specific cited figures normalized per use case (\cref{sec:comparison});
-mark each co-measured vs indicative; this performance axis is the dimension Bodea
-\cite{bodea_sok} explicitly omits}
+Read across the families, one shape recurs: each maximizes at most two of the three
+deployment-readiness criteria and pays on the third, and the security basis axis of
+\cref{sec:threat-axes} explains why the third differs so much. Cryptographic inference
+(\cref{sec:crypto}) attains exact fidelity on a provable basis and pays one to three orders of
+magnitude in performance. A Tier-3 TEE (\cref{sec:tee}) matches that exact fidelity at
+near-plaintext speed, but its basis is the silicon: the guarantee reduces to hardware whose side
+channels every threat model excludes, and to the availability of the accelerator that holds it.
+Static obfuscation (\cref{sec:obfuscation}) is the cheapest, near-plaintext throughout, but
+rests on a heuristic basis and gives up a tunable slice of fidelity. Differential privacy keeps
+that near-plaintext cost and adds a formal but probabilistic guarantee, paying again in fidelity
+through the budget $\varepsilon$ (\cref{sec:dp}). The hybrid split (\cref{sec:hybrid}) recovers
+exact fidelity and a basis stronger than static obfuscation on commodity hardware, and pays
+instead in the TEE$\leftrightarrow$GPU serialization that its offloading induces. The criterion a
+family concedes is forced by the basis it rests on, not incidental, so no single point on this
+surface dominates the rest. Which concession a deployment can absorb is what selects the scheme: a
+real-time service is bound by its latency budget, a regulated workload by the security basis it
+must be able to prove, a cost-sensitive one by the hardware it already has, and a
+quality-critical one by the fidelity it can spare. The next section reads the surface through
+these constraints, use case by use case.
 
 \subsection{Deployment Readiness}
 \label{ssec:deployment}
-% The organizing payoff: score each family on the 3 deployment-readiness criteria
-% (perf, fidelity, threat-fit). Qualitative now; per-scheme specifics \needswork.
-The performance numbers above are one of three criteria that together determine whether
-a scheme is likely to be \emph{deployed}: \cref{sec:intro}'s \emph{performance},
-\emph{fidelity} (impact on output quality), and \emph{threat-model fit} (an adversary
-model appropriate to the deployment, not maximal). \cref{tab:deployment} scores the
-families on all three. The synthesis is deliberately not a ranking of families by
-security: it shows that deployment readiness comes from \emph{balancing} the three axes,
-not maximizing one. This family-level profile is the complement of the per-use-case
-comparison (\cref{tab:performance}): the profiles say what each family is \emph{good at},
-while the use-case view says which family is the deployable choice \emph{for a given
-stage}---together they answer ``what should I deploy for my use case?''
+
 \begin{table*}[t!]
   \centering \scriptsize\setlength{\tabcolsep}{4pt}
   \caption{Deployment readiness by family, on the three criteria of \cref{sec:intro}, plus
@@ -119,112 +56,216 @@ stage}---together they answer ``what should I deploy for my use case?''
     \bottomrule
   \end{tabular*}
 \end{table*}
-\needswork{justify each cell from the cited numbers; the headline reading: hybrid split
-and (on cost alone) obfuscation lead, but obfuscation's threat-fit is its liability;
-exact-but-slow cryptography and hardware-gated Tier-3 TEE trail on the binding axis}
+
+The same trade reads differently in each use case, because the constraint a deployment can
+least afford to concede changes with the task. We give the recommendation use case by use case.
+
+\emph{Generation} is dominated by the cost of autoregressive decoding, so its binding
+constraint is latency. A confidential accelerator (\cref{sec:tee}) is the strongest option for
+an operator that has one, running the full model at near-plaintext speed, but the hardware is
+scarce and few deployments own it. Where it is absent, static obfuscation runs the unmodified
+model on commodity GPUs at near-plaintext cost, at the price of a heuristic basis. The hybrid
+split is a weaker fit here than its commodity-hardware story suggests, because its per-token
+TEE$\leftrightarrow$GPU round-trips (\cref{sec:hybrid}) make decoding latency its weak point.
+MPC and FHE pay one to three orders of magnitude, which is hard to justify for single-user
+outsourcing; their natural setting is instead \emph{collaborative} inference among mutually
+distrusting data holders, such as joint analysis over disjoint institutional records, where no
+party can be trusted to aggregate and a cryptographic guarantee across parties is the whole
+point.
+
+\emph{Embedding and reranking} run a smaller, often encoder-sized model, which shifts the
+calculus: the workload does not need a flagship accelerator, so paying for a confidential GPU
+is overkill. This is the hybrid split's natural setting. It keeps a small trusted core in a
+commodity CPU-TEE and offloads to untrusted commodity GPUs (\cref{sec:hybrid}), giving exact
+output without enterprise hardware, and the short, non-autoregressive workload makes its
+round-trip cost far less acute than in generation. Static obfuscation and local DP are the
+near-plaintext alternatives where a heuristic or probabilistic basis is acceptable, and a
+cryptographic encoder (SHAFT, Euston) is the choice only when an exact and provable guarantee
+is required.
+
+\emph{Vector retrieval} divides by what must be hidden. When the access pattern and the
+inter-document structure must stay hidden, the access-hiding schemes answer it: private
+information retrieval (Panther, PIR-RAG) returns a record without revealing which one, and
+homomorphic scoring (RemoteRAG, TRSE) keeps the similarity values encrypted. When near-plaintext
+speed is the priority and a bounded, quantified comparability leak is tolerable, CAPRISE is the
+strong choice. Its conditional distance-comparison-preserving encryption hides the embeddings at
+roughly $1\times$ cost, its query-side differential privacy blocks embedding inversion, and
+unlike SAP it conceals the inter-document structure (\cref{ssec:retr-dense}). The deciding
+question is whether that residual leak is acceptable for the corpus at hand.
+
+\emph{Graph retrieval} has no near-plaintext option, so the choice trades cost against which
+structural channel it closes (\cref{ssec:retr-graph}). Hiding which node a query touches takes
+either client-side cryptography (batched PIR in Pacmann, an ORAM-wrapped index in Compass) or
+the hardware route of a TEE (Opal); the cryptographic route shifts cost and state onto the
+client, the TEE route onto trusted hardware. Hiding the adjacency volume takes a volume-hiding
+encrypted multi-map (XorMM, FLASH) at the cost of storage overhead. Where neither cost is affordable,
+anonymization (PrivGemo, ARoG) is the cheapest protection, at a heuristic and unquantified
+residual leak. No single scheme closes all three channels at once.
+
+\begin{openproblem}
+\label{op:no-e2e}
+\emph{No end-to-end confidential pipeline.} Every scheme here protects one or two stages, and no
+single design spans embedding, retrieval, and generation; the gaps between stages are uncovered.
+Composing per-stage mitigations is largely unstudied: the
+joint guarantee of a stacked pipeline, and whether its fidelity losses and residual leakages
+compound, are uncharacterized (\cref{op:dp-compose}). The prior RAG-privacy SoK reaches the same gap~\citep{bodea_sok}. \emph{Which compositions hold their per-stage guarantees, and at what
+combined fidelity cost?}
+\end{openproblem}
 
 \subsection{Cross-Cutting Findings}
-Several observations cut across the gap-map, the performance comparison, and the
-deployment scoring, and none is visible from any one of them alone. Two concern a cost
-that relocates rather than disappears as a scheme sheds server-side trust; the remaining
-three concern how the families sit against a prior deployability survey, where the
-coverage map is thinnest, and a threat class the whole field excludes by design.
+\label{ssec:findings}
 
-\paragraph{Finding: the client-reliance asymmetry.}
-A fourth factor cuts across the three and is easy to miss because the trust ladder hides
-it: \emph{how much work the scheme leaves on the client}. The lowest-server-trust
-schemes---Tier-1 cryptographic retrieval with no trusted hardware---are precisely the ones
-that make the client \emph{thick}. Compass and Pacmann achieve oblivious retrieval by
-running the ORAM controller or the graph traversal \emph{client-side} (the client stores
-the access state and drives a multi-round loop), and 2PC inference such as PermLLM makes
-the user a compute party outright. ``Trust anchor: none'' reads as zero cost, but the cost
-has only moved: from a trusted third party to the user's own device, which must now be
-capable, stateful, and online for the duration of a query. For deployment, adoption, and
-user experience this is a first-order constraint---a phone or a browser tab is a poor ORAM
-controller---and it inverts the naive reading of the table: the families that look cheapest
-on server trust can be the most demanding to actually field. A full per-scheme
-classification (thin/stateful/thick) across all families is the natural next step;
-\cref{tab:deployment} fills it for cryptography and flags the rest (\tq).
+\paragraph{Client reliance, offline setup, and multi-tenancy.}
+The trust-anchor axis of \cref{sec:threat} records where the \emph{trusted} computation runs,
+and by construction it brackets the client, since a client need not be named as its own trusted
+base. That convention hides how much work several schemes push back onto the client, which this
+finding makes explicit. Cryptographic schemes make the user a compute party in 2PC, or drive
+private retrieval from the client in PIR and ORAM (\cref{sec:crypto}, \cref{sec:retrieval}).
+Covariant weight obfuscation (AloePri, KV-Cloak, ObfusLM) has the client transform the weights
+and hold the secret, so the served checkpoint is re-keyed per client and one shared model can no
+longer serve many tenants at once. Local DP is client-reliant by construction: the noise must be
+added before the data leaves the device, so the client runs the model's input-side layers and
+draws the noise itself. DP-Forward makes the cost concrete at the split point, since moving more
+layers onto the client raises utility but also its compute and storage~\citep{du_dpforward}; the
+offline fine-tuning that calibrates the noise runs on the operator, so the standing burden is
+the online forward pass, not the one-time setup. The hybrid split mostly avoids a heavy client
+setup because it hides dynamically. SCX is the exception that keeps the client active during
+decoding, encoding each new token and recovering the first and last transformer blocks on the
+device while the cloud enclave handles the rest, a light but standing per-token role rather than
+a one-time cost~\citep{zeng_scx}. Dense and graph retrieval add their own client load: the
+client embeds and perturbs its query, Compass keeps an ORAM position map and runs a multi-round
+controller, and Pacmann preprocesses the database client-side (\cref{sec:retrieval}). Two
+reasons drive all of this. One is structural: local DP and covariant weight obfuscation can
+only originate the secret on the client and so forgo multi-tenancy. The other is performance: a
+client-side cache, compute party, or embedder lowers server cost or saves rounds. The TEE is the workaround rather than a counterexample: Opal hides the same access
+pattern with only a key and a counter on the client (\cref{sec:retrieval}), trading the client's
+burden for trust in the hardware.
 
-\paragraph{Finding: obfuscation's hidden trusted base.}
-The same asymmetry refines the ``Tier~1, no trusted hardware'' label on static obfuscation
-(\cref{sec:obfuscation}), and it splits the family by \emph{what} carries the secret. The
-\emph{weight-obfuscation} schemes---AloePri, ObfusLM, and KV-Cloak---bake the secret transform
-into the model weights, so the obfuscated model running on the cloud is itself the
-secret-bearing artifact. Whoever performs that one-time obfuscation is a trusted computing
-base: the key is the entire secret, so a single leak makes every subsequent query recoverable
-by the white-box server, and because the obfuscated weights are bound to one client the cloud
-can no longer share a model across tenants. Either the client absorbs the setup (ObfusLM's
-fine-tune) and the cloud forfeits the multi-tenant economics that make inference affordable,
-or the obfuscation is moved into a \emph{TEE} on the serving side---exactly KV-Cloak's
-``secret matrices in a TEE for key custody'' arrangement---at which point the headline
-advantage of needing no trusted hardware is gone: multi-tenant weight obfuscation is, in
-deployment, a Tier-2 scheme. The \emph{input-transform} schemes---SGT, OSNIP, Eguard---escape
-this: they leave the model a stock, shareable checkpoint and apply a client-held transform to
-the embeddings, so the secret never reaches the cloud and multi-tenancy survives; their cost
-reappears instead as a thicker client (above), and, except for Eguard---which argues for
-robustness even when its mechanism is known---the transform must still be kept from the cloud.
-As with client reliance, the cost has not vanished, only moved---here from the latency budget
-to the trust budget.
+\paragraph{Confidential accelerators are scarce and enterprise-only.}
+The pure confidential-accelerator path, a GPU- or NPU-TEE trusted end to end, is the most
+performant route that is also exact and near-plaintext, but it trades the confidentiality
+problem for a hardware-procurement one (\cref{sec:tee}). The confidential accelerators our
+corpus draws on are the NVIDIA confidential-computing GPUs (the H100/H200/B200 class) and the
+Huawei Ascend NPU; the platform space beyond these is narrow and still forming, since confidential GPU
+support is recent, concentrated in high-end enterprise parts, and gained inline TEE-I/O only with
+Blackwell (\cref{sec:tee}). Trusting such an accelerator end to end also binds a deployment to
+one vendor's silicon and attestation. That cost is easy to justify for frontier generation,
+where the model is large and the accelerator would be used regardless, and hard to justify for
+embedding or reranking, where a small encoder does not need a flagship GPU yet no cheaper
+confidential accelerator exists to match the smaller workload. The scarcity is what the hybrid
+split sidesteps by offloading to commodity untrusted GPUs (\cref{sec:hybrid}).
 
-\paragraph{Cross-comparison: a frontier, not a trajectory.}
-Andreoletti et al.~\citep{andreoletti_ppi_practice} survey an overlapping set of families through
-the same deployability lens and conclude with a single trust-minimising \emph{trajectory}---TEE as
-today's pragmatic baseline, crypto-augmentation as a mid-term step, and FHE as the asymptotic
-endpoint. Our scheme-level scoring shares their starting point (Tier-3 TEE is the only near-plaintext
-option for full-scale models today) but not the linear ordering: the hybrid split and, on cost alone,
-static obfuscation already sit at the readiness frontier (\cref{tab:deployment})---they are
-present-day operating points, not way-stations toward FHE, whose cost keeps it off the frontier for
-generative workloads. One factor a family-level view understates is \emph{infrastructural}: because
-obfuscation and DP leave the model graph unmodified, they drop into an existing production serving
-stack (vLLM, llama.cpp) with no bespoke runtime, whereas MPC, FHE, and TEE each demand a dedicated
-serving path. The deployable choice is thus \emph{use-case dependent} (\cref{tab:performance})---a
-frontier across which different families win different stages, not a single endpoint.
-Obfuscation's place on that frontier is, however, conditional on a design discipline that
-the attack record makes explicit (\cref{sec:obfusc-attacks},~\cref{sec:hybrid}): the schemes
-that survive refresh their hiding randomness per query or per batch, while every broken
-scheme reuses a static permutation or key that a white-box adversary averages across queries
-to recover.
+\paragraph{For heuristic schemes, a refreshed secret is what survives accumulation.}
+The same failure recurs across three families. A single secret, reused on every request, lets
+the adversary accumulate the externalities the scheme offloads (the obfuscated activations,
+attention, and externalized KV-cache) until they pin down what the secret was meant to hide: the
+hidden states, and through them the input. Fixed permutations are broken by prompt reconstruction
+in cryptographic inference (\cref{sec:crypto}), static obfuscation accumulates into blind source
+separation and learned inversion (\cref{sec:obfuscation}), and a reused KV-cache shuffle is
+broken by collision (\cref{sec:hybrid}). In every case the schemes that survive are the ones that
+refresh the secret: KV-Cloak draws a fresh permutation per cache block, GELO a fresh mixing
+matrix per batch, and SCX a one-time key per generated token. Refreshing is necessary but not
+sufficient. Under an orthogonal mixing the Gram matrix $U^{\top}U$ equals $H^{\top}H$ whichever
+matrix is drawn, so a fresh secret per batch still exposes the hidden states' pairwise inner
+products, which feed the blind-source-separation and anchor attacks of \cref{sec:hybrid}. How
+often to refresh under a latency budget is itself open (\cref{op:refresh-frequency}).
 
-\paragraph{Finding: graph-RAG is the most privacy-underserved setting.}
-Graph-RAG systems such as LightRAG~\citep{guo_lightrag} index a corpus as a knowledge
-graph; their retrieval surface is entity/relation ANN plus \emph{one-hop} neighborhood
-expansion and a source-chunk fan-out---not multi-hop reasoning or GNN message-passing. The
-schemes that cover this surface are catalogued with the other retrieval work in
-\cref{sec:retrieval} (\cref{ssec:retr-graph}); here we record only the cross-family finding.
-Graph-RAG is the most privacy-underserved setting in the corpus: Bodea et
-al.~\citep{bodea_sok} exclude it entirely, secure GNN-inference and graph-analytics schemes
-are off-target for the one-hop surface (cited only as lineage), and the near-empty graph rows
-of \cref{tab:gapmap} are the resulting open frontier---most acute at the \emph{construction}
-stage and for traversal integrity (ZKGraph~\citep{zkgraph} is the lone entry). The
-distinctive adjacency/degree leak that separates graph-RAG from naive RAG is the volume
-surface that volume-hiding multi-maps target (\cref{ssec:retr-graph}).
+\paragraph{Malicious-operator security is an added integrity layer, not a free upgrade.}
+Most schemes here assume an honest-but-curious operator that follows the protocol. Defending one
+that may also deviate, by dropping, replaying, or tampering, means adding integrity on top of
+confidentiality, and that comes by one of two routes. The cryptographic route adds authenticated
+computation: information-theoretic MACs make secret-sharing MPC actively secure in the SPDZ line,
+TwinShield's U-Verify checks a possibly malicious GPU with a Freivalds-style test
+(\cref{sec:hybrid}), and Opal authenticates memory against a malicious host with a Merkle tree
+(\cref{sec:tee}). The hardware route adds attestation, as in the confidential accelerators
+(Nvidia-CC, Ascend-CC). Malicious resistance is therefore not hardware-exclusive. What stands out
+is that the surveyed cryptographic-inference schemes take neither route: SHAFT, Fission, PermLLM,
+and CryptoMoE are all proved only semi-honest, and a malicious client can already extract the
+model from a semi-honest protocol (\cref{sec:crypto}). Defending against a deviating operator is
+narrower than full malicious security, which also covers a cheating client and costs more again;
+the surveyed schemes provide neither. MACs could in principle make their linear-algebra core
+actively secure at a cost, but the permutation-reveal speed tricks that make these schemes fast
+sit outside what a MAC protects, so malicious security there is not a drop-in. A gap remains: malicious resistance is achievable
+cryptographically, yet no surveyed crypto scheme pays for it, and the families that do reach it
+lean on integrity machinery or trusted hardware that the cheap, semi-honest designs omit.
 
-\paragraph{Finding: the field-wide side-channel blind spot.}
+\paragraph{The field-wide side-channel blind spot.}
 \label{ssec:sidechannel}
-Reading down the residual-leakage axis of the taxonomy (\cref{tab:threat-taxonomy})
-yields a uniform answer: \emph{every} scheme places microarchitectural, cache, timing,
-power, and physical channels out of scope. GELO excludes ``side channels
-originating inside the TEE \dots\ and accelerator-side leakage beyond raw memory
-reads'' \citep{belikov_gelo}; Opal devotes a paragraph to enumerating the
-in-enclave side channels it does \emph{not} defend \citep{kaviani_opal}; the
-remainder simply omit them. This is not a gap the field has overlooked but one its
-threat models deliberately exclude, and it is worth naming because it falls hardest
-on the designs least able to absorb it. The TEE and hybrid families anchor their
-entire trust in hardware whose best-documented weaknesses are microarchitectural and
-physical leakage: transient-execution attacks of the Spectre and Foreshadow
-class~\citep{spectre,foreshadow}, and physical memory-bus interposition such as
-TEE.Fail, which extracts keys and forges attestation from the deterministic memory
-encryption of server TEEs and which the vendors classify as out of scope with no fix
-planned~\citep{tee_fail}. Many individual attacks are patched on the normal platform
-cycle, but the class recurs because each generation's performance optimizations
-reopen an observable channel.
+The residual-leakage axis of the taxonomy (\cref{tab:threat-taxonomy}) gives a uniform answer:
+\emph{every} scheme places the microarchitectural, cache, timing, and physical side channels
+(power analysis and the memory bus among them) out of scope. GELO excludes accelerator-side leakage beyond raw memory
+reads~\citep{belikov_gelo}, Opal enumerates the in-enclave channels it does \emph{not}
+defend~\citep{kaviani_opal}, and the rest omit them. This is a deliberate exclusion, and it
+falls hardest on the TEE and hybrid families, whose entire trust is the silicon. Their
+best-documented weaknesses are exactly microarchitectural and physical: transient-execution
+attacks of the Spectre and Foreshadow class~\citep{spectre,foreshadow}, and physical memory-bus
+interposition such as TEE.Fail, which extracts keys and forges attestation from the
+deterministic memory encryption of server TEEs. The vendors classify such physical attacks as
+out of scope, with no fix planned~\citep{tee_fail}. Individual attacks are patched on the platform cycle, but
+the class recurs because each generation's performance optimizations reopen an observable
+channel, and unlike a cryptographic assumption a hardware-anchored design cannot close it
+without the vendor.
 
-We do not close this gap: side channels are out of scope for this SoK as
-well, and current confidential-computing hardware
-(TDX-backed CVMs, GPUs in confidential mode) materially raises the bar against
-software-only attackers \citep{kaviani_opal}. But we record it as a systematisation
-finding and a standing item for future work: the field has converged on a threat
-model that, by design, excludes the attack class most likely to break its dominant
-trust anchor, and a hardware-anchored guarantee cannot strengthen itself against that
-class without the vendor.
+\paragraph{Graph-RAG is the most privacy-underserved setting.}
+No surveyed work delivers an end-to-end confidential graph-RAG deployment, and it is the setting
+the field, ours included, covers least. What this SoK offers is a per-component map of which
+surveyed primitive serves which part of the graph pipeline (\cref{ssec:retr-graph}): entity and
+relation ANN lookups by Compass, Pacmann, and CAPRISE; one-hop adjacency by the volume-hiding
+multi-maps XorMM and FLASH; graph storage by PeGraph and GORAM; access hiding by Opal (TEE) or a client-side ORAM index;
+and the cheapest, heuristic protection by the anonymization of PrivGemo and ARoG. One stage
+stays uncovered across the corpus: building the graph index itself under confidentiality, before
+any query runs. Confidential graph construction is the clearest open problem in this setting.
+
+% tab:gapmap rows = pipeline stages; columns = mechanism families (§3-§7);
+% cells = representative schemes; ``---'' = no practical scheme (a gap).
+%\begin{table*}[t!]
+%  \centering \scriptsize
+%  \caption{Coverage of the inference-and-RAG pipeline by mechanism family. Cell = one
+%    or two representative schemes (\cref{sec:crypto}--\cref{sec:hybrid}; see those
+%    tables for the full set); ``---'' = no practical scheme known to us (a gap).}
+%  \label{tab:gapmap}
+%  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
+%    \toprule
+%    Pipeline stage & Crypto/MPC & TEE & Obfuscation & DP & Hybrid split \\
+%    \midrule
+%    Embed            & SHAFT/Euston       & H100-CC          & SGT/Eguard    & DP-Fwd/SPARSE & GELO/ObfuscaTune \\
+%    Store (vectors)  & CAPRISE/SAP        & Opal             & ---           & ---           & --- \\
+%    Retrieve (ANN)   & Compass/Pacmann    & Opal+ORAM        & ---           & RemoteRAG     & --- \\
+%    Rerank           & p\textsuperscript{2}RAG/TRSE & Opal   & ---           & RemoteRAG(HE) & --- \\
+%    Generate         & PermLLM/CryptoMoE  & PipeLLM          & AloePri/OSNIP & DP-RAG(out)   & GELO/SCX \\
+%    Graph construct. & ---                & ---              & ARoG          & ---           & PrivGemo \\
+%    Graph traverse   & Pacmann/XorMM      & Opal/H$_2$O$_2$RAM & ARoG        & ---           & PrivGemo \\
+%    \bottomrule
+%  \end{tabular*}
+%\end{table*}
+
+%\begin{table*}[t!]
+%  \centering \footnotesize
+%  \caption{Performance and fidelity by use case (indicative; normalized per use case,
+%    \cref{sec:comparison}). ``$\times$'' = overhead vs.\ plaintext; ``exact'' = computes the
+%    true function. Cross-paper figures are indicative, not co-measured. All figures are
+%    \emph{paper-reported}; we do not independently reproduce them, and Chen et
+%    al.~\citep{chen_sok_pti} find that re-benchmarked crypto-inference numbers can diverge from
+%    the originals---so cross-scheme readings here are order-of-magnitude, and open-source
+%    availability is tracked per scheme in the family tables (\cref{sec:crypto}--\cref{sec:hybrid}).}
+%  \label{tab:performance}
+%  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}p{6.3cm}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{3.6cm}@{}}
+%    \toprule
+%    Use case & Mechanisms (representative) & Overhead (normalized) & Fidelity \\
+%    \midrule
+%    Generation & MPC (PermLLM, CryptoMoE, Fission); TEE (PipeLLM); obfusc (AloePri, SGT, OSNIP); hybrid (GELO, SCX, ObfuscaTune)
+%               & MPC 1--2 orders; TEE $<$20\%; obfusc $\sim$0; hybrid few$\times$
+%               & exact (MPC/TEE/hybrid); lossy (obfusc) \\
+%    Embedding (encoder) & MPC (SHAFT); FHE (Euston); DP (DP-Forward, SPARSE); obfusc (Eguard)
+%               & crypto 1--2 orders; obfusc/DP $\sim$0
+%               & exact (crypto); acc.\ $\Delta$ (obfusc/DP) \\
+%    Vector retrieval & crypto (p\textsuperscript{2}RAG, Panther, PIR-RAG, RAGtime-PIANO); DP (RemoteRAG); enc (CAPRISE, SAP)
+%               & sub-s--10\,s @$10^6$--$10^7$; enc $\sim$0
+%               & exact (PIR/FHE); recall $\Delta$ (DP); order-leak (DCPE) \\
+%    Graph retrieval & TEE (Opal); crypto (Compass, Pacmann); SSE (XorMM, PeGraph, GORAM); anon (ARoG, PrivGemo)
+%               & graph-ANN sub-s--s; KG-anon $\sim$0
+%               & exact (ORAM/SSE); quality-only (anon) \\
+%    \bottomrule
+%  \end{tabular*}
+%\end{table*}
+
