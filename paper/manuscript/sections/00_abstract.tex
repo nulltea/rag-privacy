@@ -6,11 +6,11 @@ five mechanism families: secure computation (MPC and FHE), trusted execution env
 static obfuscation,
 differential privacy, and hybrid TEE-and-obfuscation splits. No prior systematization compares
 them on a common footing of mechanism, threat model, and deployment cost, and none covers the RAG
-retrieval layer. We organize the field by \emph{deployment readiness}, the likelihood a scheme is
-adopted in practice, scored on performance, utility, and threat-model fit, across inference and
-RAG retrieval, both dense and graph. We find that no family dominates: each attains at most two of
-performance, utility, and a strong security basis, so the deployable choice is set by the
-constraint an application can least afford to relax. Even trusted hardware is no exception, since
-every surveyed scheme excludes the side channels to which it is most exposed. We further surface
-hidden deployment costs, such as client reliance and custom software, identify private graph-RAG as
+retrieval layer. We organize the field by \emph{deployment readiness}: the likelihood a scheme is
+adopted in practice, scored on performance, utility, and threat-model fit. The scoring spans
+inference and RAG retrieval, both dense and graph. We find that no family dominates: each attains at most two of
+the three criteria, and which one it sacrifices is fixed by its security basis, so the
+deployable choice is set by the constraint an application can least afford to relax. Even trusted hardware is no exception, since
+every surveyed scheme ignores the side channels to which it is most exposed. We further surface
+hidden deployment costs, such as client reliance and a custom serving path, identify private graph-RAG as
 the least-served setting, and find that no design yet keeps a pipeline confidential from query to answer.
