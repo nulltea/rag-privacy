@@ -5,31 +5,30 @@ This section draws the per-family results of \cref{sec:crypto}--\cref{sec:retrie
 into three views: the three-way trade-off that locates each family
 (\cref{ssec:design-space}), per-use-case deployment recommendations (\cref{ssec:deployment}),
 and the cross-cutting findings and open problems that no single family section could state on
-its own (\cref{ssec:findings}). The headline is that no family dominates:
-which scheme is deployable depends on the application, on the constraint it can least afford to
-concede.
+its own (\cref{ssec:findings}). The central finding is that no family dominates:
+which scheme is deployable depends on the application, on the constraint it can least afford to relax.
 
 \subsection{Design Space}
 \label{ssec:design-space}
 
-Every family maximizes at most two of the three deployment-readiness criteria and pays on the
+Every family maximizes at most two of the three criteria and pays on the
 third, and the security basis axis of \cref{sec:threat-axes} explains why the third differs so
 much. Cryptographic inference
-(\cref{sec:crypto}) attains exact fidelity on a provable basis and pays one to three orders of
-magnitude in performance. A Tier-3 TEE (\cref{sec:tee}) matches that exact fidelity at
+(\cref{sec:crypto}) attains exact fidelity and a provable security basis, and pays one to three
+orders of magnitude in performance. A GPU-TEE (\cref{sec:tee}) matches that exact fidelity at
 near-plaintext speed, but its basis is the silicon: the guarantee reduces to hardware whose side
 channels every threat model excludes, and to the availability of the accelerator that holds it.
-Static obfuscation (\cref{sec:obfuscation}) is the cheapest, near-plaintext throughout, but
-rests on a heuristic basis and gives up a tunable slice of fidelity. Differential privacy keeps
+Static obfuscation (\cref{sec:obfuscation}) is the cheapest, running at near-plaintext speed throughout, but
+rests on a heuristic basis and loses fidelity in proportion to how aggressively it hides. Differential privacy keeps
 that near-plaintext cost and adds a formal but probabilistic guarantee, paying again in fidelity
 through the budget $\varepsilon$ (\cref{sec:dp}). The hybrid split (\cref{sec:hybrid}) recovers
 exact fidelity and a basis stronger than static obfuscation on commodity hardware, and pays
 instead in the TEE$\leftrightarrow$GPU serialization that its offloading induces. The criterion a
-family concedes is forced by the basis it rests on, not incidental, so no single point on this
-surface dominates the rest. Which concession a deployment can absorb is what selects the scheme: a
+family gives up is forced by the basis it rests on, not incidental, so no single point on this
+surface dominates the rest. Which trade-off a deployment can accept is what selects the scheme: a
 real-time service is bound by its latency budget, a regulated workload by the security basis it
 must be able to prove, a cost-sensitive one by the hardware it already has, and a
-quality-critical one by the fidelity it can spare. The next section reads the surface through
+quality-critical one by the accuracy loss it can tolerate. The next section reads the surface through
 these constraints, use case by use case.
 
 \subsection{Deployment Readiness}
@@ -57,109 +56,125 @@ these constraints, use case by use case.
   \end{tabular*}
 \end{table*}
 
-The same trade reads differently in each use case, because the constraint a deployment can
-least afford to concede changes with the task. We give the recommendation use case by use case.
+The same trade-off applies differently in each use case, because the constraint a deployment can
+least afford to relax changes with the task. We give the recommendation use case by use case.
 
 \emph{Generation} is dominated by the cost of autoregressive decoding, so its binding
-constraint is latency. A confidential accelerator (\cref{sec:tee}) is the strongest option for
-an operator that has one, running the full model at near-plaintext speed, but the hardware is
-scarce and few deployments own it. Where it is absent, static obfuscation runs the unmodified
-model on commodity GPUs at near-plaintext cost, at the price of a heuristic basis. The hybrid
-split is a weaker fit here than its commodity-hardware story suggests, because its per-token
-TEE$\leftrightarrow$GPU round-trips (\cref{sec:hybrid}) make decoding latency its weak point.
+constraint is latency. A confidential accelerator (\cref{sec:tee}) can be most attractive option for
+an operator that has access to one, running the full model at near-plaintext speed, but the hardware is
+scarce and few deployments own it. Where it is absent, static obfuscation leaves the
+architecture intact and runs on commodity GPUs with stock inference software at near-plaintext
+cost, at the price of a heuristic basis. The hybrid
+split is a weaker fit here than its commodity-hardware advantage suggests, because its
+TEE$\leftrightarrow$GPU round-trips, one per non-linear step and so multiplied across layers and
+generated tokens, dominate its decoding latency.
 MPC and FHE pay one to three orders of magnitude, which is hard to justify for single-user
-outsourcing; their natural setting is instead \emph{collaborative} inference among mutually
+outsourcing; MPC's natural setting is instead \emph{collaborative} inference among mutually
 distrusting data holders, such as joint analysis over disjoint institutional records, where no
-party can be trusted to aggregate and a cryptographic guarantee across parties is the whole
-point.
+party can be trusted to aggregate and a cryptographic guarantee across parties is essential.
 
-\emph{Embedding and reranking} run a smaller, often encoder-sized model, which shifts the
-calculus: the workload does not need a flagship accelerator, so paying for a confidential GPU
-is overkill. This is the hybrid split's natural setting. It keeps a small trusted core in a
+\emph{Embedding and reranking} run models far smaller than a generative decoder, which changes the
+trade-off: the workload does not need a high-end accelerator, so paying for a confidential GPU
+is unnecessary. This is the hybrid split's natural setting. It keeps a small trusted core in a
 commodity CPU-TEE and offloads to untrusted commodity GPUs (\cref{sec:hybrid}), giving exact
 output without enterprise hardware, and the short, non-autoregressive workload makes its
-round-trip cost far less acute than in generation. Static obfuscation and local DP are the
-near-plaintext alternatives where a heuristic or probabilistic basis is acceptable, and a
+round-trip cost far less acute than in generation. Static obfuscation and local DP run at
+near-plaintext speed where a heuristic or probabilistic basis is acceptable, and a
 cryptographic encoder (SHAFT, Euston) is the choice only when an exact and provable guarantee
 is required.
 
-\emph{Vector retrieval} divides by what must be hidden. When the access pattern and the
-inter-document structure must stay hidden, the access-hiding schemes answer it: private
+\emph{Dense retrieval} divides by what must be hidden. When the access pattern and the
+inter-document structure must stay hidden, the access-hiding schemes are the appropriate choice: private
 information retrieval (Panther, PIR-RAG) returns a record without revealing which one, and
 homomorphic scoring (RemoteRAG, TRSE) keeps the similarity values encrypted. When near-plaintext
 speed is the priority and a bounded, quantified comparability leak is tolerable, CAPRISE is the
-strong choice. Its conditional distance-comparison-preserving encryption hides the embeddings at
+preferable option. Its conditional distance-comparison-preserving encryption hides the embeddings at
 roughly $1\times$ cost, its query-side differential privacy blocks embedding inversion, and
 unlike SAP it conceals the inter-document structure (\cref{ssec:retr-dense}). The deciding
-question is whether that residual leak is acceptable for the corpus at hand.
+question is whether that residual leak is acceptable for the corpus.
 
-\emph{Graph retrieval} has no near-plaintext option, so the choice trades cost against which
-structural channel it closes (\cref{ssec:retr-graph}). Hiding which node a query touches takes
-either client-side cryptography (batched PIR in Pacmann, an ORAM-wrapped index in Compass) or
-the hardware route of a TEE (Opal); the cryptographic route shifts cost and state onto the
-client, the TEE route onto trusted hardware. Hiding the adjacency volume takes a volume-hiding
-encrypted multi-map (XorMM, FLASH) at the cost of storage overhead. Where neither cost is affordable,
-anonymization (PrivGemo, ARoG) is the cheapest protection, at a heuristic and unquantified
-residual leak. No single scheme closes all three channels at once.
+\emph{Graph retrieval} splits by whether a cryptographic guarantee is required. Its only
+option at near-plaintext speed is heuristic anonymization (PrivGemo, ARoG), which pseudonymizes entities
+and prunes structure at no cryptographic cost, but is lossy and carries no provable guarantee. A
+scheme with a cryptographic guarantee instead pays overhead, and there the choice trades cost
+against which structural channel it closes (\cref{ssec:retr-graph}). Hiding which node a query
+touches requires client-side cryptography (batched PIR in Pacmann, an ORAM-wrapped index in
+Compass) or the hardware route of a TEE (Opal); the cryptographic route shifts cost and state
+onto the client, the TEE route onto trusted hardware. Hiding the adjacency volume requires a
+volume-hiding encrypted multi-map (XorMM, FLASH) at the cost of storage overhead. No single
+scheme closes all three channels simultaneously.
 
 \begin{openproblem}
 \label{op:no-e2e}
-\emph{No end-to-end confidential pipeline.} Every scheme here protects one or two stages, and no
-single design spans embedding, retrieval, and generation; the gaps between stages are uncovered.
-Composing per-stage mitigations is largely unstudied: the
-joint guarantee of a stacked pipeline, and whether its fidelity losses and residual leakages
-compound, are uncharacterized (\cref{op:dp-compose}). The prior RAG-privacy SoK reaches the same gap~\citep{bodea_sok}. \emph{Which compositions hold their per-stage guarantees, and at what
-combined fidelity cost?}
+\emph{No confidential pipeline from query to answer.} Confidential retrieval is well covered:
+RemoteRAG protects the query and the scoring end to end (\cref{ssec:retr-dense}), and confidential
+generation exists separately in the inference families (\cref{sec:crypto}--\cref{sec:hybrid}). No
+single design joins them, so a pipeline that stays confidential from the query through to the
+generated answer must compose a private-retrieval scheme with a private-generation scheme across
+the retrieval-generation boundary. Whether such a composition preserves both per-stage guarantees,
+and at what combined fidelity cost, is uncharacterized (\cref{op:dp-compose}); the prior
+RAG-privacy SoK reaches the same gap~\citep{bodea_sok}. \emph{Which retrieval-generation
+compositions preserve their guarantees, and at what combined fidelity cost?}
 \end{openproblem}
 
 \subsection{Cross-Cutting Findings}
 \label{ssec:findings}
 
 \paragraph{Client reliance, offline setup, and multi-tenancy.}
-The trust-anchor axis of \cref{sec:threat} records where the \emph{trusted} computation runs,
-and by construction it brackets the client, since a client need not be named as its own trusted
-base. That convention hides how much work several schemes push back onto the client, which this
-finding makes explicit. Cryptographic schemes make the user a compute party in 2PC, or drive
-private retrieval from the client in PIR and ORAM (\cref{sec:crypto}, \cref{sec:retrieval}).
-Covariant weight obfuscation (AloePri, KV-Cloak, ObfusLM) has the client transform the weights
-and hold the secret, so the served checkpoint is re-keyed per client and one shared model can no
-longer serve many tenants at once. Local DP is client-reliant by construction: the noise must be
-added before the data leaves the device, so the client runs the model's input-side layers and
-draws the noise itself. DP-Forward makes the cost concrete at the split point, since moving more
-layers onto the client raises utility but also its compute and storage~\citep{du_dpforward}; the
-offline fine-tuning that calibrates the noise runs on the operator, so the standing burden is
-the online forward pass, not the one-time setup. The hybrid split mostly avoids a heavy client
-setup because it hides dynamically. SCX is the exception that keeps the client active during
-decoding, encoding each new token and recovering the first and last transformer blocks on the
-device while the cloud enclave handles the rest, a light but standing per-token role rather than
-a one-time cost~\citep{zeng_scx}. Dense and graph retrieval add their own client load: the
-client embeds and perturbs its query, Compass keeps an ORAM position map and runs a multi-round
-controller, and Pacmann preprocesses the database client-side (\cref{sec:retrieval}). Two
-reasons drive all of this. One is structural: local DP and covariant weight obfuscation can
-only originate the secret on the client and so forgo multi-tenancy. The other is performance: a
-client-side cache, compute party, or embedder lowers server cost or saves rounds. The TEE is the workaround rather than a counterexample: Opal hides the same access
-pattern with only a key and a counter on the client (\cref{sec:retrieval}), trading the client's
-burden for trust in the hardware.
+The trust-anchor axis of \cref{sec:threat} brackets the client by construction, since a client
+need not be named as its own trusted base, hiding how much work several schemes shift onto it.
+Cryptographic schemes make the user a compute party in 2PC or run PIR and ORAM retrieval from the
+client (\cref{sec:crypto},~\cref{sec:retrieval}); covariant weight obfuscation (AloePri, KV-Cloak,
+ObfusLM) has the client re-key the model and hold the secret, so the checkpoint is per-client and
+one model cannot serve many tenants (\cref{sec:obfuscation}); and local DP runs the model up to
+the noise-injection point on the client and draws the noise there, DP-Forward trading more client
+compute for more utility as that point moves deeper (\cref{sec:dp},~\citealp{du_dpforward}). The
+hybrid split mostly avoids this by hiding dynamically, except SCX, which keeps the client encoding
+each token and recovering the first and last blocks while the cloud computes the rest
+(\cref{sec:hybrid}). Retrieval adds its own load: the client embeds and perturbs the query,
+Compass holds an ORAM position map and runs a multi-round controller, and Pacmann preprocesses the
+database (\cref{sec:retrieval}). Two reasons account for this: structurally, local DP and
+covariant weight obfuscation can originate the secret only on the client, forgoing multi-tenancy;
+for performance, a client-side cache, compute party, or embedder lowers server cost or saves
+rounds. The TEE is the workaround, Opal hiding the same access pattern with only a key and a
+counter on the client and so trading the client's burden for trust in the hardware
+(\cref{sec:retrieval}).
+
+\paragraph{Cryptographic and hybrid schemes force a custom serving path.}
+Whether a scheme runs on an off-the-shelf inference server is a deployment cost the mechanism
+tables omit. A custom serving path is required whenever the secret is applied during inference,
+in one of two degrees. Cryptographic inference is the heavier: it replaces the model's operators,
+evaluating the non-linearities through secret sharing, oblivious transfer, or homomorphic
+arithmetic, so the server runs a secure-computation protocol in place of the model
+(\cref{sec:crypto}). The hybrid split and KV-Cloak are lighter: the model's own compute still
+runs on the GPU, but a refreshable transform is interposed on the activations or the KV-cache and
+must be injected and unwound each request, so the serving path carries operators the stock stack
+lacks (\cref{sec:hybrid},~\cref{sec:obfuscation}). A static transform needs neither: the secret
+is applied offline (static obfuscation's re-keyed weights, served on unmodified vLLM) or on the
+client (local DP's noised embeddings), so the server runs the stock model unchanged
+(\cref{sec:obfuscation},~\cref{sec:dp}). A TEE is the middle case, running stock inference
+software inside a confidential VM with attestation (\cref{sec:tee}). Stock-server
+compatibility is one more advantage the static-transform families hold over the cryptographic and
+hybrid ones.
 
 \paragraph{Confidential accelerators are scarce and enterprise-only.}
 The pure confidential-accelerator path, a GPU- or NPU-TEE trusted end to end, is the most
-performant route that is also exact and near-plaintext, but it trades the confidentiality
+performant route that is also exact and near-plaintext in speed, but it trades the confidentiality
 problem for a hardware-procurement one (\cref{sec:tee}). The confidential accelerators our
-corpus draws on are the NVIDIA confidential-computing GPUs (the H100/H200/B200 class) and the
+survey covers are the NVIDIA confidential-computing GPUs (the H100/H200/B200 class) and the
 Huawei Ascend NPU; the platform space beyond these is narrow and still forming, since confidential GPU
 support is recent, concentrated in high-end enterprise parts, and gained inline TEE-I/O only with
 Blackwell (\cref{sec:tee}). Trusting such an accelerator end to end also binds a deployment to
-one vendor's silicon and attestation. That cost is easy to justify for frontier generation,
-where the model is large and the accelerator would be used regardless, and hard to justify for
-embedding or reranking, where a small encoder does not need a flagship GPU yet no cheaper
-confidential accelerator exists to match the smaller workload. The scarcity is what the hybrid
+one vendor's silicon and attestation. That cost is marginal for frontier generation,
+where a high-end accelerator is needed anyway and confidentiality is the only added requirement,
+but pure overhead for embedding or reranking, where a small encoder needs no high-end accelerator
+yet no cheaper confidential accelerator exists to match the smaller workload. The scarcity is what the hybrid
 split sidesteps by offloading to commodity untrusted GPUs (\cref{sec:hybrid}).
 
 \paragraph{For heuristic schemes, a refreshed secret is what survives accumulation.}
 The same failure recurs across three families. A single secret, reused on every request, lets
 the adversary accumulate the externalities the scheme offloads (the obfuscated activations,
-attention, and externalized KV-cache) until they pin down what the secret was meant to hide: the
-hidden states, and through them the input. Fixed permutations are broken by prompt reconstruction
+attention, and externalized KV-cache) until they recover what the secret was meant to hide. Fixed permutations are broken by prompt reconstruction
 in cryptographic inference (\cref{sec:crypto}), static obfuscation accumulates into blind source
 separation and learned inversion (\cref{sec:obfuscation}), and a reused KV-cache shuffle is
 broken by collision (\cref{sec:hybrid}). In every case the schemes that survive are the ones that
@@ -167,27 +182,23 @@ refresh the secret: KV-Cloak draws a fresh permutation per cache block, GELO a f
 matrix per batch, and SCX a one-time key per generated token. Refreshing is necessary but not
 sufficient. Under an orthogonal mixing the Gram matrix $U^{\top}U$ equals $H^{\top}H$ whichever
 matrix is drawn, so a fresh secret per batch still exposes the hidden states' pairwise inner
-products, which feed the blind-source-separation and anchor attacks of \cref{sec:hybrid}. How
+products, which the blind-source-separation and anchor attacks of \cref{sec:hybrid} exploit. How
 often to refresh under a latency budget is itself open (\cref{op:refresh-frequency}).
 
 \paragraph{Malicious-operator security is an added integrity layer, not a free upgrade.}
-Most schemes here assume an honest-but-curious operator that follows the protocol. Defending one
-that may also deviate, by dropping, replaying, or tampering, means adding integrity on top of
-confidentiality, and that comes by one of two routes. The cryptographic route adds authenticated
-computation: information-theoretic MACs make secret-sharing MPC actively secure in the SPDZ line,
-TwinShield's U-Verify checks a possibly malicious GPU with a Freivalds-style test
+Most schemes here assume an honest-but-curious operator; defending one that may also deviate
+(drop, replay, or tamper) requires adding integrity, by one of two routes. The cryptographic
+route adds authenticated computation: information-theoretic MACs make secret-sharing MPC actively
+secure (the SPDZ line), TwinShield's U-Verify is a Freivalds-style check over a malicious GPU
 (\cref{sec:hybrid}), and Opal authenticates memory against a malicious host with a Merkle tree
 (\cref{sec:tee}). The hardware route adds attestation, as in the confidential accelerators
-(Nvidia-CC, Ascend-CC). Malicious resistance is therefore not hardware-exclusive. What stands out
-is that the surveyed cryptographic-inference schemes take neither route: SHAFT, Fission, PermLLM,
-and CryptoMoE are all proved only semi-honest, and a malicious client can already extract the
-model from a semi-honest protocol (\cref{sec:crypto}). Defending against a deviating operator is
-narrower than full malicious security, which also covers a cheating client and costs more again;
-the surveyed schemes provide neither. MACs could in principle make their linear-algebra core
-actively secure at a cost, but the permutation-reveal speed tricks that make these schemes fast
-sit outside what a MAC protects, so malicious security there is not a drop-in. A gap remains: malicious resistance is achievable
-cryptographically, yet no surveyed crypto scheme pays for it, and the families that do reach it
-lean on integrity machinery or trusted hardware that the cheap, semi-honest designs omit.
+(Nvidia-CC, Ascend-CC). Malicious resistance is thus not hardware-exclusive, yet the surveyed
+cryptographic schemes (SHAFT, Fission, PermLLM, CryptoMoE) take neither: all are proved only
+semi-honest. MACs could secure their linear core, but the permutation-reveal optimizations 
+that give them their speed lie outside what a MAC protects. 
+The gap is real: malicious resistance is achievable
+cryptographically, yet no surveyed crypto scheme pays for it, and the families that reach it rely
+on integrity machinery or trusted hardware the semi-honest designs omit.
 
 \paragraph{The field-wide side-channel blind spot.}
 \label{ssec:sidechannel}

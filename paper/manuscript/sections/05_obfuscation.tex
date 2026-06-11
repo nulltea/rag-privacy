@@ -15,7 +15,7 @@ the family, however, and depends on how hard each scheme tunes its hiding
 
 A second advantage is infrastructural. These schemes leave the model architecture intact, so
 they fit standard inference stacks far more readily than crypto or hybrid schemes, which require
-a bespoke serving path. The deployment
+a custom serving path. The deployment
 trade-offs, including who must perform the one-time obfuscation and hold the secret, are
 examined in \cref{ssec:deployment}.
 
@@ -132,7 +132,7 @@ real: every scheme but KV-Cloak runs on \emph{unmodified} inference software, pu
 extra work to a client-side tokenizer or embedder. AloePri serves as a re-weighted checkpoint
 on stock vLLM, and SGT, OSNIP, Eguard, and ObfusLM run the model unchanged while the client
 supplies the obfuscated embeddings or token indices. KV-Cloak alone must insert obfuscation
-operators into the attention path. None needs the bespoke serving runtime that crypto and TEE
+operators into the attention path. None needs the custom serving runtime that crypto and TEE
 schemes require.
 
 \emph{Accuracy.} Fidelity is not free either, and the hiding knob is what sets it. KV-Cloak
