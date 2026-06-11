@@ -33,7 +33,7 @@ but revealing: a secret transform and its inverse, the non-linearities, or merel
 obfuscation keys. The bulk of the cost, the dense linear algebra of the QKV and output
 projections and the feed-forward GEMMs, is offloaded to an \emph{untrusted, commodity}
 accelerator that never sees plaintext; correctness is recovered exactly in the enclave, so
-unlike DP (\cref{sec:dp}) the family pays no fidelity tax. In the \cref{sec:framework}
+unlike DP (\cref{sec:dp}) the family pays no accuracy cost. In the \cref{sec:framework}
 taxonomy the TCB is the enclave alone, the adversary is an honest-but-curious, white-box
 operator, and the observation surface is the stream of obfuscated activations crossing the
 PCIe boundary.
@@ -145,7 +145,7 @@ OutSoftMax calls and pays $(2H{+}5)L$ of them per forward pass
 (\cref{tab:roundtrips}), the most of any scheme here. Its wall-clock latency is therefore
 governed by serialization, not by the $13\%$ of FLOPs it retains. ObfuscaTune reports $1.5$--$4.3\times$ over unprotected
 inference, and SCX is effectively free online ($\sim$$1\times$, $36$\,ms for Llama-7B)
-having moved its key setup offline. Fidelity is exact for GELO/TwinShield/SCX and
+having moved its key setup offline. The output is exact for GELO/TwinShield/SCX and
 near-exact for ObfuscaTune (numerical error grows with the obfuscation matrix's condition
 number).
 

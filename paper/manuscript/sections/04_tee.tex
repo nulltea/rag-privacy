@@ -16,7 +16,7 @@ strong as that CPU-TEE and the access pattern still leaks; Opal~\citep{kaviani_o
 base but adds ORAM, hiding the access pattern obliviously rather than under a hardness assumption;
 Ascend-CC~\citep{ascend_cc} drops the CPU-TEE, leaving the NPU as the sole trusted base against a
 fully compromised host. Pure TEE attains the highest
-performance and fidelity in the survey, but its Tier-3 hardware dependence is the binding
+performance and utility in the survey, but its Tier-3 hardware dependence is the binding
 deployability constraint; we rank it against the other families in \cref{sec:synthesis}.
 
 \subsection{Approaches}
@@ -106,7 +106,7 @@ deployed systems do not yet provide that support~\citep{nvidia_secureai}. Opal p
 the band, for access-pattern hiding rather than for compute. Hiding which records a query touches
 has two routes inside an enclave: rescan the whole encrypted store on every request ($O(N)$), or
 use ORAM ($O(\log N)$). Opal's ORAM costs $1.57\times$ the query latency of the same pipeline with
-no hiding (plaintext storage, selective fetches)~\citep{kaviani_opal}. Fidelity is exact throughout, since a
+no hiding (plaintext storage, selective fetches)~\citep{kaviani_opal}. The output is exact throughout, since a
 TEE computes the true function in plaintext.
 
 \subsection{Limitations and Known Attacks}

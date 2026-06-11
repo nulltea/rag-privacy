@@ -14,15 +14,15 @@ which scheme is deployable depends on the application, on the constraint it can 
 Every family maximizes at most two of the three criteria and pays on the
 third, and the security basis axis of \cref{sec:threat-axes} explains why the third differs so
 much. Cryptographic inference
-(\cref{sec:crypto}) attains exact fidelity and a provable security basis, and pays one to three
-orders of magnitude in performance. A GPU-TEE (\cref{sec:tee}) matches that exact fidelity at
+(\cref{sec:crypto}) is exact and rests on a provable security basis, and pays one to three
+orders of magnitude in performance. A GPU-TEE (\cref{sec:tee}) matches that exactness at
 near-plaintext speed, but its basis is the silicon: the guarantee reduces to hardware whose side
 channels every threat model excludes, and to the availability of the accelerator that holds it.
 Static obfuscation (\cref{sec:obfuscation}) is the cheapest, running at near-plaintext speed throughout, but
-rests on a heuristic basis and loses fidelity in proportion to how aggressively it hides. Differential privacy keeps
-that near-plaintext cost and adds a formal but probabilistic guarantee, paying again in fidelity
+rests on a heuristic basis and loses accuracy in proportion to how aggressively it hides. Differential privacy keeps
+that near-plaintext cost and adds a formal but probabilistic guarantee, paying again in accuracy
 through the budget $\varepsilon$ (\cref{sec:dp}). The hybrid split (\cref{sec:hybrid}) recovers
-exact fidelity and a basis stronger than static obfuscation on commodity hardware, and pays
+exactness and a basis stronger than static obfuscation on commodity hardware, and pays
 instead in the TEE$\leftrightarrow$GPU serialization that its offloading induces. The criterion a
 family gives up is forced by the basis it rests on, not incidental, so no single point on this
 surface dominates the rest. Which trade-off a deployment can accept is what selects the scheme: a
@@ -107,15 +107,11 @@ scheme closes all three channels simultaneously.
 
 \begin{openproblem}
 \label{op:no-e2e}
-\emph{No confidential pipeline from query to answer.} Confidential retrieval is well covered:
-RemoteRAG protects the query and the scoring end to end (\cref{ssec:retr-dense}), and confidential
-generation exists separately in the inference families (\cref{sec:crypto}--\cref{sec:hybrid}). No
-single design joins them, so a pipeline that stays confidential from the query through to the
-generated answer must compose a private-retrieval scheme with a private-generation scheme across
-the retrieval-generation boundary. Whether such a composition preserves both per-stage guarantees,
-and at what combined fidelity cost, is uncharacterized (\cref{op:dp-compose}); the prior
-RAG-privacy SoK reaches the same gap~\citep{bodea_sok}. \emph{Which retrieval-generation
-compositions preserve their guarantees, and at what combined fidelity cost?}
+\emph{No confidential pipeline from query to answer.} Confidential retrieval (RemoteRAG,
+\cref{ssec:retr-dense}) and confidential generation (the inference families,
+\cref{sec:crypto}--\cref{sec:hybrid}) exist separately, but no design covers all steps: a
+query-to-answer pipeline must compose private embedding, retrieval, rerank and generation schemes. \emph{Which retrieval-generation compositions preserve their
+guarantees, and at what combined utility cost?}
 \end{openproblem}
 
 \subsection{Cross-Cutting Findings}

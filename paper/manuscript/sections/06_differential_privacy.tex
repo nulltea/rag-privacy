@@ -15,7 +15,7 @@ The schemes here derive
 protection from the \emph{randomness alone}, with no secret to keep: the bound holds against an
 adversary who knows the weights, the mechanism, and the budget, and the noise is drawn
 fresh per request and applied to the data or the output rather than embedded in the
-weights. The only cost is fidelity: a smaller $\varepsilon$ injects more noise and lowers accuracy.
+weights. The only cost is accuracy: a smaller $\varepsilon$ injects more noise and lowers it.
 
 Within the family, the approaches divide by \emph{whose} data they protect and from \emph{whom},
 the confidentiality-scope axis of \cref{sec:threat-axes}: a scheme either protects the user's own
@@ -23,7 +23,7 @@ input from an untrusted operator, or protects the operator's retrieval corpus an
 consumer of the answer. These map onto the two standard settings of DP, local and central: the
 first noises the input on the client, the second noises the output on a trusted server. On the deployment-readiness criteria DP
 scores well on performance, near-plaintext at inference, and offers a formal threat model,
-trading fidelity for that guarantee (\cref{sec:synthesis}).
+trading accuracy for that guarantee (\cref{sec:synthesis}).
 
 \subsection{Approaches}
 The schemes agree on the primitive, calibrated noise under a budget $\varepsilon$, but differ on
@@ -88,7 +88,7 @@ while DP-Fusion protects context spans.
 \emph{Composing local and central DP.} The two are orthogonal, protecting different assets on
 opposite sides of the trust boundary, so in principle a single pipeline could apply both, hiding the
 user's input from the operator and the operator's corpus and context from the consumer. Whether the
-two noise sources then compose without compounding the fidelity loss is untested: no surveyed work
+two noise sources then compose without compounding the accuracy loss is untested: no surveyed work
 runs DP mitigations in sequence~\cite{bodea_sok}.
 \end{openproblem}
 
@@ -111,7 +111,7 @@ models, so it does not require a custom inference engine, but it does require th
 
 Within this family the three axes are only loosely coupled: privacy and accuracy always trade
 against each other through $\varepsilon$, whereas privacy and performance interact only on the
-central side. For the local schemes, turning $\varepsilon$ down (more privacy) costs only fidelity, not compute,
+central side. For the local schemes, turning $\varepsilon$ down (more privacy) costs only accuracy, not compute,
 since the noise draw is the same size at any $\varepsilon$, and a more selective mechanism (SPARSE's
 masked noise, NVDP's learned posterior) costs only offline training. The central schemes trade the
 same way; here the answer degrades toward its \emph{no-private-context} baseline (the answer the
@@ -182,7 +182,7 @@ independent of the protected data, so there is a floor below which no scheme in 
 both protect and function.
 
 Stacking mitigations across pipeline stages is likewise unresolved: the
-joint privacy guarantee and combined fidelity cost of running local and central DP together are both
+joint privacy guarantee and combined accuracy cost of running local and central DP together are both
 uncharacterized (\cref{op:dp-compose}). One advantage holds despite all of these limits: central
 output-DP composes with any retrieval or inference backend, which makes it the family's natural
 answer to the corpus-extraction attacks of \cref{sec:synthesis}, regardless of how the rest of the

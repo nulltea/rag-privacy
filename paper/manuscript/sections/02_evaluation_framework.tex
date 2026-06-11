@@ -2,14 +2,14 @@
 \label{sec:framework}
 
 % UNIFIED framework section (grill #5): ONE framing for how we compare schemes, split into
-% Security (categorical taxonomy) and Cost (quantitative perf+fidelity). The categorical/
+% Security (categorical taxonomy) and Cost (quantitative perf+utility). The categorical/
 % quantitative split is stated ONCE here; nothing downstream re-derives it. Side-channel
 % finding lives in §\ref{sec:synthesis}.
 
 We compare confidential Transformer-inference and RAG schemes along two kinds of
 dimension. \emph{Security} captures categorical properties of who the adversary is and what
 stays hidden (\cref{sec:threat}); \emph{cost} is the quantitative price of that
-protection, in performance and fidelity (\cref{sec:comparison}). This single split runs
+protection, in performance and utility (\cref{sec:comparison}). This single split runs
 through the paper: the security dimensions yield the threat-model-fit criterion of our
 deployment-readiness lens (\cref{sec:intro}). We also fix here how schemes are
 \emph{grouped} for comparison: by use case, not by family.
@@ -186,13 +186,13 @@ axis.
     obfuscation, DP, and hybrid rows give \emph{$\times$-overhead} vs.\ plaintext on the same
     hardware (communication local/negligible, omitted). An inline ``offl.'' figure marks one-time
     offline cost. Figures are paper-reported; cross-row figures are indicative, not co-measured
-    (\cref{sec:comparison}). Fidelity
-    is the accuracy/utility delta vs.\ plaintext; obfuscation/DP privacy is treated in
+    (\cref{sec:comparison}). Utility
+    is the accuracy or recall delta vs.\ plaintext; obfuscation/DP privacy is treated in
     \cref{sec:obfuscation},~\cref{sec:dp}.}
   \label{tab:inf-perf}
   \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lllll@{}}
     \toprule
-    Scheme & Technique & Model & Latency / overhead & Fidelity \\
+    Scheme & Technique & Model & Latency / overhead & Utility \\
     \midrule
     \multicolumn{5}{@{}l}{\emph{Cryptographic (MPC/FHE)} --- \cref{sec:crypto}}\\
     SHAFT~\cite{shaft}        & 2PC               & BERT-base (110M)        & $41$/$281$\,s LAN/WAN; $10.5$\,GB/inf & $-0.5\%$ \\
@@ -260,11 +260,11 @@ per-session secret, under the compute and observation horizon the scheme's own e
 permits), so that a reported break is a break by the victim's own standard, not an artifact of
 an inflated adversary.
 
-\subsection{Cost: Performance and Fidelity}
+\subsection{Cost: Performance and Utility}
 \label{sec:comparison}
 
 The other two deployment-readiness criteria are quantitative: \emph{performance}
-(overhead and latency) and \emph{fidelity} (impact on output quality). Comparing them
+(overhead and latency) and \emph{utility} (impact on output quality). Comparing them
 across papers is hard to do fairly: reported numbers come from different hardware, model
 sizes, datasets, and metrics, so a raw side-by-side can mislead. We fix here a common set of
 \emph{reference metrics} for both, and state how we group schemes when we compare them.
@@ -280,7 +280,7 @@ regime, a comparison is fair only when the number of parties, the numerical prec
 network setting match. Chen et al.~\citep{chen_sok_pti} find WAN-tuned schemes miss their
 reported numbers under other network profiles, so LAN and WAN figures are not interchangeable.
 
-\paragraph{Normalizing fidelity.}
+\paragraph{Normalizing utility.}
 Schemes that compute the true function (cryptography, TEE, invertible-mask hybrid splits) are
 \emph{exact}; approximate schemes (obfuscation, DP, polynomial-approximation MPC) are reported
 as a \emph{delta} against the plaintext baseline in the use-case-appropriate metric, so a
@@ -288,7 +288,7 @@ retrieval recall drop and a generation accuracy drop are never conflated.
 
 \paragraph{Grouping: by use case, not by family.}
 We \emph{systematize} by mechanism family (\cref{sec:crypto}--\cref{sec:hybrid}) but
-\emph{compare} performance and fidelity \textbf{by use case}, since a deployment decision weighs
+\emph{compare} performance and utility \textbf{by use case}, since a deployment decision weighs
 every mechanism that serves a stage against the others (private generation pits MPC, TEE,
 obfuscation, and hybrid split against each other, not FHE against obfuscation in the abstract).
 We use four use cases aligned with the gap-map stages (\cref{sec:synthesis}): \emph{generation}
@@ -300,5 +300,5 @@ schemes (only Opal exercises it directly, in its enclave pipeline); no surveyed 
 standalone private reranker, which we leave as an open problem. We give it no separate cost
 bucket, and the gap-map (\cref{sec:synthesis}) shows it covered by the inference families. Each use case has a
 canonical metric: latency and $\times$-overhead for generation and embedding; latency/query and
-communication at a fixed corpus size for retrieval; and fidelity as the task-accuracy
+communication at a fixed corpus size for retrieval; and utility as the task-accuracy
 (generation/embedding) or recall@$k$ (retrieval) delta against the plaintext baseline.

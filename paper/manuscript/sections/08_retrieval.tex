@@ -47,14 +47,14 @@ index) it actually closes (\cref{ssec:retr-limits}).
   \caption{\emph{Dense} retrieval and storage: approximate nearest-neighbour
     (ANN) search over a vector index; all mechanisms. Latency is end-to-end query time
     unless noted; Comm./storage is per-query communication or index-storage overhead;
-    fidelity is retrieval exactness. SE = searchable encryption; PIR = private information
+    utility is retrieval exactness. SE = searchable encryption; PIR = private information
     retrieval; HE = homomorphic encryption; DP = differential privacy. $^*$ relative only
     (no absolute latency reported); n/r = not reported.}
   \label{tab:crypto-vec}
   \scriptsize\setlength{\tabcolsep}{4pt}
   \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
     \toprule
-    Scheme & Stage & Primitive & Latency & Comm./storage & Fidelity \\
+    Scheme & Stage & Primitive & Latency & Comm./storage & Utility \\
     \midrule
     p\textsuperscript{2}RAG~\cite{p2rag}    & retrieve,score  & 2-server SS              & rel.\ only$^*$              & $O(N{+}S)$ B/query & exact \\
     Panther~\cite{panther}                   & retrieve        & PIR+SS+GC+HE             & 18\,s @10M                  & 284\,MB/query      & exact \\
@@ -136,7 +136,7 @@ address them and graph retrieval needs different machinery (\cref{tab:crypto-gra
   \scriptsize\setlength{\tabcolsep}{3pt}
   \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
     \toprule
-    Scheme & Stage & Primitive & Latency & Comm./storage & Fidelity \\
+    Scheme & Stage & Primitive & Latency & Comm./storage & Utility \\
     \midrule
     Pacmann~\cite{pacmann}     & retrieve,gt       & batched PIR (graph-ANN)  & $-$22\% lat @100M        & ${\sim}$few\,KB/query     & 90\% ANN quality \\
     Compass~\cite{zhu_compass} & retrieve,gt       & encrypted HNSW + ORAM    & sub-second LAN           & n/r                       & exact \\

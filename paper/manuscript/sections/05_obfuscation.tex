@@ -9,7 +9,7 @@ That low cost is also why its privacy claims deserve the most scrutiny. The obfu
 \emph{fixed}, and the adversary is the white-box server. It knows the obfuscation algorithm
 and its parameters, and it can passively collect the intermediary results of its own
 computation and use them to train an inverter model. On the deployment-readiness criteria,
-obfuscation leads on performance and is often near-lossless. Fidelity is not uniform across
+obfuscation leads on performance and is often near-lossless. Accuracy is not uniform across
 the family, however, and depends on how hard each scheme tunes its hiding
 (\cref{sec:obfusc-perf}).
 
@@ -108,7 +108,7 @@ CodeCipher & PPL/obfuscation threshold & $-3$\,pp Pass@1 & ${\approx}0$ online; 
 \end{table*}
 
 Read off the headline columns of \cref{tab:inf-perf}, this family looks unambiguously cheap.
-Every scheme runs at ${\approx}1\times$ plaintext and reports near-lossless fidelity. Both
+Every scheme runs at ${\approx}1\times$ plaintext and reports near-lossless accuracy. Both
 numbers are \emph{sweet-spot} readings of a hiding knob that trades security, accuracy, and
 performance against one another at the same time (\cref{tab:obfusc-tradeoffs}). The nuance the
 headline hides is where each scheme pays.
@@ -135,7 +135,7 @@ supplies the obfuscated embeddings or token indices. KV-Cloak alone must insert 
 operators into the attention path. None needs the custom serving runtime that crypto and TEE
 schemes require.
 
-\emph{Accuracy.} Fidelity is not free either, and the hiding knob is what sets it. KV-Cloak
+\emph{Accuracy.} It is not free either, and the hiding knob is what sets it. KV-Cloak
 is exactly lossless, because its matrices cancel in the attention product, so its accuracy is
 independent of the security parameter. The other schemes face a privacy-utility curve. ObfusLM's $(k,\varepsilon)$-anonymity loses about $4\%$ on classification and about
 $6\%$ on generation, and degrades further as the anonymity set $k$ grows. Eguard holds above

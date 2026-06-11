@@ -16,7 +16,7 @@ surveys, we do not re-systematize them: \citet{li_pti_survey} give a layer-wise 
 and \citet{chen_sok_pti} a reproducibility re-benchmark. We cover the sub-family briefly through five
 frontier exemplars (\cref{tab:inf-perf}) that locate it on our deployment-cost frontier, and defer
 the cryptographic \emph{retrieval} layer (PIR/ORAM/SSE/DCPE) to \cref{sec:retrieval}.
-On our criteria, cryptographic inference scores highest on threat-model fit and fidelity but lowest
+On our criteria, cryptographic inference scores highest on threat-model fit and utility but lowest
 on performance (\cref{sec:synthesis}).
 
 \subsection{Approaches}
@@ -41,7 +41,7 @@ case: it keeps MoE expert-routing secret-shared. This hides a routing pattern th
 semantic type and that has been used to recover a co-batched prompt in full~\citep{yona_moe_steal}.
 Exploiting that sparsity, CryptoMoE realizes a $2.8$--$3.5\times$ end-to-end latency reduction (and
 $2.9$--$4.3\times$ in communication) over a dense-MPC baseline. Across all five, even the fastest
-exchanges hundreds of MB to GB per token or inference at exact (MPC) or near-exact (FHE) fidelity; no scheme reports
+exchanges hundreds of MB to GB per token or inference, with output that is exact (MPC) or near-exact (FHE); no scheme reports
 overhead vs.\ plaintext, so \cref{tab:inf-perf}'s figures are paper-reported or 1-hop extrapolated
 (\cref{sec:comparison}).
 
