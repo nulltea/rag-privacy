@@ -1,18 +1,16 @@
-% ABSTRACT — ~185 words. SoK framing: deployment-readiness lens.
-Outsourcing Transformer inference and retrieval-augmented generation (RAG) to an untrusted
-cloud exposes prompts, documents, and proprietary weights to the provider. A decade of point
-solutions now spans five mechanism families---secure computation (MPC/FHE), trusted execution
-environments (TEEs), static obfuscation, differential privacy, and hybrid TEE\,+\,obfuscation
-splits---but no systematization unifies \emph{mechanism}, \emph{threat model}, and
-\emph{deployment cost} across them, and none covers the RAG retrieval layer. We organize the
-field by \emph{deployment readiness}---the likelihood a scheme is adopted in practice---on three
-criteria: \emph{performance}, \emph{fidelity} (impact on output quality), and \emph{threat-model
-fit} (an adversary model \emph{appropriate} to the deployment, not maximal). Our artifacts are a
-five-axis threat-model taxonomy, a stage\,$\times$\,mechanism coverage map whose empty cells are
-open problems, a performance comparison normalized from reported numbers, and a
-deployment-readiness synthesis---spanning inference, RAG, and graph-RAG, a setting prior work
-excludes. We find that readiness comes not from maximizing any single axis but from balancing
-all three: hybrid splits and obfuscation lead on the performance-to-threat ratio, while
-exact-but-slow cryptography and hardware-gated TEEs trail. Two cross-cutting findings stand out:
-the near-universal exclusion of microarchitectural side-channels from threat models, and the
-under-reported invertibility of static obfuscation.
+% ABSTRACT — SoK framing: deployment-readiness lens. Em-dash-free per house rule.
+Running Transformer inference and retrieval-augmented generation (RAG) over confidential data
+forces a choice: either expose prompts and documents to a cloud operator, or keep the data
+on-premises, which confines the deployment to weaker self-hosted models. Existing defenses span
+five mechanism families: secure computation (MPC and FHE), trusted execution environments (TEEs),
+static obfuscation,
+differential privacy, and hybrid TEE-and-obfuscation splits. No prior systematization compares
+them on a common footing of mechanism, threat model, and deployment cost, and none covers the RAG
+retrieval layer. We organize the field by \emph{deployment readiness}, the likelihood a scheme is
+adopted in practice, scored on performance, utility, and threat-model fit, across inference and
+RAG retrieval, both dense and graph. We find that no family dominates: each attains at most two of
+performance, utility, and a strong security basis, so the deployable choice is set by the
+constraint an application can least afford to relax. Even trusted hardware is no exception, since
+every surveyed scheme excludes the side channels to which it is most exposed. We further surface
+hidden deployment costs, such as client reliance and custom software, identify private graph-RAG as
+the least-served setting, and find that no design yet keeps a pipeline confidential from query to answer.
