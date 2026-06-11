@@ -91,14 +91,14 @@ homomorphic scoring (RemoteRAG, TRSE) keeps the similarity values encrypted. Whe
 speed is the priority and a bounded, quantified comparability leak is tolerable, CAPRISE is the
 preferable option. Its conditional distance-comparison-preserving encryption hides the embeddings at
 roughly $1\times$ cost, its query-side differential privacy blocks embedding inversion, and
-unlike SAP it conceals the inter-document structure (\cref{ssec:retr-dense}). The deciding
+unlike SAP it conceals the inter-document structure (\cref{ssec:retr-similarity}). The deciding
 question is whether that residual leak is acceptable for the corpus.
 
 \emph{Graph retrieval} splits by whether a cryptographic guarantee is required. Its only
 option at near-plaintext speed is heuristic anonymization (PrivGemo, ARoG), which pseudonymizes entities
 and prunes structure at no cryptographic cost, but is lossy and carries no provable guarantee. A
 scheme with a cryptographic guarantee instead pays overhead, and there the choice trades cost
-against which structural channel it closes (\cref{ssec:retr-graph}). Hiding which node a query
+against which structural channel it closes (\cref{ssec:retr-adjacency}). Hiding which node a query
 touches requires client-side cryptography (batched PIR in Pacmann, an ORAM-wrapped index in
 Compass) or the hardware route of a TEE (Opal); the cryptographic route shifts cost and state
 onto the client, the TEE route onto trusted hardware. Hiding the adjacency volume requires a
@@ -108,7 +108,7 @@ scheme closes all three channels simultaneously.
 \begin{openproblem}
 \label{op:no-e2e}
 \emph{No confidential pipeline from query to answer.} Confidential retrieval (RemoteRAG,
-\cref{ssec:retr-dense}) and confidential generation (the inference families,
+\cref{ssec:retr-similarity}) and confidential generation (the inference families,
 \cref{sec:crypto}--\cref{sec:hybrid}) exist separately, but no design covers all steps: a
 query-to-answer pipeline must compose private embedding, retrieval, rerank and generation schemes. \emph{Which retrieval-generation compositions preserve their
 guarantees, and at what combined utility cost?}
@@ -217,7 +217,7 @@ without the vendor.
 \paragraph{Graph-RAG is the most privacy-underserved setting.}
 No surveyed work delivers an end-to-end confidential graph-RAG deployment, and it is the setting
 the field, ours included, covers least. What this SoK offers is a per-component map of which
-surveyed primitive serves which part of the graph pipeline (\cref{ssec:retr-graph}): entity and
+surveyed primitive serves which part of the graph pipeline (\cref{ssec:retr-adjacency}): entity and
 relation ANN lookups by Compass, Pacmann, and CAPRISE; one-hop adjacency by the volume-hiding
 multi-maps XorMM and FLASH; graph storage by PeGraph and GORAM; access hiding by Opal (TEE) or a client-side ORAM index;
 and the cheapest, heuristic protection by the anonymization of PrivGemo and ARoG. One stage
