@@ -2,19 +2,19 @@
 \label{sec:synthesis}
 
 This section draws the per-family results of \cref{sec:crypto}--\cref{sec:retrieval} together
-into three views: the trade-off geometry that locates each family
+into three views: the three-way trade-off that locates each family
 (\cref{ssec:design-space}), per-use-case deployment recommendations (\cref{ssec:deployment}),
 and the cross-cutting findings and open problems that no single family section could state on
 its own (\cref{ssec:findings}). The headline is that no family dominates:
-which scheme is deployable depends on the application. The geometry below makes that trade
-explicit, and the recommendations turn it into per-use-case guidance.
+which scheme is deployable depends on the application, on the constraint it can least afford to
+concede.
 
 \subsection{Design Space}
 \label{ssec:design-space}
 
-Read across the families, one shape recurs: each maximizes at most two of the three
-deployment-readiness criteria and pays on the third, and the security basis axis of
-\cref{sec:threat-axes} explains why the third differs so much. Cryptographic inference
+Every family maximizes at most two of the three deployment-readiness criteria and pays on the
+third, and the security basis axis of \cref{sec:threat-axes} explains why the third differs so
+much. Cryptographic inference
 (\cref{sec:crypto}) attains exact fidelity on a provable basis and pays one to three orders of
 magnitude in performance. A Tier-3 TEE (\cref{sec:tee}) matches that exact fidelity at
 near-plaintext speed, but its basis is the silicon: the guarantee reduces to hardware whose side
