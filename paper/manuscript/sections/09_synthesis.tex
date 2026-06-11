@@ -168,7 +168,7 @@ but pure overhead for embedding or reranking, where a small encoder needs no hig
 yet no cheaper confidential accelerator exists to match the smaller workload. The scarcity is what the hybrid
 split sidesteps by offloading to commodity untrusted GPUs (\cref{sec:hybrid}).
 
-\paragraph{For heuristic schemes, a refreshed secret is what survives accumulation.}
+\paragraph{For heuristic schemes, a refreshed secret is what survives leakage accumulation attacks.}
 The same failure recurs across three families. A single secret, reused on every request, lets
 the adversary accumulate the externalities the scheme offloads (the obfuscated activations,
 attention, and externalized KV-cache) until they recover what the secret was meant to hide. Fixed permutations are broken by prompt reconstruction

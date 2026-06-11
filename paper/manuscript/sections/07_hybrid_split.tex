@@ -53,12 +53,12 @@ offline terms, and OutSoftMax offloads the exponentials. It adds U-Verify integr
 checks (a Freivalds generalization, the first to verify the non-linear SoftMax) so the
 accelerator may even be \emph{malicious}. \textbf{ObfuscaTune}~\citep{frikha_obfuscatune} keeps only the low-parameter, non-linearity-bearing
 layers in the TEE (the input embedding, the output head, and the LayerNorm/dropout layers,
-${\sim}5\%$ of the parameters, under $0.5\%$ at the $405$B scale) and offloads the obfuscated
+${\approx}5\%$ of the parameters, under $0.5\%$ at the $405$B scale) and offloads the obfuscated
 attention and MLP weights. Its obfuscation is a single \emph{static} invertible matrix per
 weight without the per-batch refresh, so its confidentiality holds
 only while the served model stays \emph{proprietary}: without the plaintext weights the operator
 cannot solve for the transform.
-\textbf{SCX}~\citep{zeng_scx} protects the KV-cache not by encryption but by
+\textbf{SCX}~\citep{yuan_scx} protects the KV-cache not by encryption but by
 \emph{permutation}, using token- and feature-level permutations plus redundant embeddings and
 calibrated Laplace noise (yielding $(\varepsilon,0)$-DP) with one-time keys per decoding
 step, so the cloud can neither recover the input nor complete the next token without the
@@ -88,11 +88,11 @@ $l_s$ and last $l_e$ layers crossing per step ($O(L{+}T)$ overall).}
 \toprule
 Scheme & Offl.\ FLOP & per pass & full gen \\
 \midrule
-TwinShield  & ${\sim}87\%$          & $(2H{+}5)L$ & $(2H{+}5)L(1{+}T)$ \\
-ObfuscaTune & ${\sim}95\%$          & ${\sim}4L$  & ${\sim}4L(1{+}T)$ \\
-GELO        & ${\sim}76\%$  & $2L$        & $2L(1{+}T)$ \\
-SCX         & ${\sim}100\%$         & $l_s{+}l_e$ & $O(L{+}T)$ \\
-CMIF        & ${\sim}98\%$          & $1$         & $1{+}T$ \\
+TwinShield  & ${\approx}87\%$          & $(2H{+}5)L$ & $(2H{+}5)L(1{+}T)$ \\
+ObfuscaTune & ${\approx}95\%$          & ${\sim}4L$  & ${\sim}4L(1{+}T)$ \\
+GELO        & ${\approx}76\%$  & $2L$        & $2L(1{+}T)$ \\
+SCX         & ${\approx}100\%$         & $l_s{+}l_e$ & $O(L{+}T)$ \\
+CMIF        & ${\approx}98\%$          & $1$         & $1{+}T$ \\
 \bottomrule
 \end{tabular*}
 \end{table}
@@ -114,7 +114,7 @@ Game of Arrows~\citep{arrowmatch} & lightweight static weight-obfuscation (Trans
 \addlinespace[3pt]
 Hidden No More~\citep{hnm} & permutation + noise obfuscation, open-weights (STIP/PermLLM-class) & near-perfect prompt reconstruction from hidden states & refresh (GELO, SCX); seq.-sharding (Cascade) \\
 \addlinespace[3pt]
-Static-basis break~\citep{saini_precomp_break} & reused secret basis (SOTER, TSQP) & confidentiality + integrity break; LLaMA-3-8B layer in ${\sim}6$\,min & fresh keys; no static basis \\
+Static-basis break~\citep{saini_precomp_break} & reused secret basis (SOTER, TSQP) & confidentiality + integrity break; LLaMA-3-8B layer in ${\approx}6$\,min & fresh keys; no static basis \\
 \addlinespace[3pt]
 Gram-matrix leak~\citep{belikov_gelo} & GELO under \emph{orthogonal} mixing $A$ & $U^{\top}U{=}H^{\top}H$ leaks hidden-state covariance (passive; narrows the BSS search) & non-orthogonal $A$, or shield vectors \\
 \addlinespace[3pt]
@@ -131,20 +131,20 @@ scheme can safely offload, the closer its latency approaches plaintext. But the 
 GELO's headline ``${\approx}76\%$ offloaded at $20$--$30\%$ overhead'' is a
 \emph{synthetic microbenchmark} of a \emph{single} projection offload (random tensors
 shuttled between two processes, not an end-to-end model run), and that overhead is
-dominated ($\sim$$80\%$) by inter-process communication, not the masking. The overhead is also U-shaped in batch size: ${\sim}20\%$ only at an optimal batch, rising again for large
+dominated ($\approx$$80\%$) by inter-process communication, not the masking. The overhead is also U-shaped in batch size: ${\approx}20\%$ only at an optimal batch, rising again for large
 batches as the $O(n^3)$ generation of the mixing matrix dominates; GELO also offloads only
 the attention Q/K/V/O projections (MLP offload is left to future work). The number should
 thus be read as a best-case lower bound, not a full-inference cost.
-TwinShield offloads ${\sim}87\%$ of total transformer-inference \emph{FLOPs} (a compute
+TwinShield offloads ${\approx}87\%$ of total transformer-inference \emph{FLOPs} (a compute
 ratio, not a latency one), reporting $5.4\times$ over a TEE-only baseline in its verifiable
-configuration (including U-Verify), ${\sim}6.7\times$ with privacy only, and
+configuration (including U-Verify), ${\approx}6.7\times$ with privacy only, and
 $4.0$--$6.1\times$\,/\,$4.9$--$7.7\times$ over prior verifiable\,/\,private schemes. But
 offloading the non-linears is precisely what \emph{multiplies} the round-trips: the masks do not
 commute with SoftMax, so TwinShield splits attention into \emph{per-head} OutAttnMult and
 OutSoftMax calls and pays $(2H{+}5)L$ of them per forward pass
 (\cref{tab:roundtrips}), the most of any scheme here. Its wall-clock latency is therefore
 governed by serialization, not by the $13\%$ of FLOPs it retains. ObfuscaTune reports $1.5$--$4.3\times$ over unprotected
-inference, and SCX is effectively free online ($\sim$$1\times$, $36$\,ms for Llama-7B)
+inference, and SCX is effectively free online ($\approx$$1\times$, $36$\,ms for Llama-7B)
 having moved its key setup offline. The output is exact for GELO/TwinShield/SCX and
 near-exact for ObfuscaTune (numerical error grows with the obfuscation matrix's condition
 number).
@@ -194,7 +194,7 @@ The family's security rests on \emph{dynamic, never-reused} hiding randomness; o
 static and the weights are known, the open-weights solve returns (\cref{tab:hybrid-attacks}).
 Direction similarity recovers ${>}98\%$ of statically obfuscated weights~\citep{arrowmatch}, and a
 precomputed-basis attack drives a full confidentiality-and-integrity break, a LLaMA-3-8B layer in
-${\sim}6$~minutes~\citep{saini_precomp_break}; both were demonstrated on lightweight static schemes
+${\approx}6$~minutes~\citep{saini_precomp_break}; both were demonstrated on lightweight static schemes
 (TransLinkGuard, SOTER, TSQP). ObfuscaTune uses the same static, unrefreshed obfuscation and would
 inherit this exposure, but its threat model assumes a \emph{proprietary} model that denies the
 operator the plaintext weights the solve needs; its confidentiality therefore stands on model
@@ -207,14 +207,6 @@ products of the hidden states. A non-orthogonal $A$, or appended high-energy ``s
 vectors, blunt the resulting ICA/BSS and anchor attacks, but the guarantee is per-batch and
 collapses under key reuse~\citep{belikov_gelo}.
 
-\begin{openproblem}
-\emph{Cheap second-order hiding.} The Gram-matrix leak above persists under per-batch refresh, and
-its known fixes each cost something: a non-orthogonal mixing forces an $O(n^3)$ inverse per batch and
-risks ill-conditioning, while high-energy shield vectors displace user tokens and lower throughput.
-\emph{Is there a refreshable transform that closes second-order leakage at near-orthogonal cost without
-sacrificing throughput?}
-\end{openproblem}
-
 The externalized KV-cache that these schemes
 leave outside the enclave for throughput is itself a reconstruction
 surface: inversion, collision, and injection attacks rebuild the prompt from a leaked
@@ -223,4 +215,12 @@ LeftoverLocals~\citep{leftoverlocals}. The co-located TEE+GPU design also pays f
 the PCIe stream, with residual exposure from unencrypted HBM on some confidential-GPU parts.
 Trust is honest-but-curious and white-box by default; only TwinShield's U-Verify extends to
 a malicious accelerator.
+
+\begin{openproblem}
+\emph{Cheap second-order hiding.} The Gram-matrix leak above persists under per-batch refresh, and
+its known fixes each cost something: a non-orthogonal mixing forces an $O(n^3)$ inverse per batch and
+risks ill-conditioning, while high-energy shield vectors displace user tokens and lower throughput.
+\emph{Is there a refreshable transform that closes second-order leakage at near-orthogonal cost without
+sacrificing throughput?}
+\end{openproblem}
 

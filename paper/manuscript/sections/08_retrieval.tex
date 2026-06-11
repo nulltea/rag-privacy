@@ -5,7 +5,7 @@
   \centering
   \scriptsize\setlength{\tabcolsep}{3pt}
   \caption{Threat models for the dense and graph retrieval schemes of
-    \cref{tab:crypto-vec} and \cref{tab:crypto-graph}, on the axes of \cref{sec:threat-axes}; the
+    \cref{tab:retr-perf}, on the axes of \cref{sec:threat-axes}; the
     white-box/black-box attack-surface axis is inference-specific and omitted (a retrieval
     adversary sees an encrypted index and a query interface). \emph{Behavior}:
     HbC=honest-but-curious; mal.=malicious server. \emph{Trust anchor}: none=single untrusted
@@ -81,7 +81,7 @@ steps to the client (\cref{sec:synthesis}).
 \label{ssec:retr-dense}
 Dense retrieval ranks the database by similarity to a query embedding. The confidentiality
 problem is to perform that ranking without revealing the query, the matches, or the stored
-vectors (\cref{tab:crypto-vec}). Each is a concrete leakage channel, and two of the three share a root cause:
+vectors (\cref{tab:retr-perf}). Each is a concrete leakage channel, and two of the three share a root cause:
 an embedding is a lossy but invertible encoding of its text, readable by inversion models such
 as Vec2Text~\citep{vec2text}, so the \emph{query embedding} discloses the user's
 question and the \emph{stored vectors} at rest disclose the corpus. The third channel is
@@ -129,27 +129,45 @@ under differential privacy, closing the structural leak SAP leaves open. The sha
 exactness and a quantified leakage, examined in \cref{ssec:retr-limits}.
 
 \begin{table*}[t!]
-  \centering \footnotesize
-  \caption{\emph{Dense} retrieval and storage: approximate nearest-neighbour
-    (ANN) search over a vector index; all mechanisms. Latency is end-to-end query time
-    unless noted; Comm./storage is per-query communication or index-storage overhead;
-    utility is retrieval exactness. SE = searchable encryption; PIR = private information
-    retrieval; HE = homomorphic encryption; DP = differential privacy. $^*$ relative only
-    (no absolute latency reported); n/r = not reported.}
-  \label{tab:crypto-vec}
-  \scriptsize\setlength{\tabcolsep}{4pt}
+  \centering
+  \scriptsize\setlength{\tabcolsep}{3pt}
+  \caption{Confidential retrieval and storage performance, by index structure: \emph{dense}
+    approximate-nearest-neighbour (ANN) search over a vector index (\cref{ssec:retr-dense}) and
+    \emph{graph}-indexed ANN and graph traversal (Graph/LightRAG, \cref{ssec:retr-graph}); all
+    mechanisms. Latency is end-to-end query time unless noted (``gt'' = graph traversal);
+    Comm./storage is per-query communication or index-storage overhead; utility is retrieval
+    exactness. (S)SE = (structured) searchable encryption; PIR = private information retrieval;
+    HE = homomorphic encryption; (VH-)EMM = (volume-hiding) encrypted multi-map; ORAM = oblivious
+    RAM; DP = differential privacy. $^*$ relative only (no absolute latency reported); n/r = not
+    reported. ``billion-edge'' denotes the largest graph tested, not a latency.
+    ``lossy; QA-pres.''\ = retrieval is not exact (the subgraph is pruned by design) but
+    downstream answer quality is preserved.}
+  \label{tab:retr-perf}
   \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
     \toprule
     Scheme & Stage & Primitive & Latency & Comm./storage & Utility \\
     \midrule
+    \multicolumn{6}{@{}l}{\emph{Dense retrieval} --- \cref{ssec:retr-dense}}\\
     p\textsuperscript{2}RAG~\cite{p2rag}    & retrieve,score  & 2-server SS              & rel.\ only$^*$              & $O(N{+}S)$ B/query & exact \\
     Panther~\cite{panther}                   & retrieve        & PIR+SS+GC+HE             & 18\,s @10M                  & 284\,MB/query      & exact \\
     PIR-RAG~\cite{pirrag}                     & retrieve        & lattice PIR              & 16.8\,s @5K                 & n/r                & exact (cluster) \\
     RAGtime-PIANO~\cite{ragtime_piano}        & retrieve,e2e    & CKKS + lattice PIR       & rel.\ only$^*$              & n/r                & exact (ct) \\
-    TRSE~\cite{trse}                          & retrieve,score  & 2-round SE + HE scoring  & ${\approx}4.5$\,s @4K (scoring) & n/r                & exact \\
+    TRSE~\cite{trse}                          & retrieve,score  & 2-round SE + HE scoring  & ${\approx}4.5$\,s @4K (scoring) & n/r             & exact \\
     RemoteRAG~\cite{cheng2025remoterag}       & retrieve,score  & DistanceDP + PHE top-$k$ & 0.67\,s                     & n/r                & 100\% recall (DP) \\
-    SAP/DCPE~\cite{fuchsbauer_sap}            & store,retrieve  & DCPE (symmetric)         & ${\approx}0$\,ms               & ${\approx}1\times$ & approx ($\beta$) \\
+    SAP/DCPE~\cite{fuchsbauer_sap}            & store,retrieve  & DCPE (symmetric)         & ${\approx}0$\,ms            & ${\approx}1\times$ & approx ($\beta$) \\
     CAPRISE~\cite{ye_caprise}                 & store,retrieve  & conditional ADCPE        & 2339\,vec/s (enc.)          & ${\approx}1\times$ & approx ($\beta$)+DP \\
+    \midrule
+    \multicolumn{6}{@{}l}{\emph{Graph retrieval} --- \cref{ssec:retr-graph}}\\
+    Pacmann~\cite{pacmann}     & retrieve,gt       & batched PIR (graph-ANN)  & $-$22\% lat @100M        & ${\sim}$few\,KB/query     & 90\% ANN quality \\
+    Compass~\cite{zhu_compass} & retrieve,gt       & encrypted HNSW + ORAM    & sub-second LAN           & n/r                       & exact \\
+    XorMM~\cite{xormm}         & retrieve,gt       & volume-hiding EMM (SSE)  & ${\approx}5$\,ms/q ; ${\approx}170$\,ms @vol\,$2^{15}$ & ${\approx}1.2$--$2.5\times$ stor. & exact \\
+    FLASH~\cite{flash_emm}     & retrieve,gt       & VH-EMM (+conj.)          & ${\approx}1.8$\,ms/q; ${\approx}90$\,ms @vol\,$2^{15}$ & near-opt.\ overhead       & exact \\
+    PeGraph~\cite{pegraph}     & store,retrieve,gt & SSE + secret sharing     & $<$1\,s/query @multi-M   & n/r                       & exact (ranked) \\
+    H$_2$O$_2$RAM~\cite{h2o2ram}& store,retrieve,gt & doubly-oblivious RAM (TEE) & ${\approx}1000\times$ vs.\ O$_2$RAM & n/r            & exact \\
+    GORAM~\cite{goram}         & retrieve,gt       & 3PC sqrt-ORAM (reserve)  & 58\,ms--36\,s @1.4B      & n/r; init ${<}3$\,min     & exact \\
+    PrivGemo~\cite{tan_privgemo}& retrieve,gt       & dual-tower KG anon (HMAC) & no crypto cost          & ${\approx}70\%$ fewer nodes & lossy; QA-pres. \\
+    Opal~\cite{kaviani_opal}    & retrieve,gt,e2e   & TEE + Ring-ORAM          & 2.32\,s/q ($1.57\times$) & ORAM (n/r)                & ANN ($+13$\,pp) \\
+    ARoG~\cite{ning_arog}       & retrieve,gt       & KGQA machine-ID anon     & no crypto cost           & n/r                       & SoTA KGQA (lossy) \\
     \bottomrule
   \end{tabular*}
 
@@ -171,35 +189,7 @@ degree, and a degree sequence is a structural fingerprint that re-identifies nod
 public graph even under encryption. Third, the \texttt{source\_id} \emph{fan-out} (which
 chunks an entity maps to) links a query to specific source documents. Because these surfaces
 are about \emph{structure and access}, not arithmetic, dense-retrieval primitives do not
-address them and graph retrieval needs different machinery (\cref{tab:crypto-graph}).
-\begin{table*}[t!]
-  \centering \footnotesize
-  \caption{\emph{Graph} retrieval and storage: graph-indexed ANN and graph traversal
-    (Graph/LightRAG); all mechanisms. Columns as in \cref{tab:crypto-vec}; latency is per
-    graph-query (``gt'' = graph traversal). SSE = searchable symmetric encryption;
-    (VH-)EMM = (volume-hiding) encrypted multi-map; ORAM = oblivious RAM. n/r = not
-    reported. ``billion-edge'' denotes the largest graph tested, not a latency.
-    ``lossy; QA-pres.''\ = retrieval is not exact (the subgraph is pruned by design) but
-    downstream answer quality is preserved.}
-  \label{tab:crypto-graph}
-  \scriptsize\setlength{\tabcolsep}{3pt}
-  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
-    \toprule
-    Scheme & Stage & Primitive & Latency & Comm./storage & Utility \\
-    \midrule
-    Pacmann~\cite{pacmann}     & retrieve,gt       & batched PIR (graph-ANN)  & $-$22\% lat @100M        & ${\sim}$few\,KB/query     & 90\% ANN quality \\
-    Compass~\cite{zhu_compass} & retrieve,gt       & encrypted HNSW + ORAM    & sub-second LAN           & n/r                       & exact \\
-    XorMM~\cite{xormm}         & retrieve,gt       & volume-hiding EMM (SSE)  & ${\approx}5$\,ms/q ; ${\approx}170$\,ms @vol\,$2^{15}$ & ${\approx}1.2$--$2.5\times$ stor. & exact \\
-    FLASH~\cite{flash_emm}     & retrieve,gt       & VH-EMM (+conj.)          & ${\approx}1.8$\,ms/q; ${\approx}90$\,ms @vol\,$2^{15}$ & near-opt.\ overhead       & exact \\
-    PeGraph~\cite{pegraph}     & store,retrieve,gt & SSE + secret sharing     & $<$1\,s/query @multi-M   & n/r                       & exact (ranked) \\
-    H$_2$O$_2$RAM~\cite{h2o2ram}& store,retrieve,gt & doubly-oblivious RAM (TEE) & ${\approx}1000\times$ vs.\ O$_2$RAM & n/r                & exact \\
-    GORAM~\cite{goram}         & retrieve,gt       & 3PC sqrt-ORAM (reserve)  & 58\,ms--36\,s @1.4B      & n/r; init ${<}3$\,min     & exact \\
-    PrivGemo~\cite{tan_privgemo}& retrieve,gt       & dual-tower KG anon (HMAC) & no crypto cost          & ${\approx}70\%$ fewer nodes & lossy; QA-pres. \\
-    Opal~\cite{kaviani_opal}    & retrieve,gt,e2e   & TEE + Ring-ORAM          & 2.32\,s/q ($1.57\times$) & ORAM (n/r)                & ANN ($+13$\,pp) \\
-    ARoG~\cite{ning_arog}       & retrieve,gt       & KGQA machine-ID anon     & no crypto cost           & n/r                       & SoTA KGQA (lossy) \\
-    \bottomrule
-  \end{tabular*}
-\end{table*}
+address them and graph retrieval needs different machinery (\cref{tab:retr-perf}).
 
 \paragraph{Graph-ANN over an oblivious index.}
 Pacmann and Compass serve the entity/relation ANN lookups that open a LightRAG-style
