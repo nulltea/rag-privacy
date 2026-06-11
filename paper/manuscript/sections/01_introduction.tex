@@ -2,45 +2,37 @@
 \label{sec:intro}
 
 \subsection{Motivation}
-Organizations in regulated and sensitive domains increasingly want to run Transformer
-inference, both embedding and generation, over confidential data such as clinical notes,
-financial records, legal files, and proprietary code. The default path exposes exactly that
-data: a hosted inference or embedding API receives every document and query in plaintext, so
-the operator, a privileged insider, or an attacker who breaches the service sees it in the
-clear. GDPR, HIPAA, and the EU AI Act's high-risk provisions make this incompatible with
-processing personal, health, or privileged information, and data-residency rules can forbid
-the egress outright. The constraint already reshapes practice: in a 2024 survey of enterprise
-IT leaders, half adopt retrieval-augmented generation specifically to bring the model to the
-data and keep it in house~\citep{cloudera_ai_survey}, settling for weaker self-hosted models
-because the frontier models are available only as hosted APIs that would require sending the
-data out.
+Organizations in regulated domains increasingly want to run Transformer inference, both
+embedding and generation, over confidential data: clinical notes, financial records, legal
+files, proprietary code. The default path exposes exactly that data, because a hosted
+inference or embedding API receives every document and query in plaintext, in reach of the
+operator, a privileged insider, or anyone who breaches the service. GDPR, HIPAA, and the EU~AI
+Act make this incompatible with processing personal, health, or privileged data, and
+data-residency rules can forbid the egress outright. In a 2024 industry survey, half of
+enterprises already adopted RAG to keep data in house~\citep{cloudera_ai_survey}, accepting
+weaker self-hosted models because the strongest models are reachable only through such APIs.
 
-Confidential inference aims to remove that sacrifice: to use a powerful operator's
-infrastructure, including frontier models and accelerators, without revealing the data to the
-operator that runs it. The difficulty is that protection must then hold for data \emph{in use},
-not merely at rest. On hardware it controls, the serving operator observes the inputs and the
-intermediate activations of every forward pass; a retrieval-augmented pipeline additionally
-exposes the query, the access pattern over the corpus, and the assembled prompt, which
-concentrates the most sensitive context in one place.
-These surfaces are exploited rather than hypothetical. The European Data Protection Supervisor
-warns that RAG systems can retrieve and disclose personal data inadvertently held in their
-corpus~\citep{edps_rag}, and a single poisoned document placed in a retrieval corpus has been
-shown to turn an ordinary RAG application into a remote data-exfiltration
-channel~\citep{greshake_ipi}.
+Confidential inference aims to lift that constraint: to use an untrusted operator's
+infrastructure, including frontier models and accelerators, without revealing the data to it.
+The difficulty is protecting data \emph{in use}, not just at rest. On hardware it controls, the
+operator sees the inputs and activations of every forward pass, and a RAG pipeline further
+exposes the query, the access pattern over the corpus, and the assembled prompt, where the most
+sensitive context is concentrated. The European Data Protection
+Supervisor warns that RAG systems can disclose personal data held in their
+corpus~\citep{edps_rag}, and a single poisoned document has been shown to turn a RAG
+application into a remote data-exfiltration channel~\citep{greshake_ipi}.
 
-These pressures have produced a fast-growing body of work on confidential Transformer
-inference and RAG, built on cryptography, trusted hardware, obfuscation, differential privacy,
-and combinations of these. The schemes span the inference stages of embedding, reranking, and
-generation as well as the retrieval and storage layer, yet they rest on different trust
-assumptions and report costs on different hardware, models, and metrics. A practitioner
-therefore cannot tell which is deployable for a given setting; this systematization supplies
-that comparison.
+A fast-growing body of work answers this with cryptography, trusted hardware, obfuscation,
+differential privacy, and hybrids, spanning the inference stages (embedding, reranking,
+generation) and the retrieval and storage layer. But the schemes assume different adversaries
+and report costs on different hardware, models, and metrics, so a practitioner cannot tell
+which is deployable. This systematization supplies that comparison.
 
 \subsection{Scope and Positioning}
 % Merged Why-a-New-SoK + Scope (goal-first). Positioning compressed: the table carries
 % per-SoK detail; prose = one clause each + the sharp Andreoletti contrast.
 Our organizing goal is \emph{deployment readiness}: how likely a scheme is to be adopted in
-a real deployment, on three criteria---\textbf{performance} (overhead and latency),
+a real deployment, on three criteria: \textbf{performance} (overhead and latency),
 \textbf{fidelity} (impact on output quality), and \textbf{threat-model fit} (an adversary
 model \emph{appropriate} to the deployment, not maximal). The aim is not to crown a winning
 family but to make this trade explicit; which schemes sit near the deployable frontier is a
@@ -54,12 +46,12 @@ treats \emph{cryptographic} private inference, confined to
 MPC/FHE~\citep{li_pti_survey,pti_survey_2024,luo_cplm_survey,chen_sok_pti}; others go deep on
 a single FHE primitive~\citep{xue_fhe_sok,albadawi_ckks_sok} or stay high-level across the
 lifecycle~\citep{ma_semantic_sok}. For MPC/FHE-inference protocol depth we \emph{refer the
-reader to} Li et al.~\citep{li_pti_survey} and Chen et al.~\citep{chen_sok_pti} (the latter
+reader to} \citet{li_pti_survey} and \citet{chen_sok_pti} (the latter
 adding a reproducibility re-benchmark), keeping only a few frontier exemplars
-(\cref{sec:crypto}). The one prior work sharing our deployability lens, Andreoletti et
-al.~\citep{andreoletti_ppi_practice}, differs substantively: it is a \emph{meta}-survey at the
+(\cref{sec:crypto}). The one prior work sharing our deployability lens,
+\citet{andreoletti_ppi_practice}, differs substantively: it is a \emph{meta}-survey at the
 level of PET \emph{families} (qualitative trade-offs, thin on information-theoretic and
-obfuscation methods, no retrieval or graph-RAG), and where it argues one trust-minimising
+obfuscation methods, no retrieval or graph-RAG), and where it argues one trust-minimizing
 trajectory (TEE\,$\to$\,FHE) we score \emph{individual schemes} and reach a different
 conclusion: today's deployable options are present-day systems such as the hybrid split,
 obfuscation, and confidential-accelerator TEEs, not way-stations toward a cryptographic
@@ -100,20 +92,20 @@ untrusted), and Tier~3 (a confidential accelerator trusted end-to-end). We focus
 Tiers~1 and~2, where confidentiality is an open \emph{design} problem, and keep
 \textbf{Tier~3} as a performance baseline (\cref{sec:tee}): once a confidential
 accelerator is trusted end-to-end, confidentiality largely reduces to hardware
-availability, enclave construction, and attestation---a narrower, hardware-specific
+availability, enclave construction, and attestation, a narrower, hardware-specific
 space systematized in its own right~\citep{accel_tee_sok}. Second, the
 \textbf{practical-frontier} restriction follows directly from the deployment lens:
 comparison tables hold only state-of-the-art schemes with deployable overhead, and
 foundational or superseded work is cited for lineage only.
 
 The systematization spans Transformer inference (embedding, reranking, generation) and
-RAG including \emph{graph-RAG}---a setting the prior RAG-privacy SoK~\citep{bodea_sok}
+RAG including \emph{graph-RAG}, a setting the prior RAG-privacy SoK~\citep{bodea_sok}
 excludes. We treat a semi-honest cloud as the baseline adversary, documenting the range
 to malicious in \cref{sec:threat}. Explicitly \emph{out of scope}: microarchitectural
 side-channels (a field-wide exclusion we make a finding of, \cref{sec:threat}), full
 verifiable computation (lightweight composable integrity is in scope, but zkLLM-class
 proving is not), foundational/superseded schemes, and \emph{on-device model-inference
-protection}---schemes such as SecureInfer~\citep{secureinfer} and
+protection}, schemes such as SecureInfer~\citep{secureinfer} and
 Amulet~\citep{amulet} that defend a proprietary model against the device owner
 (an inverted threat model: protecting the \emph{model} from the user, rather than the
 user's data from the cloud), which is orthogonal to the confidential-RAG setting we study.
@@ -125,20 +117,20 @@ This paper is a \emph{systematization of knowledge}. Concretely:
         classifies confidential Transformer-inference and RAG schemes by
         adversary behavior, trust anchor, attacker knowledge, confidentiality
         scope, and \emph{security basis} (cryptographic / DP / hardware /
-        heuristic) --- the last separating provably-secure schemes from
+        heuristic), the last separating provably-secure schemes from
         empirically-resistant ones, and surfacing the field-wide side-channel blind
         spot we report as a finding in \cref{ssec:sidechannel}.
   \item \textbf{A mechanism-organized systematization} of five inference-defense
         families (\cref{sec:crypto}--\cref{sec:hybrid}) plus a dedicated treatment of the
-        confidential \textbf{retrieval and storage} layer (\cref{sec:retrieval})---dense and
-        graph/LightRAG---spanning the full inference-and-RAG pipeline.
+        confidential \textbf{retrieval and storage} layer (\cref{sec:retrieval}), dense and
+        graph/LightRAG, spanning the full inference-and-RAG pipeline.
   \item \textbf{A performance comparison} synthesized from reported numbers
-        (\cref{sec:synthesis}) --- the cost axis the existing RAG-privacy SoK
-        \cite{bodea_sok} omits --- with an explicit non-comparability caveat.
+        (\cref{sec:synthesis}), the cost axis the existing RAG-privacy SoK
+        \citep{bodea_sok} omits, with an explicit non-comparability caveat.
   \item \textbf{A deployment-readiness synthesis} (\cref{sec:synthesis}) that scores
         each family on performance, fidelity, and threat-model fit, showing that
         real-world readiness comes from balancing the three rather than maximizing any
-        one --- and locating each family on that frontier.
+        one, and locating each family on that frontier.
   \item \textbf{A stage\,$\times$\,mechanism gap-map} (\cref{sec:synthesis})
         whose empty cells are the field's open problems.
 \end{itemize}
@@ -146,10 +138,10 @@ This paper is a \emph{systematization of knowledge}. Concretely:
 \subsection{Organization}
 The evaluation framework (\cref{sec:framework}) defines the security taxonomy and the cost
 metrics. The five mechanism families for confidential \emph{inference} are systematized in
-\cref{sec:crypto}--\cref{sec:hybrid}; the RAG \emph{retrieval and storage} layer---dense and
-graph/LightRAG, across all mechanisms---is treated separately in \cref{sec:retrieval}, since
+\cref{sec:crypto}--\cref{sec:hybrid}; the RAG \emph{retrieval and storage} layer (dense and
+graph/LightRAG, across all mechanisms) is treated separately in \cref{sec:retrieval}, since
 its trade-offs and primitives differ. The synthesis (\cref{sec:synthesis}) draws them
-together---the stage\,$\times$\,mechanism gap-map, the performance comparison, the
+together: the stage\,$\times$\,mechanism gap-map, the performance comparison, the
 deployment-readiness profile, graph-RAG as a retrieval setting, and the field-wide
 side-channel finding. \Cref{sec:related} positions the work against prior surveys, and the
 conclusion lists open problems.
