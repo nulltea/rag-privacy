@@ -4,21 +4,24 @@
 \subsection{Motivation}
 Organizations in regulated and sensitive domains increasingly want to run Transformer
 inference, both embedding and generation, over confidential data such as clinical notes,
-financial records, legal files, and proprietary code. The default path defeats that goal: a
-hosted inference or embedding API receives every document and query in plaintext, so the
-operator, a privileged insider, or an attacker who breaches the service sees the data in the
+financial records, legal files, and proprietary code. The default path exposes exactly that
+data: a hosted inference or embedding API receives every document and query in plaintext, so
+the operator, a privileged insider, or an attacker who breaches the service sees it in the
 clear. GDPR, HIPAA, and the EU AI Act's high-risk provisions make this incompatible with
 processing personal, health, or privileged information, and data-residency rules can forbid
 the egress outright. The constraint already reshapes practice: in a 2024 survey of enterprise
 IT leaders, half adopt retrieval-augmented generation specifically to bring the model to the
-data and keep it in house~\citep{cloudera_ai_survey}, foregoing frontier hosted models rather
-than surrendering plaintext.
+data and keep it in house~\citep{cloudera_ai_survey}, settling for weaker self-hosted models
+because the frontier models are available only as hosted APIs that would require sending the
+data out.
 
-Hosting on-premises does not by itself resolve the problem, because the exposure is not
-confined to data at rest. A confidential pipeline must protect data \emph{in use}: during
-inference the serving operator observes the inputs and the intermediate activations, and a
-retrieval-augmented pipeline additionally exposes the query, the access pattern over the
-corpus, and the assembled prompt, which concentrates the most sensitive context in one place.
+Confidential inference aims to remove that sacrifice: to use a powerful operator's
+infrastructure, including frontier models and accelerators, without revealing the data to the
+operator that runs it. The difficulty is that protection must then hold for data \emph{in use},
+not merely at rest. On hardware it controls, the serving operator observes the inputs and the
+intermediate activations of every forward pass; a retrieval-augmented pipeline additionally
+exposes the query, the access pattern over the corpus, and the assembled prompt, which
+concentrates the most sensitive context in one place.
 These surfaces are exploited rather than hypothetical. The European Data Protection Supervisor
 warns that RAG systems can retrieve and disclose personal data inadvertently held in their
 corpus~\citep{edps_rag}, and a single poisoned document placed in a retrieval corpus has been
