@@ -20,12 +20,6 @@
   year   = {2024}
 }
 
-@misc{secformer,
-  author = {Peng, Shenzhen and others},
-  title  = {{SecFormer}: Fast and Accurate Privacy-Preserving Inference for Transformer Models via {SMPC}},
-  note   = {[verified-EdgeQuake] 2Quad + Goldschmidt + Fourier-GELU. TODO: verify venue (ACL?), year, arXiv/DOI},
-  year   = {2024}
-}
 
 @misc{shaft,
   author = {{SHAFT authors}},
@@ -42,21 +36,7 @@
   year   = {2026}
 }
 
-@misc{bumblebee,
-  author = {{BumbleBee authors}},
-  title  = {{BumbleBee}: Secure Two-party Transformer Inference},
-  note   = {2PC HE+ASS, segmented-poly exp; 2PC SOTA trust. TODO: verify authors, venue (NDSS 2025?),
-            year, arXiv/DOI},
-  year   = {2025}
-}
 
-@misc{sigma,
-  author = {{SIGMA authors}},
-  title  = {{SIGMA}: Secure {GPT} Inference with Function Secret Sharing},
-  note   = {GPU FSS LUTs; best online perf. TODO: verify authors, venue (PETS 2024?),
-            year, arXiv/DOI},
-  year   = {2024}
-}
 
 @misc{fission,
   author = {{Fission authors}},
@@ -75,19 +55,7 @@
   year   = {2025}
 }
 
-@misc{nexus,
-  author = {{NEXUS authors}},
-  title  = {Secure Transformer Inference Made Non-interactive ({NEXUS})},
-  note   = {non-interactive RNS-CKKS. TODO: verify authors, venue (CCS 2024?), year, arXiv/DOI},
-  year   = {2024}
-}
 
-@misc{cipherformer,
-  author = {Wang, Weize and others},
-  title  = {{CipherFormer}: Efficient Transformer Private Inference with Low Round Complexity},
-  note   = {[verified-EdgeQuake] FHE encoder, small classifiers. TODO: verify venue, year, arXiv/DOI},
-  year   = {2024}
-}
 
 % ====== Cryptographic — retrieval / storage (§3.3) ==========================
 
@@ -171,13 +139,6 @@
   year   = {2025}
 }
 
-@misc{grass,
-  author = {Kim and others},
-  title  = {{GraSS}: Graph-based Similarity Search over Encrypted Data},
-  note   = {FHE graph-based ANN. TODO: verify authors, exact title, venue (EuroS\&P?), year
-            (doc cites ePrint 2024/2012)},
-  year   = {2025}
-}
 
 @misc{trse,
   author = {Yu and others},
@@ -250,13 +211,6 @@
   year   = {2025}
 }
 
-@misc{lin_collaborative_obfusc,
-  author = {Lin, Yu and others},
-  title  = {Collaborative Obfuscation for Privacy-Preserving {LLM} Inference},
-  note   = {dynamic covariance-structured masks. TODO: verify authors, exact title, venue,
-            year (doc cites arXiv 2603.01499)},
-  year   = {2026}
-}
 
 @misc{roberts_sgt,
   author = {Roberts, Jay and others},
@@ -290,13 +244,6 @@
   year   = {2025}
 }
 
-@misc{stip,
-  author = {{STIP authors}},
-  title  = {Secure Transformer Inference Protocol ({STIP})},
-  note   = {3-party static-permutation obfuscation; collapses for open-source weights
-            (cautionary lineage). TODO: verify authors, year, venue},
-  year   = {2024}
-}
 
 @inproceedings{obfuslm,
   author    = {Lin, Yu and Yang, Ruining and Mao, Yunlong and Zhang, Qizhi and Hong, Jue and Cai, Quanwei and Wu, Ye and Liu, Huiqi and Chen, Zhiyu and Duan, Bing and Zhong, Sheng},
@@ -313,12 +260,6 @@
   note      = {[verified-EdgeQuake] token-to-token confusion mapping on the embedding matrix, discrete-optimized; preserves code-task output on CodeLlama-7B. Domain-specific (code LLMs). arXiv:2410.05797}
 }
 
-@misc{centaur,
-  author    = {{Centaur authors}},
-  title     = {Centaur: Bridging the Impossible Trinity of Privacy, Efficiency, and Performance in Privacy-Preserving Transformer Inference},
-  year      = {2024},
-  note      = {static random permutation replaces SMPC non-linears; plaintext-speed. Broken by Hidden-No-More (multi-run reconstruction). Cautionary lineage. arXiv:2412.10652. TODO: verify authors, venue}
-}
 
 @inproceedings{vec2text,
   author    = {Morris, John X. and Kuleshov, Volodymyr and Shmatikov, Vitaly and Rush, Alexander M.},
@@ -358,13 +299,6 @@
   note      = {GEIA: learning-based (generative) embedding inversion, trains a GPT-2 decoder to reconstruct full sentences from embeddings. arXiv:2305.03010 (2023.findings-acl.881). TODO: verify pages}
 }
 
-@misc{translinkguard,
-  author = {{TransLinkGuard authors}},
-  title  = {{TransLinkGuard}: Hardening Edge Deployment against Model Stealing via Static-Key Obfuscation},
-  note   = {static-key weight obfuscation; cited-as-broken lineage (TSQP/ArrowMatch).
-            TODO: verify authors, exact title, venue (ACM MM 2024?), year},
-  year   = {2024}
-}
 
 % ====== Differential Privacy (§6) ===========================================
 
@@ -465,21 +399,6 @@
   year   = {2025}
 }
 
-@misc{amulet,
-  author = {{Amulet authors}},
-  title  = {{Amulet}: Per-round Fresh Invertible Masking for Confidential Transformer Inference},
-  note   = {per-round fresh invertible masks all layers. TODO: verify authors, exact title,
-            venue, year (doc cites arXiv 2512.07495)},
-  year   = {2025}
-}
-
-@misc{toges,
-  author = {Kane and Bkakria},
-  title  = {{TOGES}: Toward Oblivious Graph Encryption for Secure Shortest-path Search},
-  note   = {graph enc, Path-ORAM position-map in SGX. TODO: verify authors, exact title,
-            venue (LNCS 2024?), year (doc cites arXiv 2405.19259)},
-  year   = {2024}
-}
 
 @misc{tan_privgemo,
   author = {Tan and others},
@@ -489,67 +408,16 @@
   year   = {2026}
 }
 
-@misc{portcullis,
-  author = {{Portcullis authors}},
-  title  = {{Portcullis}: A {TEE}-Attested {PII}-Anonymization Gateway for Cloud {LLM}s},
-  note   = {TEE-attested PII-anonymization before cloud LLM; 96x vs Hide-and-Seek.
-            TODO: verify authors, exact title, venue (AAAI 2025?), year},
-  year   = {2025}
-}
 
 % ====== Targeted / Composable Verification (cross-cut; §7-corpus, ms §8) =====
 
-@misc{qiu_v3db,
-  author = {Qiu, Zipeng and others},
-  title  = {{V3DB}: Audit-on-Demand Zero-Knowledge Proofs for Verifiable Vector Search
-            over Committed Snapshots},
-  note   = {[verified-EdgeQuake] ZK that top-k matches the committed encrypted index. TODO: verify
-            venue, year, arXiv/DOI},
-  year   = {2026}
-}
 
-@misc{annproof,
-  author = {{ANNProof authors}},
-  title  = {Verifiable Outsourced Approximate Nearest Neighbor Search},
-  note   = {authenticated data structure (blockchain); ms-level VO. TODO: verify authors,
-            exact title, venue (FGCS 2024?), year},
-  year   = {2024}
-}
 
-@misc{zkgraph,
-  author = {Wu and others},
-  title  = {{ZKGraph}: Zero-Knowledge Verifiable Graph Query Evaluation},
-  note   = {PLONKish ZK proof of graph-traversal correctness vs committed snapshot;
-            research-stage (no perf nums). TODO: verify authors, exact title, venue,
-            year (doc cites arXiv 2507.00427)},
-  year   = {2025}
-}
 
-@misc{zkifv,
-  author = {{ZKIFV authors}},
-  title  = {Zero-Knowledge Verifiable Inverted-File Search},
-  note   = {ZK proof of keyword/inverted-index search correctness+completeness.
-            TODO: verify authors, exact title, venue, year, identifier},
-  year   = {2025}
-}
 
-@misc{anchuri_proofs,
-  author = {Anchuri and others},
-  title  = {Lightweight Proofs of Inference via Random Path Opening},
-  note   = {samples random output-to-input paths; trades soundness for speed; composable.
-            TODO: verify authors, exact title, venue, year (doc cites arXiv 2603.19025)},
-  year   = {2026}
-}
 
 % ====== Attacks (§2 / §5 / §8 — the threat side) ============================
 
-@inproceedings{morris2023vec2text,
-  author    = {Morris, John X. and others},
-  title     = {Text Embeddings Reveal (Almost) As Much As Text},
-  booktitle = {EMNLP},
-  year      = {2023},
-  note      = {Vec2Text; canonical inversion bar (~92\% token recovery). TODO: verify pages}
-}
 
 @inproceedings{lin_inversion,
   author    = {Lin, Yu and Zhang, Qizhi and Cai, Quanwei and Hong, Jue and Wu, Ye and
@@ -717,50 +585,11 @@
             MPC-compute-party routing leakage CryptoMoE closes. TODO: confirm venue (OpenReview 1RNSYEEpwi).}
 }
 
-@misc{tsqp,
-  author = {{TSQP authors}},
-  title  = {{TSQP}: Recovering Statically-Obfuscated Transformer Layers},
-  note   = {recovers Llama-3-8B layer in ~6 min. TODO: verify authors, exact title, venue,
-            year (doc cites arXiv 2602.11088)},
-  year   = {2026}
-}
 
-@misc{graphrag_extraction,
-  author = {Liu and others},
-  title  = {Exposing Privacy Risks in Graph Retrieval-Augmented Generation},
-  note   = {black-box entity-listing extraction. TODO: verify authors, exact title, venue,
-            year (doc cites arXiv 2508.17222)},
-  year   = {2025}
-}
 
-@misc{agea,
-  author = {Yang and others},
-  title  = {{AGEA}: Agentic Graph Extraction Attack on Graph-{RAG}},
-  note   = {agentic graph reconstruction under budget; 96\% node recovery @1000 queries.
-            TODO: verify authors, exact title, venue, year (doc cites arXiv 2601.14662)},
-  year   = {2026}
-}
 
-@misc{gragpoison,
-  author = {Liang and others},
-  title  = {{GRAGPOISON}: Targeted-Relation Corpus Poisoning of Graph-{RAG}},
-  note   = {TODO: verify authors, exact title, venue, year (doc cites arXiv 2501.14050)},
-  year   = {2025}
-}
 
-@misc{logicpoison,
-  author = {Xiao and others},
-  title  = {{LogicPoison}: Zero-Token Cyclic Entity-Swap Poisoning of Graph-{RAG}},
-  note   = {TODO: verify authors, exact title, venue (ACL 2026?), year (doc cites arXiv 2604.02954)},
-  year   = {2026}
-}
 
-@misc{linkteller,
-  author = {Wu, Fan and others},
-  title  = {{LinkTeller}: Recovering Private Edges from Graph Neural Networks via Influence Analysis},
-  note   = {edge inference, defeats DP-GCN at eps>5. TODO: verify authors, venue (S\&P 2022?), year},
-  year   = {2022}
-}
 
 % ====== Surveys / SoKs (positioning, §9) ====================================
 
@@ -774,12 +603,6 @@
   year   = {2025}
 }
 
-@misc{mu_securerag,
-  author = {Mu and others},
-  title  = {Towards Secure Retrieval-Augmented Generation},
-  note   = {flags reranking privacy underdeveloped. TODO: verify authors, exact title, venue, year},
-  year   = {2026}
-}
 
 @inproceedings{accel_tee_sok,
   author    = {Zhang, Fengwei and others},
@@ -800,14 +623,6 @@
   note    = {[verified-EdgeQuake: full-MD] MPC+HE only; inference-only (no TEE/obfusc/DP/RAG);
              semi-honest/honest-majority only; layer-wise (linear/non-linear) x MPC-vs-HE taxonomy +
              comm/runtime/accuracy eval table. The crypto-inference depth anchor we defer to.}
-}
-
-@misc{pti_survey_2024,
-  author = {{TODO verify authors}},
-  title  = {A Survey on Private Transformer Inference},
-  note   = {arXiv:2412.08145 (Dec 2024); MPC/FHE/hybrid private transformer inference, 2022--2024.
-            TODO: confirm author list + venue},
-  year   = {2024}
 }
 
 @article{xue_fhe_sok,
@@ -880,54 +695,11 @@
 
 % ====== Hybrid-split lineage (CNN-era roots + TEE-partition analyses) ========
 
-@inproceedings{tramer_slalom,
-  author    = {Tram{\`e}r, Florian and Boneh, Dan},
-  title     = {Slalom: Fast, Verifiable and Private Execution of Neural Networks in Trusted Hardware},
-  booktitle = {International Conference on Learning Representations (ICLR)},
-  year      = {2019},
-  note      = {[verified-web] CNN-era root: TEE delegates linear layers to untrusted co-processor; arXiv:1806.03287}
-}
 
-@inproceedings{hashemi_darknight,
-  author    = {Hashemi, Hanieh and Wang, Yongqin and Annavaram, Murali},
-  title     = {{DarKnight}: An Accelerated Framework for Privacy and Integrity Preserving Deep Learning Using Trusted Hardware},
-  booktitle = {54th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO)},
-  year      = {2021},
-  note      = {[verified-web] matrix-masking input obfuscation in TEE, offload to GPU; DOI 10.1145/3466752.3480112; arXiv:2207.00083}
-}
 
-@inproceedings{sun_shadownet,
-  author    = {Sun, Zhichuang and Sun, Ruimin and Liu, Changming and Roy Chowdhury, Amrita and Lu, Long and Jha, Somesh},
-  title     = {{ShadowNet}: A Secure and Efficient On-device Model Inference System for Convolutional Neural Networks},
-  booktitle = {IEEE Symposium on Security and Privacy (S\&P)},
-  year      = {2023},
-  note      = {[verified-web] weight-transform offload of linear layers, restore in TEE; arXiv:2011.05905}
-}
 
-@inproceedings{shen_soter,
-  author    = {Shen, Tianxiang and Qi, Ji and Jiang, Jianyu and Wang, Xian and Wen, Siyuan and Chen, Xusheng and Zhao, Shixiong and Wang, Sen and Chen, Li and Luo, Xiapu and Zhang, Fengwei and Cui, Heming},
-  title     = {{SOTER}: Guarding Black-box Inference for General Neural Networks at the Edge},
-  booktitle = {USENIX Annual Technical Conference (ATC)},
-  pages     = {723--738},
-  year      = {2022},
-  note      = {[verified-web] associative-operator parameter morphing, offload to untrusted GPU, restore in TEE. Static-basis integrity broken by arXiv:2602.11088}
-}
 
-@inproceedings{zhang_teeslice,
-  author    = {Zhang, Ziqi and others},
-  title     = {No Privacy Left Outside: On the (In-)Security of {TEE}-Shielded {DNN} Partition for On-Device {ML}},
-  booktitle = {IEEE Symposium on Security and Privacy (S\&P)},
-  year      = {2024},
-  note      = {[verified-web] benchmarks TEE-shielded DNN partition (TSDP) under model-stealing/MIA; the analysis showing naive partition leaks; proposes TEESlice partition-before-training. arXiv:2310.07152}
-}
 
-@inproceedings{kvshield,
-  author    = {Yang, Huan and Zhang, Deyu and Zhao, Yudong and Li, Yuanchun and Liu, Yunxin},
-  title     = {A First Look At Efficient and Secure On-Device {LLM} Inference Against {KV} Leakage},
-  booktitle = {Workshop on Mobility in the Evolving Internet Architecture (MobiArch)},
-  year      = {2024},
-  note      = {[verified-web] KV-Shield: secret permutation R in TEE, permuted weights $W_P{=}WR$ on GPU. Broken: open-weights solve $W_P{=}WR$; Collision Attack (Shadow-in-the-Cache); RoPE-incompatible. DOI 10.1145/3691555.3696827; arXiv:2409.04040}
-}
 
 @misc{saini_precomp_break,
   author = {Saini, Abhishek and Jiang, Haolin and Liu, Hang},

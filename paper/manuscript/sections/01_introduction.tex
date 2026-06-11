@@ -43,7 +43,7 @@ is set by the taxonomy of \cref{sec:threat}; performance and utility are reporte
 No prior survey occupies this ground (\cref{tab:prior-soks}); each covers a slice. A
 risk-centric SoK catalogs attacks over naive RAG~\citep{bodea_sok}; a cluster of surveys
 treats \emph{cryptographic} private inference, confined to
-MPC/FHE~\citep{li_pti_survey,pti_survey_2024,luo_cplm_survey,chen_sok_pti}; others go deep on
+MPC/FHE~\citep{li_pti_survey,luo_cplm_survey,chen_sok_pti}; others go deep on
 a single FHE primitive~\citep{xue_fhe_sok,albadawi_ckks_sok} or stay high-level across the
 lifecycle~\citep{ma_semantic_sok}. For MPC/FHE-inference protocol depth we \emph{refer the
 reader to} \citet{li_pti_survey} and \citet{chen_sok_pti} (the latter
@@ -74,7 +74,6 @@ deployment-readiness lens.
     \midrule
     Bodea et al.~\citep{bodea_sok}        & RAG risks (attacks)        & risk-taxon. & ---       & ---       & ---       & ---       & $\circ$   & --- \\
     Li et al.~\citep{li_pti_survey}       & MPC/FHE                    & semi-honest & $\bullet$ & ---       & ---       & $\bullet$ & ---       & --- \\
-    PTI survey~\citep{pti_survey_2024}    & MPC/FHE/hybrid             & $\circ$     & $\circ$   & ---       & ---       & $\bullet$ & ---       & --- \\
     Luo et al.~\citep{luo_cplm_survey}    & MPC/FHE (+training)        & ---         & ---       & ---       & $\circ$   & $\bullet$ & ---       & --- \\
     Xue et al.~\citep{xue_fhe_sok}        & FHE only                   & ---         & $\bullet$ & ---       & ---       & $\circ$   & ---       & --- \\
     Ma et al.~\citep{ma_semantic_sok}     & DP/obfusc.\ (hi-lvl)       & lifecycle   & ---       & ---       & ---       & $\circ$   & ---       & --- \\
@@ -103,12 +102,8 @@ RAG including \emph{graph-RAG}, a setting the prior RAG-privacy SoK~\citep{bodea
 excludes. We treat a semi-honest cloud as the baseline adversary, documenting the range
 to malicious in \cref{sec:threat}. Explicitly \emph{out of scope}: microarchitectural
 side-channels (a field-wide exclusion we make a finding of, \cref{sec:threat}), full
-verifiable computation (lightweight composable integrity is in scope, but zkLLM-class
-proving is not), foundational/superseded schemes, and \emph{on-device model-inference
-protection}, schemes such as SecureInfer~\citep{secureinfer} and
-Amulet~\citep{amulet} that defend a proprietary model against the device owner
-(an inverted threat model: protecting the \emph{model} from the user, rather than the
-user's data from the cloud), which is orthogonal to the confidential-RAG setting we study.
+verifiable computation (lightweight composable integrity is reported when present, but zkLLM-class
+proving is not covered), and foundational/superseded schemes.
 
 \subsection{Contributions}
 This paper is a \emph{systematization of knowledge}. Concretely:
@@ -143,5 +138,4 @@ graph/LightRAG, across all mechanisms) is treated separately in \cref{sec:retrie
 its trade-offs and primitives differ. The synthesis (\cref{sec:synthesis}) draws them
 together: the stage\,$\times$\,mechanism gap-map, the performance comparison, the
 deployment-readiness profile, graph-RAG as a retrieval setting, and the field-wide
-side-channel finding. \Cref{sec:related} positions the work against prior surveys, and the
-conclusion lists open problems.
+side-channel finding.
