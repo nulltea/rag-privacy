@@ -34,24 +34,25 @@ these constraints, use case by use case.
 \subsection{Deployment Readiness}
 \label{ssec:deployment}
 
-\begin{table*}[t!]
-  \centering \scriptsize\setlength{\tabcolsep}{4pt}
-  \caption{Deployment readiness by family, on the three criteria of \cref{sec:intro}, plus
-    \emph{client reliance} (thin = enc/dec a query; stateful = holds keys + light work;
-    thick = stores access state and runs a multi-round retrieval/compute loop). Ratings are
-    qualitative and indicative, not co-measured; see \cref{tab:performance} for the
-    performance basis. \tq{}-marked client cells await the per-scheme review
-    (\cref{ssec:deployment}).}
-  \label{tab:deployment}
+% tab:gapmap rows = pipeline stages; columns = mechanism families (§3-§8);
+% cells = representative schemes; ``---'' = no practical scheme (a gap).
+\begin{table*}[b!]
+  \centering \scriptsize
+  \caption{Deployment-frontier schemes across the inference-and-RAG pipeline, by mechanism family
+    (\cref{sec:crypto}--\cref{sec:retrieval}; one or two per cell). Inference stages (embed,
+    rerank, generate) require server-side private computation; storage and retrieval mark any
+    private-access scheme. ``---'' = no frontier scheme known to us.}
+  \label{tab:gapmap}
   \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
     \toprule
-    Mechanism family & Performance & Fidelity & Threat-model fit & Client & Deploy.\ readiness \\
+    Pipeline stage & Crypto/MPC & TEE & Obfuscation & DP & Hybrid split \\
     \midrule
-    Cryptographic (MPC/FHE) & L infer./M retr. & H (exact) & H (often exceeds need) & thin--thick & L--M \\
-    TEE (Tier 3)            & H (near-plain.)  & H (exact) & M (HW-trust; side-ch.) & \tq & M (HW-gated) \\
-    Static obfuscation      & H (near-plain.)  & H (small loss) & L (fixed; several broken) & \tq & M \\
-    Differential privacy    & H                & M (recall at small $\varepsilon$) & M (formal, prob.) & \tq & M \\
-    Hybrid split            & M--H (few$\times$) & H (exact) & M--H (Tier-2; per-batch) & \tq & H \\
+    Embed            & Euston       & Ascend-CC          & ---              & ---               & TwinShield \\
+    Store (vectors)  & CAPRISE/RemoteRAG  & Opal               & ---              & CAPRISE               & --- \\
+    Retrieve (ANN)   & CAPRISE/RemoteRAG  & Opal+ORAM          & ---              & RemoteRAG         & --- \\
+    Rerank           & TRSE               & Opal                        & ---              & RemoteRAG         & TwinShield \\
+    Generate         & PermLLM/CryptoMoE  & Nvidia-CC/PipeLLM            & AloePri/KV-Cloak & DP-KSA/DP-Fusion  & GELO/SCX \\
+    Graph traverse   & Pacmann/XorMM      & Opal/H$_2$O$_2$RAM & ARoG/PrivGemo    & ---               & --- \\
     \bottomrule
   \end{tabular*}
 \end{table*}
@@ -226,57 +227,4 @@ multi-maps XorMM and FLASH; graph storage by PeGraph and GORAM; access hiding by
 and the cheapest, heuristic protection by the anonymization of PrivGemo and ARoG. One stage
 stays uncovered across the corpus: building the graph index itself under confidentiality, before
 any query runs. Confidential graph construction is the clearest open problem in this setting.
-
-% tab:gapmap rows = pipeline stages; columns = mechanism families (§3-§7);
-% cells = representative schemes; ``---'' = no practical scheme (a gap).
-%\begin{table*}[t!]
-%  \centering \scriptsize
-%  \caption{Coverage of the inference-and-RAG pipeline by mechanism family. Cell = one
-%    or two representative schemes (\cref{sec:crypto}--\cref{sec:hybrid}; see those
-%    tables for the full set); ``---'' = no practical scheme known to us (a gap).}
-%  \label{tab:gapmap}
-%  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llllll@{}}
-%    \toprule
-%    Pipeline stage & Crypto/MPC & TEE & Obfuscation & DP & Hybrid split \\
-%    \midrule
-%    Embed            & SHAFT/Euston       & H100-CC          & SGT/Eguard    & DP-Fwd/SPARSE & GELO/ObfuscaTune \\
-%    Store (vectors)  & CAPRISE/SAP        & Opal             & ---           & ---           & --- \\
-%    Retrieve (ANN)   & Compass/Pacmann    & Opal+ORAM        & ---           & RemoteRAG     & --- \\
-%    Rerank           & p\textsuperscript{2}RAG/TRSE & Opal   & ---           & RemoteRAG(HE) & --- \\
-%    Generate         & PermLLM/CryptoMoE  & PipeLLM          & AloePri/OSNIP & DP-RAG(out)   & GELO/SCX \\
-%    Graph construct. & ---                & ---              & ARoG          & ---           & PrivGemo \\
-%    Graph traverse   & Pacmann/XorMM      & Opal/H$_2$O$_2$RAM & ARoG        & ---           & PrivGemo \\
-%    \bottomrule
-%  \end{tabular*}
-%\end{table*}
-
-%\begin{table*}[t!]
-%  \centering \footnotesize
-%  \caption{Performance and fidelity by use case (indicative; normalized per use case,
-%    \cref{sec:comparison}). ``$\times$'' = overhead vs.\ plaintext; ``exact'' = computes the
-%    true function. Cross-paper figures are indicative, not co-measured. All figures are
-%    \emph{paper-reported}; we do not independently reproduce them, and Chen et
-%    al.~\citep{chen_sok_pti} find that re-benchmarked crypto-inference numbers can diverge from
-%    the originals---so cross-scheme readings here are order-of-magnitude, and open-source
-%    availability is tracked per scheme in the family tables (\cref{sec:crypto}--\cref{sec:hybrid}).}
-%  \label{tab:performance}
-%  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}p{6.3cm}>{\raggedright\arraybackslash}p{3.6cm}>{\raggedright\arraybackslash}p{3.6cm}@{}}
-%    \toprule
-%    Use case & Mechanisms (representative) & Overhead (normalized) & Fidelity \\
-%    \midrule
-%    Generation & MPC (PermLLM, CryptoMoE, Fission); TEE (PipeLLM); obfusc (AloePri, SGT, OSNIP); hybrid (GELO, SCX, ObfuscaTune)
-%               & MPC 1--2 orders; TEE $<$20\%; obfusc $\sim$0; hybrid few$\times$
-%               & exact (MPC/TEE/hybrid); lossy (obfusc) \\
-%    Embedding (encoder) & MPC (SHAFT); FHE (Euston); DP (DP-Forward, SPARSE); obfusc (Eguard)
-%               & crypto 1--2 orders; obfusc/DP $\sim$0
-%               & exact (crypto); acc.\ $\Delta$ (obfusc/DP) \\
-%    Vector retrieval & crypto (p\textsuperscript{2}RAG, Panther, PIR-RAG, RAGtime-PIANO); DP (RemoteRAG); enc (CAPRISE, SAP)
-%               & sub-s--10\,s @$10^6$--$10^7$; enc $\sim$0
-%               & exact (PIR/FHE); recall $\Delta$ (DP); order-leak (DCPE) \\
-%    Graph retrieval & TEE (Opal); crypto (Compass, Pacmann); SSE (XorMM, PeGraph, GORAM); anon (ARoG, PrivGemo)
-%               & graph-ANN sub-s--s; KG-anon $\sim$0
-%               & exact (ORAM/SSE); quality-only (anon) \\
-%    \bottomrule
-%  \end{tabular*}
-%\end{table*}
 

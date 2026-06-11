@@ -295,8 +295,10 @@ We use four use cases aligned with the gap-map stages (\cref{sec:synthesis}): \e
 (decoder) and \emph{embedding} (encoder) inference, and retrieval split by index structure into
 \emph{vector} (flat/IVF ANN and vector storage) and \emph{graph} (graph-based ANN and
 graph-semantic search), which impose different costs and threat surfaces; each scheme is grouped
-by the model class it evaluates. \emph{Reranking} has no standalone private measurement in the
-corpus, so it stays an open gap (\cref{sec:synthesis}), not a cost bucket. Each use case has a
+by the model class it evaluates. \emph{Reranking} is cross-encoder inference, so it inherits the embedding and generation
+schemes (only Opal exercises it directly, in its enclave pipeline); no surveyed work optimizes a
+standalone private reranker, which we leave as an open problem. We give it no separate cost
+bucket, and the gap-map (\cref{sec:synthesis}) shows it covered by the inference families. Each use case has a
 canonical metric: latency and $\times$-overhead for generation and embedding; latency/query and
 communication at a fixed corpus size for retrieval; and fidelity as the task-accuracy
 (generation/embedding) or recall@$k$ (retrieval) delta against the plaintext baseline.
