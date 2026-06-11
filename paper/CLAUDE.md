@@ -21,6 +21,18 @@ Cross-session context lives in [MEMORY.md](MEMORY.md); past plans, specs, and se
 
 ---
 
+## Writing Style (HARD RULES for `manuscript/**/*.tex` prose)
+
+**Standard register only.** Use plain, standard, precise academic vocabulary. Do NOT use colloquial, conversational, or figurative words/phrases where a literal standard term exists. This has been a recurring failure; treat it as non-negotiable, on par with the no-em-dash rule.
+
+- **Avoid** conversational verbs and idioms: e.g. "answer it", "boils/comes down to", "at once", "at hand", "the whole point", "story", "spare", "sore point", "buys" (meaning gains), "a lot", "kind/sort of", "sweet spot", "knob" (in prose), "reads differently". Avoid figurative framing when a literal term exists (e.g. "geometry" for a trade-off; "concede/concession" for giving something up).
+- **Prefer the plainest standard term.** "answer it" → "are the appropriate choice"; "the whole point" → "is essential"; "at once" → "simultaneously / concurrently"; "reads differently" → "applies differently"; "concede a constraint" → "relax a constraint"; a scheme "gives up a criterion" (not "concedes"); name what is tunable (the hiding) rather than calling fidelity "tunable".
+- **Sweep, don't patch.** When a term is flagged once, `grep` the WHOLE file and fix every instance; do not reintroduce it in rewrites. Fixing only the cited line is a failure — this is the exact mistake that produced this rule.
+- **When unsure** whether a word is standard register, choose the plainer, more literal alternative.
+- **No em-dashes** in prose (`---`); use canonical field terms or the paper's own defined terms, not invented synonyms; never narrate a correction inside the artifact.
+
+---
+
 ## Folder Structure
 
 ```
