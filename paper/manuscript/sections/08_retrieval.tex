@@ -309,12 +309,14 @@ and 3PC sqrt-ORAM (GORAM) close it by making accesses oblivious: the server no l
 node is touched or how many neighbors it has, so there is no fingerprint to match.
 
 \paragraph{End-to-end KG-RAG.}
-The attack here is \emph{structural re-identification} of the anonymized view: replacing entity
-names with identifiers hides the semantics, but rare connectivity motifs and repeated exploration
-traces de-anonymize a node by its topology alone~\citep{tan_privgemo}. \textbf{ARoG} masks only
-names, leaving this structural channel open, and its stable identifiers further let a query's
-subject be linked across sessions. \textbf{PrivGemo} is the only surveyed scheme to target it,
-clustering the anonymized subgraph into supernodes to erase unique motifs and re-keying the
+The attack here is \emph{structural re-identification}. Anonymizing the view strips entity names
+but leaves the graph's topology intact, and a node's neighborhood is often distinctive enough to
+act as a fingerprint that re-identifies the entity behind the identifier. Repeated queries sharpen
+this fingerprint, because the retriever explores the same node the same way each time, exposing the
+same neighbors and partial paths~\citep{tan_privgemo}. \textbf{ARoG} masks only names,
+leaving this structural channel open, and its stable identifiers further link a query's subject
+across sessions. \textbf{PrivGemo} closes this exact channel: it
+clusters the anonymized subgraph into supernodes to blur distinctive neighborhoods, and re-keys the
 anonymization per session against cross-session linkage. Both remain heuristic obfuscation rather
 than a provable guarantee: the coarsened view still exposes cluster-level connectivity, the
 residual leakage is unquantified, and the local component holding the raw graph is fully trusted.
