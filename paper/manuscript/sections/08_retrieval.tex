@@ -78,20 +78,20 @@
     TRSE~\cite{trse}                          & retrieve,score  & 2-round SE + HE scoring  & ${\approx}4.5$\,s @4K (scoring) & n/r             & exact \\
     RAGtime-PIANO~\cite{ragtime_piano}        & retrieve,e2e    & CKKS + lattice PIR       & rel.\ only$^*$              & n/r                & exact (ct) \\
     RemoteRAG~\cite{cheng2025remoterag}       & retrieve,score  & DistanceDP + PHE top-$k$ & 0.67\,s                     & n/r                & 100\% recall (DP) \\
-    p\textsuperscript{2}RAG~\cite{p2rag}      & retrieve,score  & 2-server SS              & rel.\ only$^*$              & $O(N{+}S)$ B/query & exact \\
+    p\textsuperscript{2}RAG~\cite{p2rag}      & retrieve,score  & 2-server SS              & rel.\ only$^*$              & $O(m{+}N)$ B/query & exact \\
     \midrule
     \multicolumn{6}{@{}l}{\emph{Access-pattern hiding} --- \cref{ssec:retr-access}}\\
     Panther~\cite{panther}                    & retrieve        & PIR+SS+GC+HE             & 18\,s @10M                  & 284\,MB/query      & exact \\
     PIR-RAG~\cite{pirrag}                     & retrieve        & lattice PIR              & 16.8\,s @5K                 & n/r                & exact (cluster) \\
-    Pacmann~\cite{pacmann}                    & retrieve,gt     & batched PIR (graph-ANN)  & $-$22\% lat @100M           & ${\sim}$few\,KB/query & 90\% ANN quality \\
-    Compass~\cite{zhu_compass}                & retrieve,gt     & encrypted HNSW + ORAM    & sub-second LAN              & n/r                & exact \\
+    Pacmann~\cite{pacmann}                    & retrieve,gt     & batched PIR (graph-ANN)  & $-$22\% lat @100M           & ${\approx}1.5$--$14$\,MB/query & 90\% ANN quality \\
+    Compass~\cite{zhu_compass}                & retrieve,gt     & encrypted HNSW + ORAM    & 0.57--1.28\,s               & n/r                & exact \\
     \midrule
     \multicolumn{6}{@{}l}{\emph{Adjacency expansion and graph storage} --- \cref{ssec:retr-adjacency}}\\
     XorMM~\cite{xormm}         & retrieve,gt       & volume-hiding EMM (SSE)  & ${\approx}5$\,ms/q; ${\approx}170$\,ms @vol\,$2^{15}$ & ${\approx}1.2$--$2.5\times$ stor. & exact \\
     FLASH~\cite{flash_emm}     & retrieve,gt       & VH-EMM (+conj.)          & ${\approx}1.8$\,ms/q; ${\approx}90$\,ms @vol\,$2^{15}$ & near-opt.\ overhead       & exact \\
     PeGraph~\cite{pegraph}     & store,retrieve,gt & SSE + secret sharing     & $<$1\,s/query @multi-M   & n/r                       & exact (ranked) \\
     GORAM~\cite{goram}         & retrieve,gt       & 3PC sqrt-ORAM (reserve)  & 58\,ms--36\,s @1.4B      & n/r; init ${<}3$\,min     & exact \\
-    H$_2$O$_2$RAM~\cite{h2o2ram}& store,retrieve,gt & doubly-oblivious RAM (TEE) & ${\approx}1000\times$ vs.\ O$_2$RAM & n/r            & exact \\
+    H$_2$O$_2$RAM~\cite{h2o2ram}& store,retrieve,gt & doubly-oblivious RAM (TEE) & ${\approx}1000\times$ faster than O$_2$RAM & n/r            & exact \\
     \midrule
     \multicolumn{6}{@{}l}{\emph{End-to-end confidential KG-RAG} --- \cref{ssec:retr-e2e}}\\
     Opal~\cite{kaviani_opal}    & retrieve,gt,e2e   & TEE + Ring-ORAM           & 2.32\,s/q ($1.57\times$) & ORAM (n/r)                & KG-filt.\ $+13$\,pp vs ANN \\
@@ -102,7 +102,8 @@
 
   \smallskip
   {\footnotesize $^*$ p\textsuperscript{2}RAG reports 3--300$\times$ vs.\ PRAG;
-  RAGtime-PIANO 40$\times$ vs.\ PIR-RAG; neither gives an absolute query latency.}
+  RAGtime-PIANO up to 40$\times$ latency and 323$\times$ communication vs.\ PIR-RAG
+  and GraphRAG; neither gives an absolute query latency.}
 \end{table*}
 
 
@@ -194,7 +195,7 @@ the iterative ANN traversal on the client and privately fetches each hop's neigh
 PIR over a public database, retaining $90\%$ of a non-private ANN run's accuracy while
 \emph{cutting} latency by $22\%$ at $100$M vectors. Compass wraps an encrypted HNSW index in
 client-side Ring-ORAM to defend even a \emph{malicious} server, leaving only the operation type
-visible, at sub-second LAN latency. Opal (a TEE design, \cref{ssec:retr-e2e}) reaches the same
+visible, at $0.57$--$1.28$\,s even over a slow cross-region network. Opal (a TEE design, \cref{ssec:retr-e2e}) reaches the same
 access-hiding goal with hardware trust instead of client-side cryptography.
 
 \begin{keyinsight}
