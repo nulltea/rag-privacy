@@ -11,8 +11,8 @@ NPU (the Huawei Ascend line). These designs are therefore predominantly Tier~3: 
 confidentiality reduces to enclave provisioning and attestation, a hardware-specific space
 systematized separately~\citep{accel_tee_sok}. The corpus's strongest adversary, a \emph{malicious host} that may tamper with computation outside
 the enclave, is met here under three different trusted bases. NVIDIA's confidential
-GPU~\citep{h100cc} trusts a CPU-TEE CVM (SEV-SNP/TDX) as its peer, so its guarantee is only as
-strong as that CPU-TEE and the access pattern still leaks; Opal~\citep{kaviani_opal} keeps that
+GPU~\citep{h100cc} trusts a CPU-TEE confidential VM (CVM; SEV-SNP/TDX) as its control peer, so
+its guarantee is only as strong as that CPU-TEE and the access pattern still leaks; Opal~\citep{kaviani_opal} keeps that
 base but adds ORAM, hiding the access pattern obliviously rather than under a hardness assumption;
 Ascend-CC~\citep{ascend_cc} drops the CPU-TEE, leaving the NPU as the sole trusted base against a
 fully compromised host. Pure TEE attains the highest
@@ -67,7 +67,7 @@ and ANN retrieval pipeline on a TDX host with a B200 accelerator.
 
 \subsection{Performance}
 \label{ssec:tee-perf}
-Overhead is near-plaintext and single-digit-percent across the band (\cref{tab:inf-perf}): the
+Speed is near-plaintext, with only single-digit-percent overhead across the band (\cref{tab:inf-perf}): the
 confidential GPU adds $4$--$8\%$ on Llama-2 7--70B, and Ascend-CC adds under $0.1\%$ on Llama-2/3
 at realistic sequence lengths. These percentages are each platform's own overhead and are not
 comparable across hardware classes, because they sit on very different absolute baselines. An
@@ -99,7 +99,8 @@ simulation rather than on deployed silicon, but the metadata it removes is incur
 TEE-protected tensor workload, inference included.
 
 These optimizations are software workarounds for a cost that hardware is beginning to absorb.
-Inline PCIe TEE-IO, the TDISP and IDE standards adopted as Intel TDX-Connect, AMD SEV-TIO, and
+Inline PCIe TEE-IO, the TEE Device Interface Security Protocol (TDISP) and PCIe Integrity and Data
+Encryption (IDE) standards adopted as Intel TDX-Connect, AMD SEV-TIO, and
 NVIDIA Blackwell Trusted I/O, encrypts the link in the PCIe controller itself and removes the
 software bounce buffer entirely, but only when both the CPU and the accelerator support it. Most
 deployed systems do not yet provide that support~\citep{nvidia_secureai}. Opal pays more than the rest of

@@ -12,7 +12,7 @@ stays hidden (\cref{sec:threat}); \emph{cost} is the quantitative price of that
 protection, in performance and utility (\cref{sec:comparison}). This single split runs
 through the paper: the security dimensions yield the threat-model-fit criterion of our
 deployment-readiness lens (\cref{sec:intro}). We also fix here how schemes are
-\emph{grouped} for comparison: by use case, not by family.
+\emph{grouped} for comparison: by use case, not by family (detailed in \cref{sec:comparison}).
 
 \subsection{Taxonomy: Threat Model and Security}
 \label{sec:threat}
@@ -100,14 +100,18 @@ confidentiality alone suffices.
 What the scheme roots its guarantees in: \emph{none} (purely cryptographic, statistical, or
 obfuscation-based); a \emph{CPU-TEE} (Intel TDX, AMD SEV-SNP); a \emph{GPU-TEE} (a
 confidential H100/H200/B200-class accelerator); or \emph{multi-party non-collusion} (the MPC
-assumption). A larger TCB trades a stronger trust assumption for performance or simplicity.
+assumption). The trusted computing base (TCB) is the set of components that must be trusted not
+to leak; a larger TCB means more hardware is trusted, so a purely cryptographic scheme has the
+smallest TCB and a GPU-TEE among the largest. A larger TCB trades a stronger trust assumption for
+performance or simplicity.
 These anchors collapse onto a three-level \emph{hardware-trust} ladder we use to
 organize the systematization and its scope (\cref{sec:intro}):
 \begin{description}
   \item[Tier 1.] \emph{No trusted hardware}: confidentiality rests on cryptography or
         statistics alone (MPC/FHE, static obfuscation, DP). ``None'' constrains what must be
         \emph{trusted not to leak}, not where the \emph{work} runs. Several Tier-1 schemes are
-        not thin-client: client-side PIR/ORAM retrieval, or 2PC where the user is a compute
+        not thin-client: client-side private information retrieval or oblivious RAM (PIR/ORAM)
+        retrieval, or two-party computation (2PC) where the user is a compute
         party, make the client load-bearing, a deployment factor we revisit in
         \cref{sec:synthesis}.
   \item[Tier 2.] \emph{CPU-TEE only}: a commodity CPU enclave is trusted; any GPU is untrusted.
@@ -126,14 +130,14 @@ for open-weight Transformers). We adopt Kerckhoffs's principle throughout: in ei
 adversary knows the algorithm and is denied only a fresh per-session secret, whether an
 obfuscation transform, injected DP noise, or cryptographic keys. That secret therefore belongs
 to the \emph{security basis} (axis~5), not to a separate knowledge level. White-box is the
-regime in which static schemes are most stressed: a transform secure only while the weights are
-private collapses once an attacker who knows the public weights can solve for it
+regime in which static schemes are most stressed: an obfuscation transform secure only while the
+weights are private collapses once an attacker who knows the public weights can solve for it
 (\cref{sec:obfuscation}).
 
 \paragraph{4. Confidentiality scope.}
-What the scheme keeps hidden and what it concedes are two faces of one question. The protected
+What the scheme keeps hidden and what it leaves exposed are complementary. The protected
 \emph{asset} may be the input, the input \emph{and} output, the model weights, or the access
-pattern over a corpus. Its dual is the \emph{residual leakage}: what the adversary still
+pattern over a corpus. The complement is the \emph{residual leakage}: what the adversary still
 observes despite the scheme (obfuscated I/O, mixed activations in untrusted VRAM, bounded
 access patterns, or distance structure). Microarchitectural, cache, timing, and power side
 channels are a residual category \emph{every} surveyed scheme places out of scope, a
@@ -145,7 +149,9 @@ leakage, not the stated protection goal, that an attack ultimately exploits.
 What the guarantee \emph{rests on}, independent of \emph{which} entity is trusted (axis~2):
 \emph{cryptographic} (provable under a hardness assumption, as in FHE/MPC under LWE/OT);
 \emph{information-theoretic} (no computational assumption, as in one-time masking);
-\emph{differential privacy} (a formal $(\varepsilon,\delta)$ or metric bound);
+\emph{differential privacy} (a formal $(\varepsilon,\delta)$ or metric bound, where the privacy
+budget $\varepsilon$ caps how much any single record can shift the output and $\delta$ is a small
+failure probability);
 \emph{hardware-enforced} (reduces to TEE isolation and attestation); and \emph{heuristic}
 (resistance shown only experimentally, as in most static obfuscation). This axis separates
 schemes the others cannot: an FHE scheme and a static-obfuscation scheme can share an identical

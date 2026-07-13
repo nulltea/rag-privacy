@@ -12,7 +12,7 @@ strongest confidentiality in our taxonomy (\cref{sec:threat}): a trusted computi
 \emph{none} (FHE) or \emph{non-colluding parties} (MPC/SS), with no special hardware. That guarantee
 costs one-to-three orders of magnitude of overhead in latency or communication, concentrated in the
 non-linear operations. Because MPC/FHE \emph{inference} protocols are already covered by dedicated
-surveys, we do not re-systematize them: \citet{li_pti_survey} give a layer-wise MPC-vs-HE treatment
+surveys, we do not re-systematize them: \citet{li_pti_survey} give a layer-wise MPC-vs-FHE treatment
 and \citet{chen_sok_pti} a reproducibility re-benchmark. We cover the sub-family briefly through five
 frontier exemplars (\cref{tab:inf-perf}) that locate it on our deployment-cost frontier, and defer
 the cryptographic \emph{retrieval} layer (PIR/ORAM/SSE/DCPE) to \cref{sec:retrieval}.
@@ -30,7 +30,7 @@ by polynomial approximations. Each of these options adds rounds, communication, 
 FHE Transformer inference is \emph{leveled}, bounding multiplicative depth before an expensive
 bootstrap and again forcing the non-linearities into low-degree polynomial approximations. In both
 families these non-linear operations dominate: \citet{li_pti_survey} measure them at ${>}85\%$ of
-MPC runtime and ${\approx}60\%$ for HE. Autoregressive decoding compounds the cost, since each
+MPC runtime and ${\approx}60\%$ for FHE. Autoregressive decoding compounds the cost, since each
 generated token is a full forward pass whose per-pass overhead and interaction rounds are multiplied
 by the generation length~\citep{andreoletti_ppi_practice}.
 
@@ -41,8 +41,9 @@ case: it keeps MoE expert-routing secret-shared. This hides a routing pattern th
 semantic type and that has been used to recover a co-batched prompt in full~\citep{yona_moe_steal}.
 Exploiting that sparsity, CryptoMoE realizes a $2.8$--$3.5\times$ end-to-end latency reduction (and
 $2.9$--$4.3\times$ in communication) over a dense-MPC baseline. Across all five, even the fastest
-exchanges hundreds of MB to GB per token or inference, with output that is exact (MPC) or near-exact (FHE); no scheme reports
-overhead vs.\ plaintext, so \cref{tab:inf-perf}'s figures are paper-reported or 1-hop extrapolated
+exchanges hundreds of MB to GB per token or inference, with output that is exact (MPC) or near-exact (FHE).
+No scheme's source paper reports its overhead as a slowdown factor against a plaintext baseline, so
+\cref{tab:inf-perf}'s figures are the papers' reported absolute costs or 1-hop extrapolations
 (\cref{sec:comparison}).
 
 \subsection{Limitations and Known Attacks}

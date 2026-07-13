@@ -2,7 +2,9 @@
 \label{sec:dp}
 
 Differential privacy (DP) provides a formal but probabilistic guarantee by adding calibrated
-noise. Several schemes in other families borrow DP machinery: the covariant obfuscation of
+noise. The strength of the guarantee is set by the privacy budget $\varepsilon$: it bounds how much
+any single record can change the output distribution, so a smaller $\varepsilon$ gives stronger
+privacy and requires more noise. Several schemes in other families borrow DP machinery: the covariant obfuscation of
 \cref{sec:obfuscation} adds Gaussian noise to weights and analyzes it under Rényi-metric
 DP, ObfusLM perturbs synthesized embedding weights under a Laplace mechanism, and the
 hybrid SCX of \cref{sec:hybrid} injects Laplace noise into its KV-cache encoding. What sets the
@@ -41,10 +43,12 @@ trusted; the cost is that the client must run the encoder, moving part of the co
 trusted computing base, onto the device. Token-level local DP replaces discrete tokens through an exponential
 mechanism (SANTEXT, InferDPT); as a fixed client-side map it is one of the static input transforms
 of \cref{sec:obfuscation}, and we treat it there. The three embedding-level schemes form a progression in \emph{how much of the noise mechanism is
-trained} rather than fixed by a closed-form formula; model retraining mirrors this inversely,
+trained} rather than fixed by a closed-form formula (each starts from a pretrained encoder and adapts
+it, never training from scratch); model retraining mirrors this inversely,
 heaviest where the noise is fixed and minimal where the noise is trained.
 \textbf{DP-Forward}~\cite{du_dpforward} trains none of the noise: it adds a fixed analytic
-matrix-Gaussian calibrated only to the $L_2$ sensitivity of the pre-noise layers, a
+matrix-Gaussian calibrated only to the $L_2$ sensitivity (the largest Euclidean-norm change a single
+input can cause in the pre-noise layer output) of the pre-noise layers, a
 \emph{task-agnostic} mechanism (the noise does not depend on the downstream task). It pays for that
 fixed noise with the heaviest model training of the three, fine-tuning the whole pipeline to perform
 on the noisy embeddings; the guarantee is standard $(\varepsilon,\delta)$-DP, in its local sequence
@@ -69,8 +73,11 @@ from inverting either the embedding or the output back to it.
 \paragraph{Protecting the operator's context (central DP).}
 The output schemes invert the trust assumptions. Here a \emph{trusted} operator holds the private data
 and injects the noise server-side; the client adds nothing. They protect not the user's own input
-but third-party data the operator holds, against the party that \emph{consumes} the output, so
-their confidentiality scope (\cref{sec:threat-axes}) differs from that of the local schemes above. \textbf{DP-KSA}~\cite{tang_dprag} (the DP-RAG generation method) treats
+but the third-party data the operator serves at inference time, the RAG retrieval corpus or the
+documents assembled into the prompt (for example a company's confidential files or a patient's
+records), against the party that \emph{consumes} the output. Because this data enters only at
+inference, training-time filtering does not address it, and their confidentiality scope
+(\cref{sec:threat-axes}) differs from that of the local schemes above. \textbf{DP-KSA}~\cite{tang_dprag} (the DP-RAG generation method) treats
 the retrieval corpus as the private dataset: it draws an ensemble of candidate generations and
 releases a differentially private set of answer keywords through the propose-test-release framework
 with an exponential-mechanism count, so the answer is $(\varepsilon,\delta)$-DP with respect to

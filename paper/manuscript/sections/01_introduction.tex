@@ -26,7 +26,7 @@ A fast-growing body of work answers this with cryptography, trusted hardware, ob
 differential privacy, and hybrids, spanning the inference stages (embedding, reranking,
 generation) and the retrieval and storage layer. But the schemes assume different adversaries
 and report costs on different hardware, models, and metrics, so a practitioner cannot tell
-which is deployable. This systematization supplies that comparison.
+which is deployable. This systematization of knowledge (SoK) supplies that comparison.
 
 \subsection{Scope and Positioning}
 % Merged Why-a-New-SoK + Scope (goal-first). Positioning compressed: the table carries
@@ -50,11 +50,11 @@ reader to} \citet{li_pti_survey} and \citet{chen_sok_pti} (the latter
 adding a reproducibility re-benchmark), keeping only a few frontier exemplars
 (\cref{sec:crypto}). The one prior work sharing our deployability lens,
 \citet{andreoletti_ppi_practice}, differs substantively: it is a \emph{meta}-survey at the
-level of PET \emph{families} (qualitative trade-offs, thin on information-theoretic and
+level of privacy-enhancing-technology (PET) \emph{families} (qualitative trade-offs, thin on information-theoretic and
 obfuscation methods, no retrieval or graph-RAG), and where it argues one trust-minimizing
 trajectory (TEE\,$\to$\,FHE) we score \emph{individual schemes} and reach a different
 conclusion: today's deployable options are present-day systems such as the hybrid split,
-obfuscation, and confidential-accelerator TEEs, not way-stations toward a cryptographic
+obfuscation, and confidential-accelerator TEEs, not intermediate stages toward a cryptographic
 endpoint (\cref{ssec:deployment}). Our contribution is thus breadth across all five families,
 per-scheme depth, the retrieval and graph-RAG dimension, and a quantitative
 deployment-readiness lens.
