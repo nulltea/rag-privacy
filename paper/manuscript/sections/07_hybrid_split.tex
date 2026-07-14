@@ -31,7 +31,7 @@ the enclave, and \emph{how} to hide the rest. A small trusted core (a CPU-TEE, o
 GELO's case a confidential GPU) holds the secrets and runs the operations that are cheap
 but revealing: a secret transform and its inverse, the non-linearities, or merely the
 obfuscation keys. The bulk of the cost, the dense linear algebra of the QKV and output
-projections and the feed-forward GEMMs, is offloaded to an \emph{untrusted, commodity}
+projections and the feed-forward general matrix multiplications (GEMMs), is offloaded to an \emph{untrusted, commodity}
 accelerator that never sees plaintext; correctness is recovered exactly in the enclave, so
 unlike DP (\cref{sec:dp}) the family pays no accuracy cost. In the \cref{sec:framework}
 taxonomy the TCB is the enclave alone, the adversary is an honest-but-curious, white-box
@@ -42,7 +42,9 @@ The schemes differ in those two choices. \textbf{GELO}~\citep{belikov_gelo} draw
 \emph{fresh} secret invertible matrix $A$ for each offloaded batch (a block of token
 hidden states $H$), forms the mixed $U{=}AH$, offloads the Q/K/V and output projections on
 $U$ to the untrusted GPU, and unmixes by $A^{-1}$ in the enclave. Because $A$ is never
-reused, recovering $H$ is a single-batch blind-source-separation problem. (GELO is the
+reused, recovering $H$ is a single-batch blind-source-separation (BSS) problem: the adversary must
+unmix the sources $H$ from the single mixed observation $U{=}AH$ without knowing $A$, and a fresh
+matrix each batch denies it the repeated observations such separation normally needs. (GELO is the
 family's outlier on hardware: its trusted core is a \emph{confidential} GPU, an
 H200-class TEE, and it offloads to a pool of cheaper untrusted commodity GPUs such as
 L40S, a deployment choice that maximizes throughput when confidential GPUs are
@@ -163,7 +165,7 @@ TEE$\leftrightarrow$GPU transfer dominates, and can only be hidden by overlappin
 largely unexplored for the hybrid-split family.
 
 \begin{keyinsight}
-A high offload ratio does not buy low latency. The real bottleneck is the TEE$\leftrightarrow$GPU
+A high offload ratio does not yield low latency. The real bottleneck is the TEE$\leftrightarrow$GPU
 round-trip count: the schemes differ by two orders of magnitude in it, from TwinShield's $O(HL)$ per
 token (one per attention head per layer) to CMIF's single handoff, and even SCX, which
 offloads essentially all compute, spends $86$--$94\%$ of its latency on TEE$\leftrightarrow$GPU memory
@@ -204,7 +206,8 @@ keys) remove the question.
 Even refreshed obfuscation leaks \emph{second-order} structure. Under an orthogonal mixing
 $A$ the Gram matrix is invariant ($U^{\top}U{=}H^{\top}H$), exposing the pairwise inner
 products of the hidden states. A non-orthogonal $A$, or appended high-energy ``shield''
-vectors, blunt the resulting ICA/BSS and anchor attacks, but the guarantee is per-batch and
+vectors, blunt the resulting independent component analysis (ICA), BSS,
+and anchor attacks, but the guarantee is per-batch and
 collapses under key reuse~\citep{belikov_gelo}.
 
 The externalized KV-cache that these schemes
@@ -212,7 +215,7 @@ leave outside the enclave for throughput is itself a reconstruction
 surface: inversion, collision, and injection attacks rebuild the prompt from a leaked
 cache~\citep{luo_shadowcache}, a threat made concrete by practical GPU-memory leaks such as
 LeftoverLocals~\citep{leftoverlocals}. The co-located TEE+GPU design also pays for encrypting
-the PCIe stream, with residual exposure from unencrypted HBM on some confidential-GPU parts.
+the PCIe stream, with residual exposure from unencrypted high-bandwidth memory (HBM) on some confidential-GPU parts.
 Trust is honest-but-curious and white-box by default; only TwinShield's U-Verify extends to
 a malicious accelerator.
 

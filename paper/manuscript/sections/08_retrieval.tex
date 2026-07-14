@@ -187,8 +187,9 @@ PIR keeps communication sublinear but forces a server-side linear scan, which is
 seconds at million-scale rather than milliseconds (Panther $18$\,s at $10$M, PIR-RAG $16.8$\,s at
 $5$K).
 
-\textbf{Compass} and \textbf{Pacmann} reach the same goal over a graph-based ANN index (HNSW or
-NSG): here the ``graph'' is a proximity index over document-chunk embeddings, each vertex a stored
+\textbf{Compass} and \textbf{Pacmann} reach the same goal over a graph-based approximate nearest
+neighbor (ANN) index (a Hierarchical Navigable Small World (HNSW) or Navigating Spreading-out Graph
+(NSG)): here the ``graph'' is a proximity index over document-chunk embeddings, each vertex a stored
 chunk vector rather than a knowledge-graph entity, so both are dense-retrieval schemes hiding the
 search over those vectors. Pacmann runs
 the iterative ANN traversal on the client and privately fetches each hop's neighborhood by batched
@@ -239,7 +240,7 @@ keyword pairs are queried together, and XorMM's verifiable variant VXorMM detect
 server's forged or incomplete postings via aggregate MACs. \textbf{PeGraph}
 combines searchable encryption with secret sharing across two non-colluding servers for ranked
 adjacency queries over million-entity graphs in under a second. \textbf{GORAM} is the
-heavier-trust 3PC fallback for billion-edge federated graphs ($58$\,ms to $36$\,s per query, with
+heavier-trust three-party computation (3PC) fallback for billion-edge federated graphs ($58$\,ms to $36$\,s per query, with
 a one-time index setup under $3$ minutes), and \textbf{H$_2$O$_2$RAM} provides the doubly-oblivious
 RAM layer, inside a TEE, on which such a graph store runs. What remains across all of them is
 the search/query-equality pattern, not the content, closed only by layering ORAM
