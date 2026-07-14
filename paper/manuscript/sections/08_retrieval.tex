@@ -3,7 +3,7 @@
 
 \begin{table*}[t!]
   \centering
-  \scriptsize\setlength{\tabcolsep}{3pt}
+  \scriptsize\setlength{\tabcolsep}{3pt}\renewcommand{\arraystretch}{0.92}
   \caption{Threat models for the retrieval and storage schemes of \cref{tab:retr-perf}, on the
     axes of \cref{sec:threat-axes}, grouped by the confidential retrieval function each scheme
     serves (\cref{sec:retrieval}). The white-box/black-box attack-surface axis is
@@ -56,7 +56,7 @@
 
 \begin{table*}[t!]
   \centering
-  \scriptsize\setlength{\tabcolsep}{3pt}
+  \scriptsize\setlength{\tabcolsep}{1.5pt}\renewcommand{\arraystretch}{0.92}
   \caption{Confidential retrieval and storage performance, grouped by the retrieval function each
     scheme makes confidential (\cref{sec:retrieval}); all mechanisms. Latency is end-to-end query
     time unless noted (``gt'' = graph traversal); Comm./storage is per-query communication or

@@ -25,7 +25,7 @@
 % the \autoref fallback instead of cleveref (still render as section symbols).
 % \maybeusepackage hides the literal \usepackage{...} token so Texifier's
 % pre-typeset scan cannot reject microtype; under \texpadtexfalse it loads as usual.
-\newif\iftexpadtex \texpadtextrue
+\newif\iftexpadtex \texpadtexfalse
 \newcommand{\maybeusepackage}[1]{\iftexpadtex\else\csname usepackage\endcsname{#1}\fi}
 
 % --- encoding & fonts (pdflatex path) ---------------------------------------
@@ -155,7 +155,7 @@
 \author{%
   Timofey Yaluhin \\ ChainSafe Systems \\
   \texttt{timofey@chainsafe.io}}
-\date{Draft --- \today}
+\date{\today}
 
 \begin{document}
 \maketitle
